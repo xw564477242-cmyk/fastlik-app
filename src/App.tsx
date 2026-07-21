@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from 'react'
 import { ArrowDownLeft, ArrowUpRight, BarChart3, Bell, ChevronRight, CircleDollarSign, CreditCard, Eye, EyeOff, Home, Landmark, Plus, QrCode, ScanLine, Send, ShieldCheck, Snowflake, UserRound, WalletCards } from 'lucide-react'
+import { SprintCardCenter } from './SprintCardCenter'
 
 type Page = 'wallet' | 'cards' | 'dashboard'
 type Toast = string | null
@@ -31,7 +32,7 @@ export default function App() {
   useEffect(() => { const onHash = () => setPage(route()); window.addEventListener('hashchange', onHash); return () => window.removeEventListener('hashchange', onHash) }, [])
   const go = (next: Page) => { window.location.hash = `/${next}`; setPage(next) }
   const notify = (message: string) => { setToast(message); window.setTimeout(() => setToast(null), 2200) }
-  return <div className="app-frame"><Sidebar page={page} go={go} /><main className="main-shell"><Topbar page={page} />{page === 'wallet' && <WalletHome hidden={hidden} setHidden={setHidden} notify={notify} go={go} />}{page === 'cards' && <CardCenter frozen={frozen} setFrozen={setFrozen} notify={notify} />}{page === 'dashboard' && <Dashboard />}</main><MobileNav page={page} go={go} />{toast && <div className="toast"><ShieldCheck size={18}/>{toast}</div>}</div>
+  return <div className="app-frame"><Sidebar page={page} go={go} /><main className="main-shell"><Topbar page={page} />{page === 'wallet' && <WalletHome hidden={hidden} setHidden={setHidden} notify={notify} go={go} />}{page === 'cards' && <SprintCardCenter notify={notify} />}{page === 'dashboard' && <Dashboard />}</main><MobileNav page={page} go={go} />{toast && <div className="toast"><ShieldCheck size={18}/>{toast}</div>}</div>
 }
 
 function Sidebar({page, go}:{page:Page;go:(p:Page)=>void}) {
