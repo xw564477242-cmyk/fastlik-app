@@ -39,9 +39,10 @@ function Sidebar({page, go}:{page:Page;go:(p:Page)=>void}) {
   return <aside className="sidebar"><div className="brand"><span>F</span><div><b>FastLink</b><small>GLOBAL WALLET</small></div></div><nav><button className={page==='wallet'?'active':''} onClick={()=>go('wallet')}><Home/>Wallet</button><button className={page==='cards'?'active':''} onClick={()=>go('cards')}><CreditCard/>Card Center</button><button className={page==='dashboard'?'active':''} onClick={()=>go('dashboard')}><BarChart3/>Dashboard</button></nav><div className="secure"><ShieldCheck/><div><b>Funds protected</b><small>Multi-layer security</small></div></div><button className="profile"><span>WX</span><div><b>Wei Xiong</b><small>Personal Account</small></div><ChevronRight/></button></aside>
 }
 
+// THR-APP-001 — synchronized contract disclosure; this app remains MOCK.
 function Topbar({page}:{page:Page}) {
   const titles={wallet:['Wallet','Manage digital assets, fiat and cards in one place.'],cards:['Card Center','Control your virtual and physical FastLink cards.'],dashboard:['Dashboard','Your financial activity and portfolio overview.']}
-  return <header className="topbar"><div><h1>{titles[page][0]}</h1><p>{titles[page][1]}</p></div><div className="top-actions"><span className="live-dot">Data Source: MOCK</span><button><Bell/><i/></button><button><UserRound/></button></div></header>
+  return <header className="topbar"><div><h1>{titles[page][0]}</h1><p>{titles[page][1]}</p></div><div className="top-actions"><span className="live-dot">Contract V2.0 · THR-APP-001 · Data Source: MOCK</span><button><Bell/><i/></button><button><UserRound/></button></div></header>
 }
 
 function WalletHome({hidden,setHidden,notify,go}:{hidden:boolean;setHidden:(v:boolean)=>void;notify:(s:string)=>void;go:(p:Page)=>void}) {

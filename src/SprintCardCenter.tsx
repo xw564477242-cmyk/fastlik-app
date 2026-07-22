@@ -174,7 +174,7 @@ export function SprintCardCenter({ notify }: { notify: (message: string) => void
 
   return <div className="content sprint-card-center">
     <section className="card-center-heading">
-      <div><span>DATA SOURCE: MOCK · NOT UAT</span><h2>FastLink Card Center</h2><p>Local UI contract preview. No Thredd UAT request, audit record or database write is represented here.</p></div>
+      <div><span>CONTRACT V2.0 · THR-APP-001 · DATA SOURCE: MOCK · NOT UAT</span><h2>FastLink Card Center</h2><p>Local UI contract preview. Real authorization is server-side inbound Thredd EHI; no UAT request, audit record or database write is represented here.</p></div>
       <div className="card-create-actions"><button onClick={() => createCard('VIRTUAL')}><Plus/>Virtual card</button><button onClick={() => createCard('PHYSICAL')}><Plus/>Physical card</button></div>
     </section>
 
@@ -202,7 +202,7 @@ export function SprintCardCenter({ notify }: { notify: (message: string) => void
           <button onClick={() => cvvVisible ? setCvvVisible(false) : requestReveal('CVV')}><LockKeyhole/>{cvvVisible ? selected.cvv : 'Show CVV'}</button>
           <button onClick={() => notify('Wallet binding opened in MOCK')}><WalletCards/>Add to wallet</button>
         </div>
-        <div className="security-note"><ShieldCheck/><span><b>Protected card data · MOCK contract preview</b><small>Mock secondary confirmation is required; details auto-hide after 20 seconds, blur or backgrounding. Production server re-authentication is BLOCKED.</small></span></div>
+        <div className="security-note"><ShieldCheck/><span><b>Protected card data · MOCK contract preview · THR-APP-001</b><small>Mock secondary confirmation is required; details auto-hide after 20 seconds, blur or backgrounding. Production server re-authentication is BLOCKED: no real Backend UAT Environment. Mock is not production validation.</small></span></div>
       </section>
     </section>
 
