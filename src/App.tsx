@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react'
-import { ArrowDownLeft, ArrowUpRight, BarChart3, Bell, ChevronRight, CircleDollarSign, CreditCard, Eye, EyeOff, Home, Landmark, Plus, QrCode, ScanLine, Send, ShieldCheck, Snowflake, UserRound, WalletCards } from 'lucide-react'
+import { ArrowDownLeft, ArrowUpRight, BarChart3, Bell, ChevronRight, CircleDollarSign, CreditCard, Eye, EyeOff, Home, Plus, QrCode, ScanLine, Send, ShieldCheck, UserRound } from 'lucide-react'
 import { SprintCardCenter } from './SprintCardCenter'
 
 type Page = 'wallet' | 'cards' | 'dashboard'
@@ -27,7 +27,6 @@ function route(): Page {
 export default function App() {
   const [page, setPage] = useState<Page>(route())
   const [hidden, setHidden] = useState(false)
-  const [frozen, setFrozen] = useState(false)
   const [toast, setToast] = useState<Toast>(null)
   useEffect(() => { const onHash = () => setPage(route()); window.addEventListener('hashchange', onHash); return () => window.removeEventListener('hashchange', onHash) }, [])
   const go = (next: Page) => { window.location.hash = `/${next}`; setPage(next) }
@@ -49,11 +48,6 @@ function WalletHome({hidden,setHidden,notify,go}:{hidden:boolean;setHidden:(v:bo
 }
 
 function MiniCard(){return <div className="mini-card"><div className="card-brand"><b>FastLink</b><span>VIRTUAL</span></div><div className="chip"/><strong>•••• &nbsp;•••• &nbsp;•••• &nbsp;4826</strong><div className="card-bottom"><span><small>VALID THRU</small>09/30</span><b>mastercard</b></div></div>}
-
-function CardCenter({frozen,setFrozen,notify}:{frozen:boolean;setFrozen:(v:boolean)=>void;notify:(s:string)=>void}) {
-  const [physical,setPhysical]=useState(false)
-  return <div className="content"><section className="cards-layout"><div className={`large-card ${frozen?'frozen':''}`}><div className="card-brand"><b>FastLink</b><span>{frozen?'FROZEN':'VIRTUAL'}</span></div><div className="contactless">)))</div><strong>5412 &nbsp; 8890 &nbsp; 3341 &nbsp; 4826</strong><div className="card-bottom"><span><small>CARDHOLDER</small>WEI XIONG</span><span><small>VALID THRU</small>09/30</span><b>mastercard</b></div></div><section className="card-control panel"><span>AVAILABLE BALANCE</span><strong>$4,276.00</strong><p>Monthly spending <b>$1,284.60 / $10,000</b></p><div className="progress"><i style={{width:'12.8%'}}/></div><div className="control-grid"><button onClick={()=>{setFrozen(!frozen);notify(frozen?'Card unfrozen':'Card frozen')}}><Snowflake/>{frozen?'Unfreeze':'Freeze'}</button><button onClick={()=>notify('Card details protected by verification')}><Eye/>Details</button><button onClick={()=>notify('Spending limits opened')}><BarChart3/>Limits</button><button onClick={()=>notify('Wallet binding opened')}><WalletCards/>Add to wallet</button></div></section></section><section className="panel card-services"><div className="panel-title"><div><h2>Card services</h2><p>Payments, security and card lifecycle</p></div></div><div className="service-grid">{[['Online payments','Enabled'],['ATM withdrawals','Enabled'],['Contactless','Enabled'],['Apple Pay','Ready'],['Alipay binding','Available'],['WeChat Pay','Available']].map(x=><button key={x[0]} onClick={()=>notify(`${x[0]} settings opened`)}><ShieldCheck/><div><b>{x[0]}</b><small>{x[1]}</small></div><ChevronRight/></button>)}</div></section><section className="panel physical"><div><Landmark/><section><h2>FastLink Physical Card</h2><p>Global POS payments and ATM withdrawals. Delivery tracking included.</p></section></div>{physical?<span className="ordered">Application submitted</span>:<button onClick={()=>{setPhysical(true);notify('Physical card application submitted')}}>Apply now <ChevronRight/></button>}</section></div>
-}
 
 function Dashboard(){
   const monthly=useMemo(()=>[42,58,48,72,66,88,76,96,82,106,94,118],[])
