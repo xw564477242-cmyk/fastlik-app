@@ -2,9 +2,9 @@
 
 | Variable Name | Environment | Required | Secret | Source | Current Value Status | Used By | Last Verified | Owner |
 |---|---|---:|---:|---|---|---|---|---|
-| `VITE_FASTLINK_API_URL` | ALL | Yes | No | Build platform | NEEDS_DEPLOYMENT_CONFIGURATION | `apiClient.ts` | 2026-07-23 | DevOps |
-| `VITE_FASTLINK_ENVIRONMENT` | ALL | Yes | No | Build platform | NEEDS_DEPLOYMENT_CONFIGURATION | `apiClient.ts`, session gate | 2026-07-23 | DevOps |
-| `VITE_FASTLINK_BUILD_SHA` | ALL | Yes | No | CI commit SHA | NEEDS_CI_CONFIGURATION | runtime metadata | 2026-07-23 | DevOps |
+| `VITE_FASTLINK_API_URL` | ALL | Yes | No | Build platform | CONFIGURED · PRODUCTION API | `apiClient.ts` | 2026-07-24 | DevOps |
+| `VITE_FASTLINK_ENVIRONMENT` | ALL | Yes | No | Build platform | CONFIGURED · PRODUCTION | `apiClient.ts`, session gate | 2026-07-24 | DevOps |
+| `VITE_FASTLINK_BUILD_SHA` | ALL | Yes | No | GitHub Pages revision | CONFIGURED · RUNTIME INJECTION | runtime metadata | 2026-07-24 | DevOps |
 
 ## Enforcement
 
