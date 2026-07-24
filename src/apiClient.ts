@@ -5,7 +5,9 @@ if(!apiUrl)throw new Error('Missing VITE_FASTLINK_API_URL')
 if(!environment||!['LOCAL','SANDBOX','UAT','PRODUCTION'].includes(environment))throw new Error('Invalid VITE_FASTLINK_ENVIRONMENT')
 if(environment==='PRODUCTION'&&!apiUrl.startsWith('https://'))throw new Error('Production API must use HTTPS')
 
-export const walletRuntime=Object.freeze({apiUrl,environment,buildSha:(import.meta.env.VITE_FASTLINK_BUILD_SHA as string|undefined)?.trim()||'unknown'})
+const runtimeBuildSha=window.__FASTLINK_RUNTIME__?.buildSha?.trim()
+const verifiedRuntimeBuildSha=runtimeBuildSha&&/^[0-9a-f]{40}$/i.test(runtimeBuildSha)?runtimeBuildSha:undefined
+export const walletRuntime=Object.freeze({apiUrl,environment,buildSha:verifiedRuntimeBuildSha||(import.meta.env.VITE_FASTLINK_BUILD_SHA as string|undefined)?.trim()||'unknown'})
 export class WalletApiError extends Error{constructor(public status:number,public traceId:string,message:string){super(message)}}
 const trace=()=>crypto.randomUUID()
 
