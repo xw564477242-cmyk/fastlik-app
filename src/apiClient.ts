@@ -1,22 +1,34 @@
 export type FastLinkEnvironment='LOCAL'|'SANDBOX'|'UAT'|'PRODUCTION'
+export type WalletSession={actorId:string;tenantId:string;customerId:string;environment:FastLinkEnvironment;expiresAt?:string}
+export type WalletCredentials={tenantId:string;email:string;password:string}
+
 const apiUrl=(import.meta.env.VITE_FASTLINK_API_URL as string|undefined)?.trim().replace(/\/$/,'')
 const environment=(import.meta.env.VITE_FASTLINK_ENVIRONMENT as FastLinkEnvironment|undefined)
 if(!apiUrl)throw new Error('Missing VITE_FASTLINK_API_URL')
 if(!environment||!['LOCAL','SANDBOX','UAT','PRODUCTION'].includes(environment))throw new Error('Invalid VITE_FASTLINK_ENVIRONMENT')
-if(environment==='PRODUCTION'&&!apiUrl.startsWith('https://'))throw new Error('Production API must use HTTPS')
+if(environment==='PRODUCTION'&&apiUrl!=='/api'&&!apiUrl.startsWith('https://'))throw new Error('Production API must use same-origin /api or HTTPS')
 
 const runtimeBuildSha=window.__FASTLINK_RUNTIME__?.buildSha?.trim()
 const verifiedRuntimeBuildSha=runtimeBuildSha&&/^[0-9a-f]{40}$/i.test(runtimeBuildSha)?runtimeBuildSha:undefined
 export const walletRuntime=Object.freeze({apiUrl,environment,buildSha:verifiedRuntimeBuildSha||(import.meta.env.VITE_FASTLINK_BUILD_SHA as string|undefined)?.trim()||'unknown'})
 export class WalletApiError extends Error{constructor(public status:number,public traceId:string,message:string){super(message)}}
 const trace=()=>crypto.randomUUID()
+const csrfToken=()=>document.cookie.split(';').map(value=>value.trim()).find(value=>value.startsWith('fastlink_csrf='))?.slice('fastlink_csrf='.length)
 
-async function request<T>(path:string,token:string,method='GET',body?:unknown,idempotencyKey?:string):Promise<T>{
+async function request<T>(path:string,method='GET',body?:unknown,idempotencyKey?:string):Promise<T>{
  const id=trace();const controller=new AbortController();const timeout=window.setTimeout(()=>controller.abort(),20_000)
  try{
+  const csrf=csrfToken()
+  const mutating=!['GET','HEAD','OPTIONS'].includes(method)
   const response=await fetch(`${apiUrl}${path}`,{
-   method,cache:'no-store',credentials:'omit',signal:controller.signal,
-   headers:{Accept:'application/json','X-Trace-Id':id,Authorization:`Bearer ${token}`,...(body?{'Content-Type':'application/json'}:{}),...(idempotencyKey?{'Idempotency-Key':idempotencyKey}:{})},
+   method,cache:'no-store',credentials:'include',signal:controller.signal,
+   headers:{
+    Accept:'application/json',
+    'X-Trace-Id':id,
+    ...(body?{'Content-Type':'application/json'}:{}),
+    ...(idempotencyKey?{'Idempotency-Key':idempotencyKey}:{}),
+    ...(mutating&&csrf?{'X-CSRF-Token':decodeURIComponent(csrf)}:{}),
+   },
    ...(body?{body:JSON.stringify(body)}:{})
   })
   const returned=response.headers.get('x-trace-id')||id
@@ -25,6 +37,7 @@ async function request<T>(path:string,token:string,method='GET',body?:unknown,id
    try{const payload=await response.json();message=Array.isArray(payload.message)?payload.message.join(', '):(payload.message||message)}catch{}
    throw new WalletApiError(response.status,returned,`${message} · HTTP ${response.status} · Trace ${returned}`)
   }
+  if(response.status===204)return undefined as T
   return response.json() as Promise<T>
  }catch(error){
   if(error instanceof WalletApiError)throw error
@@ -35,11 +48,15 @@ async function request<T>(path:string,token:string,method='GET',body?:unknown,id
 }
 
 export const walletApi={
- session:(token:string)=>request<{environment:FastLinkEnvironment;tenantId:string;customerId:string}>('/v1/session',token),
- cards:(token:string)=>request<Array<Record<string,unknown>>>('/v1/cards',token),
- card:(token:string,id:string)=>request<Record<string,unknown>>(`/v1/cards/${encodeURIComponent(id)}`,token),
- balance:(token:string,id:string)=>request<Record<string,unknown>>(`/v1/cards/${encodeURIComponent(id)}/balance`,token),
- transactions:(token:string,id:string)=>request<Record<string,unknown>>(`/v1/cards/${encodeURIComponent(id)}/transactions`,token),
- freeze:(token:string,id:string)=>request<Record<string,unknown>>(`/v1/cards/${encodeURIComponent(id)}/freeze`,token,'POST',undefined,crypto.randomUUID()),
- unfreeze:(token:string,id:string)=>request<Record<string,unknown>>(`/v1/cards/${encodeURIComponent(id)}/unfreeze`,token,'POST',undefined,crypto.randomUUID()),
+ register:(credentials:WalletCredentials)=>request<WalletSession>('/v1/auth/register','POST',credentials),
+ login:(credentials:WalletCredentials)=>request<WalletSession>('/v1/auth/login','POST',credentials),
+ refresh:()=>request<WalletSession>('/v1/auth/refresh','POST'),
+ logout:()=>request<void>('/v1/auth/logout','POST'),
+ session:()=>request<WalletSession>('/v1/session'),
+ cards:()=>request<Array<Record<string,unknown>>>('/v1/cards'),
+ card:(id:string)=>request<Record<string,unknown>>(`/v1/cards/${encodeURIComponent(id)}`),
+ balance:(id:string)=>request<Record<string,unknown>>(`/v1/cards/${encodeURIComponent(id)}/balance`),
+ transactions:(id:string)=>request<Record<string,unknown>>(`/v1/cards/${encodeURIComponent(id)}/transactions`),
+ freeze:(id:string)=>request<Record<string,unknown>>(`/v1/cards/${encodeURIComponent(id)}/freeze`,'POST',undefined,crypto.randomUUID()),
+ unfreeze:(id:string)=>request<Record<string,unknown>>(`/v1/cards/${encodeURIComponent(id)}/unfreeze`,'POST',undefined,crypto.randomUUID()),
 }
