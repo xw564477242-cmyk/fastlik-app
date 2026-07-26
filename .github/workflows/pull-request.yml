@@ -1,6 +1,9 @@
 name: Wallet Pull Request Gate
 
 on:
+  push:
+    branches:
+      - feature/flp-env-002-runtime-config-path
   pull_request:
     branches:
       - dev
