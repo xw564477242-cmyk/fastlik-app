@@ -1,4 +1,5 @@
 name: Wallet Pull Request Gate
+# Fresh trigger after GitHub Actions terms acceptance.
 
 on:
   pull_request:
