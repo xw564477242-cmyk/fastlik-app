@@ -3,8 +3,12 @@ import { join, relative } from "node:path";
 
 const root = process.cwd();
 const apiClient = readFileSync(join(root, "src/apiClient.ts"), "utf8");
+const app = readFileSync(join(root, "src/App.tsx"), "utf8");
 const index = readFileSync(join(root, "index.html"), "utf8");
 const vite = readFileSync(join(root, "vite.config.ts"), "utf8");
+const runtimeTemplate = readFileSync(join(root, "runtime-config.template.js"), "utf8");
+const entrypoint = readFileSync(join(root, "docker-entrypoint.sh"), "utf8");
+const dockerfile = readFileSync(join(root, "Dockerfile"), "utf8");
 
 function assert(condition, message) {
   if (!condition) throw new Error(message);
@@ -12,6 +16,19 @@ function assert(condition, message) {
 
 assert(index.includes('src="./runtime-config.js"'), "runtime config must resolve from the deployment base");
 assert(vite.includes("VITE_PUBLIC_BASE"), "Vite public base must be deployment-configurable");
+assert(apiClient.includes("window.__FASTLINK_RUNTIME__?.environment"), "Wallet must accept the runtime environment");
+assert(apiClient.includes("window.__FASTLINK_RUNTIME__?.apiUrl"), "Wallet must accept the runtime API URL");
+assert(apiClient.includes("window.__FASTLINK_RUNTIME__?.buildSha"), "Wallet must accept the runtime Build SHA");
+assert(apiClient.includes("SANDBOX Wallet must use the approved Backend Dev API"), "SANDBOX Wallet must reject a non-Dev Backend");
+assert(app.includes("walletRuntime.apiUrl"), "Wallet UI must expose the runtime API base");
+assert(runtimeTemplate.includes("$VITE_FASTLINK_ENVIRONMENT"), "runtime template must expose the environment");
+assert(runtimeTemplate.includes("$VITE_FASTLINK_API_URL"), "runtime template must expose the API URL");
+assert(runtimeTemplate.includes("$RAILWAY_GIT_COMMIT_SHA"), "runtime template must expose the Railway Release SHA");
+assert(entrypoint.includes("VITE_FASTLINK_ENVIRONMENT is required"), "container startup must fail closed without environment");
+assert(entrypoint.includes("VITE_FASTLINK_API_URL is required"), "container startup must fail closed without API URL");
+assert(entrypoint.includes("RAILWAY_GIT_COMMIT_SHA is required"), "container startup must fail closed without Release SHA");
+assert(entrypoint.includes("SANDBOX Wallet must use the approved Backend Dev API"), "container startup must reject a non-Dev Backend");
+assert(dockerfile.includes("/docker-entrypoint.d/40-fastlink-runtime.sh"), "runtime generation must execute before nginx starts");
 assert(apiClient.includes("credentials:'include'"), "Wallet API must include Cookie credentials");
 assert(apiClient.includes("fastlink_csrf"), "Wallet API must use the CSRF cookie/header contract");
 assert(!apiClient.includes("Authorization"), "Wallet API must not send a Bearer token");

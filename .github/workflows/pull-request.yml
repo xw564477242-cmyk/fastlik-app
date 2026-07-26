@@ -67,5 +67,34 @@ jobs:
           test -f dist/runtime-config.js
           grep -F 'src="./runtime-config.js"' dist/index.html
 
+      - name: Container Runtime Contract
+        shell: bash
+        env:
+          IMAGE: fastlink-wallet-dev:${{ github.event.pull_request.head.sha || github.sha }}
+          RELEASE_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+        run: |
+          set -euo pipefail
+          docker build \
+            --build-arg VITE_FASTLINK_API_URL=https://fastlink-backend-dev-development-a.up.railway.app/api \
+            --build-arg VITE_FASTLINK_ENVIRONMENT=SANDBOX \
+            --build-arg VITE_PUBLIC_BASE=/ \
+            --build-arg RAILWAY_GIT_COMMIT_SHA="$RELEASE_SHA" \
+            --tag "$IMAGE" .
+          docker run --detach --rm --name fastlink-wallet-dev-gate \
+            --publish 127.0.0.1:18081:8080 \
+            --env VITE_FASTLINK_API_URL=https://fastlink-backend-dev-development-a.up.railway.app/api \
+            --env VITE_FASTLINK_ENVIRONMENT=SANDBOX \
+            --env RAILWAY_GIT_COMMIT_SHA="$RELEASE_SHA" \
+            "$IMAGE"
+          trap 'docker stop fastlink-wallet-dev-gate >/dev/null 2>&1 || true' EXIT
+          for _ in {1..30}; do
+            curl --fail --silent http://127.0.0.1:18081/healthz && break
+            sleep 1
+          done
+          runtime="$(curl --fail --silent http://127.0.0.1:18081/runtime-config.js)"
+          grep -F 'environment: "SANDBOX"' <<<"$runtime"
+          grep -F 'apiUrl: "https://fastlink-backend-dev-development-a.up.railway.app/api"' <<<"$runtime"
+          grep -F "buildSha: \"$RELEASE_SHA\"" <<<"$runtime"
+
       - name: Secret Scan
         run: node scripts/verify-dev-wallet.mjs

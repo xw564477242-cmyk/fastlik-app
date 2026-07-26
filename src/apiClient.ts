@@ -2,11 +2,14 @@ export type FastLinkEnvironment='LOCAL'|'SANDBOX'|'UAT'|'PRODUCTION'
 export type WalletSession={actorId:string;tenantId:string;customerId:string;environment:FastLinkEnvironment;expiresAt?:string}
 export type WalletCredentials={tenantId:string;email:string;password:string}
 
-const apiUrl=(import.meta.env.VITE_FASTLINK_API_URL as string|undefined)?.trim().replace(/\/$/,'')
-const environment=(import.meta.env.VITE_FASTLINK_ENVIRONMENT as FastLinkEnvironment|undefined)
+const buildApiUrl=(import.meta.env.VITE_FASTLINK_API_URL as string|undefined)?.trim()
+const buildEnvironment=(import.meta.env.VITE_FASTLINK_ENVIRONMENT as FastLinkEnvironment|undefined)
+const apiUrl=(window.__FASTLINK_RUNTIME__?.apiUrl?.trim()||buildApiUrl||'').replace(/\/$/,'')
+const environment=(window.__FASTLINK_RUNTIME__?.environment?.trim()||buildEnvironment) as FastLinkEnvironment|undefined
 if(!apiUrl)throw new Error('Missing VITE_FASTLINK_API_URL')
 if(!environment||!['LOCAL','SANDBOX','UAT','PRODUCTION'].includes(environment))throw new Error('Invalid VITE_FASTLINK_ENVIRONMENT')
 if(environment==='PRODUCTION'&&apiUrl!=='/api'&&!apiUrl.startsWith('https://'))throw new Error('Production API must use same-origin /api or HTTPS')
+if(environment==='SANDBOX'&&apiUrl!=='https://fastlink-backend-dev-development-a.up.railway.app/api')throw new Error('SANDBOX Wallet must use the approved Backend Dev API')
 
 const runtimeBuildSha=window.__FASTLINK_RUNTIME__?.buildSha?.trim()
 const verifiedRuntimeBuildSha=runtimeBuildSha&&/^[0-9a-f]{40}$/i.test(runtimeBuildSha)?runtimeBuildSha:undefined
