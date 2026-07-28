@@ -21,10 +21,12 @@ jobs:
       - name: Build isolated Test Wallet
         env:
           VITE_FASTLINK_ENVIRONMENT: TEST
-          VITE_FASTLINK_API_URL: https://backend-test.fastlink.invalid/api
+          VITE_FASTLINK_API_URL: /api
           VITE_FASTLINK_BUILD_SHA: ${{ github.sha }}
           VITE_PUBLIC_BASE: /
         run: npm run build
       - run: |
           grep -R -F 'TEST' dist
           ! grep -R -F 'exquisite-surprise-production-309d' dist
+          ! grep -R -F 'fastlink-backend-dev-development-a' dist
+      - run: npm run test:cloudflare
