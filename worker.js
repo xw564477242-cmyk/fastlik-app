@@ -28,7 +28,7 @@ function requireBackendOrigin(env) {
 
 function proxyHeaders(request, publicUrl) {
   const headers = new Headers(request.headers);
-  for (const name of ["host", "forwarded", "x-forwarded-for", "x-forwarded-host", "x-forwarded-proto"]) {
+  for (const name of ["host", "origin", "referer", "forwarded", "x-forwarded-for", "x-forwarded-host", "x-forwarded-proto"]) {
     headers.delete(name);
   }
   headers.set("x-forwarded-host", publicUrl.host);
