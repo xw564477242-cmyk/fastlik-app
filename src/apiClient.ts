@@ -1,6 +1,9 @@
 export type FastLinkEnvironment='LOCAL'|'SANDBOX'|'TEST'|'UAT'|'PRODUCTION'
 export type WalletSession={actorId:string;tenantId:string;customerId:string;environment:FastLinkEnvironment;expiresAt?:string}
 export type WalletCredentials={tenantId:string;email:string;password:string}
+export type WalletAccountRecord={id:string;accountCode:string;name:string;assetCode:string;status:string;currentBalance:string;postedBalance:string;pendingBalance:string;availableBalance:string;updatedAt:string}
+export type WalletTransactionPage={items:Array<{id:string;type:string;status:string;assetCode:string;amount:string;createdAt:string;referenceType?:string}>;pagination:{total:number;limit:number;offset:number;hasMore:boolean}}
+export type InternalTransferInput={sourceAccountId:string;destinationAccountId:string;assetCode:string;amount:string}
 
 const buildApiUrl=(import.meta.env.VITE_FASTLINK_API_URL as string|undefined)?.trim()
 const buildEnvironment=(import.meta.env.VITE_FASTLINK_ENVIRONMENT as FastLinkEnvironment|undefined)
@@ -55,6 +58,10 @@ export const walletApi={
  refresh:()=>request<WalletSession>('/v1/auth/refresh','POST'),
  logout:()=>request<void>('/v1/auth/logout','POST'),
  session:()=>request<WalletSession>('/v1/session'),
+ walletAccounts:()=>request<WalletAccountRecord[]>('/v1/wallet/accounts'),
+ walletBalance:(accountId:string)=>request<Record<string,unknown>>(`/v1/wallet/accounts/${encodeURIComponent(accountId)}/balance`),
+ walletTransactions:(accountId:string)=>request<WalletTransactionPage>(`/v1/wallet/accounts/${encodeURIComponent(accountId)}/transactions?limit=100`),
+ internalTransfer:(input:InternalTransferInput)=>request<Record<string,unknown>>('/v1/wallet/transfers','POST',input,crypto.randomUUID()),
  cards:()=>request<Array<Record<string,unknown>>>('/v1/cards'),
  card:(id:string)=>request<Record<string,unknown>>(`/v1/cards/${encodeURIComponent(id)}`),
  balance:(id:string)=>request<Record<string,unknown>>(`/v1/cards/${encodeURIComponent(id)}/balance`),
