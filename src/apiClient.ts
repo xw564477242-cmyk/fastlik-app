@@ -8,9 +8,7 @@ const apiUrl=(window.__FASTLINK_RUNTIME__?.apiUrl?.trim()||buildApiUrl||'').repl
 const environment=(window.__FASTLINK_RUNTIME__?.environment?.trim()||buildEnvironment) as FastLinkEnvironment|undefined
 if(!apiUrl)throw new Error('Missing VITE_FASTLINK_API_URL')
 if(!environment||!['LOCAL','SANDBOX','TEST','UAT','PRODUCTION'].includes(environment))throw new Error('Invalid VITE_FASTLINK_ENVIRONMENT')
-if(environment==='PRODUCTION'&&apiUrl!=='/api'&&!apiUrl.startsWith('https://'))throw new Error('Production API must use same-origin /api or HTTPS')
-if(environment==='SANDBOX'&&apiUrl!=='https://fastlink-backend-dev-development-a.up.railway.app/api')throw new Error('SANDBOX Wallet must use the approved Backend Dev API')
-if(environment==='TEST'&&(!apiUrl.startsWith('https://')||apiUrl.includes('production-309d')))throw new Error('TEST Wallet must use an isolated HTTPS Backend Test API')
+if(['SANDBOX','TEST','PRODUCTION'].includes(environment)&&apiUrl!=='/api')throw new Error(`${environment} Cloudflare Wallet must use same-origin /api`)
 
 const runtimeBuildSha=window.__FASTLINK_RUNTIME__?.buildSha?.trim()
 const verifiedRuntimeBuildSha=runtimeBuildSha&&/^[0-9a-f]{40}$/i.test(runtimeBuildSha)?runtimeBuildSha:undefined

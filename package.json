@@ -6,7 +6,9 @@
   "scripts": {
     "dev": "vite",
     "build": "tsc --noEmit && vite build",
-    "preview": "vite preview"
+    "build:cloudflare": "bash scripts/build-cloudflare.sh",
+    "preview": "vite preview",
+    "test:cloudflare": "node scripts/verify-cloudflare.mjs"
   },
   "dependencies": {
     "lucide-react": "^0.468.0",

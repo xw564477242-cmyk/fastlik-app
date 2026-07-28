@@ -1,0 +1,19 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "fastlink-wallet-test",
+  "main": "worker.js",
+  "compatibility_date": "2026-07-25",
+  "assets": {
+    "binding": "ASSETS",
+    "directory": "dist",
+    "not_found_handling": "single-page-application",
+    "run_worker_first": ["/api/*", "/healthz", "/runtime-config.js"]
+  },
+  "vars": {
+    "FASTLINK_ENVIRONMENT": "TEST",
+    "FASTLINK_API_URL": "/api",
+    "FASTLINK_SERVICE_NAME": "fastlink-wallet-test",
+    "FASTLINK_PROXY_ID": "wallet-test"
+  },
+  "observability": { "enabled": true }
+}

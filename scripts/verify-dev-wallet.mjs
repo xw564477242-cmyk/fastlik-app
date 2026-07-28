@@ -19,7 +19,7 @@ assert(vite.includes("VITE_PUBLIC_BASE"), "Vite public base must be deployment-c
 assert(apiClient.includes("window.__FASTLINK_RUNTIME__?.environment"), "Wallet must accept the runtime environment");
 assert(apiClient.includes("window.__FASTLINK_RUNTIME__?.apiUrl"), "Wallet must accept the runtime API URL");
 assert(apiClient.includes("window.__FASTLINK_RUNTIME__?.buildSha"), "Wallet must accept the runtime Build SHA");
-assert(apiClient.includes("SANDBOX Wallet must use the approved Backend Dev API"), "SANDBOX Wallet must reject a non-Dev Backend");
+assert(apiClient.includes("Cloudflare Wallet must use same-origin /api"), "Wallet browser runtime must require the Cloudflare same-origin API");
 assert(app.includes("walletRuntime.apiUrl"), "Wallet UI must expose the runtime API base");
 assert(runtimeTemplate.includes("$VITE_FASTLINK_ENVIRONMENT"), "runtime template must expose the environment");
 assert(runtimeTemplate.includes("$VITE_FASTLINK_API_URL"), "runtime template must expose the API URL");
