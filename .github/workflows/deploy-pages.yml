@@ -1,9 +1,15 @@
-name: Deploy FastLink Wallet
+name: Legacy Rollback - Deploy FastLink Wallet
 
 on:
-  push:
-    branches: [main]
   workflow_dispatch:
+    inputs:
+      confirmation:
+        description: Type DEPLOY_LEGACY_ROLLBACK to publish the legacy Pages fallback
+        required: true
+        type: choice
+        options:
+          - DO_NOT_DEPLOY
+          - DEPLOY_LEGACY_ROLLBACK
 
 permissions:
   contents: read
@@ -16,6 +22,7 @@ concurrency:
 
 jobs:
   build-and-deploy:
+    if: inputs.confirmation == 'DEPLOY_LEGACY_ROLLBACK'
     environment:
       name: github-pages
       url: ${{ steps.deployment.outputs.page_url }}
