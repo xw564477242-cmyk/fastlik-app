@@ -4,4 +4,5 @@ dist/
 .env.*
 !.env.example
 !.env.development.example
+!.env.test.example
 *.log
