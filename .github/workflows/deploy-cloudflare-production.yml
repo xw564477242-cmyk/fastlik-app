@@ -1,0 +1,75 @@
+name: Deploy Wallet Production to Cloudflare
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: fastlink-wallet-production
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    if: vars.FASTLINK_PRODUCTION_DEPLOY_ENABLED == 'true'
+    runs-on: ubuntu-latest
+    environment: cloudflare-wallet-production
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+      - run: npm ci
+      - run: npm audit --audit-level=high
+
+      - name: Assert immutable Production targets
+        env:
+          BACKEND_ORIGIN: ${{ vars.FASTLINK_PRODUCTION_BACKEND_ORIGIN }}
+          WALLET_URL: ${{ vars.FASTLINK_PRODUCTION_WALLET_URL }}
+        run: |
+          test "$BACKEND_ORIGIN" = 'https://exquisite-surprise-production-309d.up.railway.app'
+          test "$WALLET_URL" = 'https://fastlink-wallet.adhesive-snowshoe.workers.dev'
+
+      - name: Build Production package
+        env:
+          FASTLINK_BUILD_SHA: ${{ github.sha }}
+        run: npm run build:cloudflare:production
+
+      - name: Deploy Production Worker
+        uses: cloudflare/wrangler-action@v3
+        with:
+          apiToken: ${{ secrets.CLOUDFLARE_PRODUCTION_API_TOKEN }}
+          accountId: ${{ secrets.CLOUDFLARE_PRODUCTION_ACCOUNT_ID }}
+          wranglerVersion: "4.114.0"
+          command: >-
+            deploy --config wrangler.production.jsonc
+            --var FASTLINK_BACKEND_ORIGIN:${{ vars.FASTLINK_PRODUCTION_BACKEND_ORIGIN }}
+            --var FASTLINK_BUILD_SHA:${{ github.sha }}
+
+      - name: Verify Production Worker
+        env:
+          WALLET_URL: ${{ vars.FASTLINK_PRODUCTION_WALLET_URL }}
+        run: |
+          expected_sha='${{ github.sha }}'
+          for attempt in {1..24}; do
+            health="$(curl --fail --silent --show-error --connect-timeout 5 --max-time 15 "$WALLET_URL/healthz" || true)"
+            if grep -Fq '"environment":"PRODUCTION"' <<<"$health" &&
+              grep -Fq "\"buildSha\":\"$expected_sha\"" <<<"$health"; then
+              break
+            fi
+            if [[ "$attempt" -eq 24 ]]; then
+              echo "::error::Cloudflare edge did not converge to build $expected_sha within the verification window."
+              printf '%s\n' "$health"
+              exit 1
+            fi
+            sleep 5
+          done
+          curl --fail --silent --show-error --dump-header headers.txt --output health.json "$WALLET_URL/api/health"
+          grep -i -F 'x-fastlink-api-proxy: wallet-production' headers.txt
+          grep -F '"environment":"PRODUCTION"' health.json
