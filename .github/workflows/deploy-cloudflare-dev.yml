@@ -1,0 +1,70 @@
+name: Deploy Wallet Dev to Cloudflare
+
+on:
+  push:
+    branches: [dev]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: fastlink-wallet-dev
+  cancel-in-progress: true
+
+jobs:
+  deploy:
+    if: vars.FASTLINK_DEV_DEPLOY_ENABLED == 'true'
+    runs-on: ubuntu-latest
+    environment: cloudflare-wallet-dev
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+      - run: npm ci
+
+      - name: Assert isolated Dev deployment variables
+        shell: bash
+        env:
+          BACKEND_ORIGIN: ${{ vars.FASTLINK_DEV_BACKEND_ORIGIN }}
+          WALLET_URL: ${{ vars.FASTLINK_DEV_WALLET_URL }}
+        run: |
+          test "$BACKEND_ORIGIN" = 'https://fastlink-backend-dev-development-a.up.railway.app'
+          test "$WALLET_URL" = 'https://fastlink-wallet-dev.adhesive-snowshoe.workers.dev'
+          test "$BACKEND_ORIGIN" != 'https://fastlink-backend-test-test.up.railway.app'
+          test "$BACKEND_ORIGIN" != 'https://exquisite-surprise-production-309d.up.railway.app'
+
+      - name: Build immutable Dev package
+        env:
+          FASTLINK_ENVIRONMENT: SANDBOX
+          FASTLINK_BUILD_SHA: ${{ github.sha }}
+        run: npm run build:cloudflare
+
+      - name: Deploy isolated Dev Worker
+        uses: cloudflare/wrangler-action@v3
+        with:
+          apiToken: ${{ secrets.CLOUDFLARE_DEV_API_TOKEN }}
+          accountId: ${{ secrets.CLOUDFLARE_DEV_ACCOUNT_ID }}
+          wranglerVersion: "4.114.0"
+          command: >-
+            deploy --config wrangler.dev.jsonc
+            --var FASTLINK_BACKEND_ORIGIN:${{ vars.FASTLINK_DEV_BACKEND_ORIGIN }}
+            --var FASTLINK_BUILD_SHA:${{ github.sha }}
+
+      - name: Verify Dev Worker
+        shell: bash
+        env:
+          WALLET_URL: ${{ vars.FASTLINK_DEV_WALLET_URL }}
+        run: |
+          health="$(curl --fail --silent --show-error --location --retry 6 --retry-delay 5 "$WALLET_URL/healthz")"
+          grep -F '"environment":"SANDBOX"' <<<"$health"
+          grep -F "\"buildSha\":\"${{ github.sha }}\"" <<<"$health"
+          runtime="$(curl --fail --silent --show-error --location "$WALLET_URL/runtime-config.js")"
+          grep -F '"environment":"SANDBOX"' <<<"$runtime"
+          grep -F '"apiUrl":"/api"' <<<"$runtime"
+          curl --fail --silent --show-error --dump-header headers.txt --output health.json "$WALLET_URL/api/health"
+          grep -i -F 'x-fastlink-api-proxy: wallet-dev' headers.txt
