@@ -1,0 +1,75 @@
+name: Deploy Wallet Test to Railway
+
+on:
+  push:
+    branches: [test]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: fastlink-wallet-test
+  cancel-in-progress: true
+
+jobs:
+  deploy:
+    if: vars.FASTLINK_TEST_DEPLOY_ENABLED == 'true'
+    runs-on: ubuntu-latest
+    environment: railway-wallet-test
+    env:
+      RAILWAY_TOKEN: ${{ secrets.RAILWAY_TEST_TOKEN }}
+      PROJECT_ID: ${{ vars.RAILWAY_TEST_PROJECT_ID }}
+      ENVIRONMENT_ID: ${{ vars.RAILWAY_TEST_ENVIRONMENT_ID }}
+      SERVICE_ID: ${{ vars.RAILWAY_TEST_WALLET_SERVICE_ID }}
+      WALLET_URL: ${{ vars.FASTLINK_TEST_WALLET_URL }}
+      BACKEND_URL: ${{ vars.FASTLINK_TEST_BACKEND_URL }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
+
+      - name: Assert isolated Test target
+        shell: bash
+        run: |
+          test -n "$RAILWAY_TOKEN"
+          test -n "$PROJECT_ID"
+          test -n "$ENVIRONMENT_ID"
+          test -n "$SERVICE_ID"
+          test -n "$WALLET_URL"
+          test -n "$BACKEND_URL"
+          test "$BACKEND_URL" != 'https://exquisite-surprise-production-309d.up.railway.app'
+          test "$BACKEND_URL" != 'https://fastlink-backend-dev-development-a.up.railway.app'
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+
+      - run: npm install --global @railway/cli@5.28.1
+
+      - name: Deploy exact Test commit
+        run: >-
+          railway up --detach --yes --json
+          --project "$PROJECT_ID"
+          --environment "$ENVIRONMENT_ID"
+          --service "$SERVICE_ID"
+          --message "FastLink Wallet Test ${{ github.sha }}"
+
+      - name: Verify Wallet Test health
+        shell: bash
+        run: |
+          for attempt in {1..40}; do
+            if curl --fail --silent --show-error --location "$WALLET_URL/healthz" >/dev/null; then
+              runtime="$(curl --fail --silent --show-error --location "$WALLET_URL/runtime-config.js")"
+              grep -F 'environment: "TEST"' <<<"$runtime"
+              grep -F "$BACKEND_URL" <<<"$runtime"
+              exit 0
+            fi
+            sleep 15
+          done
+          railway service status \
+            --project "$PROJECT_ID" \
+            --environment "$ENVIRONMENT_ID" \
+            --service "$SERVICE_ID" \
+            --json
+          exit 1
