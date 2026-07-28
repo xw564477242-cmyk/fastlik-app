@@ -1,0 +1,69 @@
+name: Deploy Wallet Test to Cloudflare
+
+on:
+  push:
+    branches: [test]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: fastlink-wallet-test
+  cancel-in-progress: true
+
+jobs:
+  deploy:
+    if: vars.FASTLINK_TEST_DEPLOY_ENABLED == 'true'
+    runs-on: ubuntu-latest
+    environment: cloudflare-wallet-test
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+      - run: npm ci
+
+      - name: Assert isolated Test deployment variables
+        shell: bash
+        env:
+          BACKEND_ORIGIN: ${{ vars.FASTLINK_TEST_BACKEND_ORIGIN }}
+          WALLET_URL: ${{ vars.FASTLINK_TEST_WALLET_URL }}
+        run: |
+          test -n "$BACKEND_ORIGIN"
+          test -n "$WALLET_URL"
+          test "$BACKEND_ORIGIN" != 'https://exquisite-surprise-production-309d.up.railway.app'
+          test "$BACKEND_ORIGIN" != 'https://fastlink-backend-dev-development-a.up.railway.app'
+
+      - name: Build immutable Test package
+        env:
+          FASTLINK_ENVIRONMENT: TEST
+          FASTLINK_BUILD_SHA: ${{ github.sha }}
+        run: npm run build:cloudflare
+
+      - name: Deploy isolated Test Worker
+        uses: cloudflare/wrangler-action@v3
+        with:
+          apiToken: ${{ secrets.CLOUDFLARE_TEST_API_TOKEN }}
+          accountId: ${{ secrets.CLOUDFLARE_TEST_ACCOUNT_ID }}
+          wranglerVersion: "4.114.0"
+          command: >-
+            deploy --config wrangler.test.jsonc
+            --var FASTLINK_BACKEND_ORIGIN:${{ vars.FASTLINK_TEST_BACKEND_ORIGIN }}
+            --var FASTLINK_BUILD_SHA:${{ github.sha }}
+
+      - name: Verify Test Worker
+        shell: bash
+        env:
+          WALLET_URL: ${{ vars.FASTLINK_TEST_WALLET_URL }}
+        run: |
+          health="$(curl --fail --silent --show-error --location --retry 6 --retry-delay 5 "$WALLET_URL/healthz")"
+          grep -F '"environment":"TEST"' <<<"$health"
+          runtime="$(curl --fail --silent --show-error --location "$WALLET_URL/runtime-config.js")"
+          grep -F '"environment":"TEST"' <<<"$runtime"
+          grep -F '"apiUrl":"/api"' <<<"$runtime"
+          curl --fail --silent --show-error --dump-header headers.txt --output health.json "$WALLET_URL/api/health"
+          grep -i -F 'x-fastlink-api-proxy: wallet-test' headers.txt
