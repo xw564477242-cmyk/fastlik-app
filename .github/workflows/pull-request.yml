@@ -118,6 +118,7 @@ jobs:
           name: fastlink-wallet-pr-${{ github.event.pull_request.head.sha || github.sha }}
           path: |
             dist/
+            package-lock.json
             build-evidence.json
             build-provenance.sha256
           if-no-files-found: error
