@@ -6,6 +6,8 @@ import {
   readWalletTransactionDetail,
   readWalletTransactionHistory,
   walletTransactionFilterKey,
+  walletTransactionFilterRequestAllowed,
+  walletTransactionFiltersForSelectedAsset,
   walletTransactionHistoryRequestIsCurrent,
   walletTransactionPath,
   walletTransactionRequestWasAborted,
@@ -314,4 +316,122 @@ integration("actively cancels mounted transaction detail on selection change or 
     assert.equal(walletTransactionRequestWasAborted(error), true);
     assert.equal(committed, false, `${scenario} late detail must not commit`);
   }
+});
+
+integration("filter change cancels stale pagination, resets cursor and emits one allowlisted GET", async () => {
+  const firstItems = Array.from({ length: 25 }, (_, index) =>
+    transaction(`transaction-${String(99 - index).padStart(2, "0")}`, 59 - index));
+  const unfiltered = walletTransactionFiltersForSelectedAsset(
+    { type: "ALL", status: "ALL" },
+    "USD",
+  );
+  const first = await readWalletTransactionHistory(
+    async () => JSON.stringify({ items: firstItems, nextCursor: cursorPage2 }),
+    session(),
+    environment!,
+    unfiltered,
+  );
+  let generation = 1;
+  let current = first;
+  let currentCursor = first.nextCursor;
+  let selectedDetail: unknown = first.items[0];
+  let visibleError = "old error";
+  const staleController = new AbortController();
+  let resolveStale!: (value: string) => void;
+  const staleGeneration = generation;
+  const stale = readWalletTransactionHistory(
+    () => new Promise(resolve => {
+      resolveStale = resolve;
+    }),
+    session(),
+    environment!,
+    unfiltered,
+    first,
+    staleController.signal,
+  ).then(
+    history => {
+      if (generation === staleGeneration) current = history;
+      return null;
+    },
+    error => error,
+  );
+  await Promise.resolve();
+
+  const filtered = walletTransactionFiltersForSelectedAsset(
+    { type: "TRANSFER", status: "COMPLETED" },
+    "USD",
+  );
+  staleController.abort();
+  generation += 1;
+  current = null as unknown as typeof first;
+  currentCursor = null;
+  selectedDetail = null;
+  visibleError = "";
+  let filteredGets = 0;
+  let requestPath = "";
+  const changedGeneration = generation;
+  const changed = await readWalletTransactionHistory(
+    async request => {
+      filteredGets += 1;
+      requestPath = request.path;
+      return JSON.stringify({ items: [transaction("transaction-filtered", 59)], nextCursor: null });
+    },
+    session(),
+    environment!,
+    filtered,
+  );
+  if (generation === changedGeneration) current = changed;
+  resolveStale(JSON.stringify({ items: [transaction("transaction-stale", 34)], nextCursor: null }));
+  const staleError = await stale;
+
+  assert.equal(walletTransactionRequestWasAborted(staleError), true);
+  assert.equal(filteredGets, 1);
+  assert.equal(
+    requestPath,
+    "/v1/wallet/transactions?type=TRANSFER&status=COMPLETED&assetCode=USD&limit=25",
+  );
+  assert.equal(current.items[0].id, "transaction-filtered");
+  assert.equal(currentCursor, null);
+  assert.equal(selectedDetail, null);
+  assert.equal(visibleError, "");
+  let targetFilterKey = walletTransactionFilterKey(unfiltered);
+  let admittedChanges = 0;
+  for (const repeated of [filtered, filtered]) {
+    const nextFilterKey = walletTransactionFilterKey(repeated);
+    if (nextFilterKey === targetFilterKey) continue;
+    targetFilterKey = nextFilterKey;
+    admittedChanges += 1;
+  }
+  assert.equal(admittedChanges, 1, "same filter double event must admit one request");
+  assert.throws(
+    () => walletTransactionFiltersForSelectedAsset({ type: "TRANSFER", status: "COMPLETED" }, "eur"),
+    /asset/,
+  );
+});
+
+integration("filter request gate blocks unowned and cross-scope accounts before GET", async () => {
+  const owned = { id: "account-usd", assetCode: "USD" };
+  const unowned = { id: "account-other", assetCode: "USD" };
+  let calls = 0;
+  const attempt = async (
+    account: typeof owned,
+    selected: typeof owned,
+    expectedScope: string,
+    currentScope: string,
+  ) => {
+    if (!walletTransactionFilterRequestAllowed(account, [owned], selected, expectedScope, currentScope))
+      return;
+    await readWalletTransactionHistory(
+      async () => {
+        calls += 1;
+        return JSON.stringify({ items: [], nextCursor: null });
+      },
+      session(),
+      environment!,
+      walletTransactionFiltersForSelectedAsset({ type: "ALL", status: "ALL" }, account.assetCode),
+    );
+  };
+  await attempt(unowned, unowned, "scope-a", "scope-a");
+  await attempt(owned, owned, "scope-a", "scope-b");
+  assert.equal(calls, 0);
 });
