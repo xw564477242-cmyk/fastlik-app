@@ -60,6 +60,9 @@ assert(app.includes("Customer Wallet history"), "Wallet UI must expose public cu
 assert(app.includes("Transaction detail unavailable for this session"), "Wallet detail errors must remain safely normalized");
 assert(app.includes("Selected transaction"), "Wallet UI must expose the validated selected transaction detail");
 assert(app.includes("walletHistoryAbortController.current?.abort()") && app.includes("walletTransactionDetailAbortController.current?.abort()"), "Wallet transaction requests must actively cancel on invalidation or unmount");
+assert(app.includes("Wallet transaction type filter") && app.includes("Wallet transaction status filter"), "Wallet history must expose closed Type and Status filter controls");
+assert(walletTransactions.includes("walletTransactionFiltersForSelectedAsset") && walletTransactions.includes("limit: WALLET_TRANSACTION_PAGE_SIZE"), "Wallet history filters must retain selected-asset and fixed-limit boundaries");
+assert(app.includes("walletTransactionFilterRequestAllowed") && walletTransactions.includes("ownedAccounts.some"), "Wallet history filters must reject unowned or cross-scope account requests");
 assert(app.includes("All-account Wallet activity · read only"), "Wallet UI must expose read-only all-account operation activity");
 assert(app.includes("Selected operation · read only"), "Wallet UI must expose read-only selected operation detail");
 assert(app.includes("Create virtual card"), "Wallet UI must expose the gated non-production Virtual Card form");

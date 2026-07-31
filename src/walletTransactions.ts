@@ -43,6 +43,16 @@ export type WalletTransactionFilters = Readonly<{
   limit: number;
 }>;
 
+export type WalletTransactionFilterSelection = Readonly<{
+  type: "ALL" | WalletTransactionType;
+  status: "ALL" | WalletTransactionStatus;
+}>;
+
+export type WalletTransactionOwnedAccount = Readonly<{
+  id: string;
+  assetCode: string;
+}>;
+
 export type WalletTransactionHistoryState = Readonly<{
   items: readonly WalletTransactionRecord[];
   nextCursor: string | null;
@@ -79,6 +89,7 @@ const transactionFields = [
   "updatedAt",
 ] as const;
 const filterFields = ["type", "status", "assetCode", "limit"] as const;
+const filterSelectionFields = ["type", "status"] as const;
 
 function throwIfWalletTransactionRequestAborted(signal: AbortSignal | undefined): void {
   if (signal?.aborted)
@@ -348,6 +359,54 @@ export function normalizeWalletTransactionFilters(value: unknown): WalletTransac
   if (!Number.isInteger(limit) || (limit as number) < 1 || (limit as number) > 50)
     throw new Error("Invalid Wallet transaction page limit");
   return { type, status, assetCode: selectedAsset, limit: limit as number };
+}
+
+export function normalizeWalletTransactionFilterSelection(
+  value: unknown,
+): WalletTransactionFilterSelection {
+  const record = exactDataRecord(
+    value,
+    filterSelectionFields,
+    "Wallet transaction filter selection",
+  );
+  return {
+    type: record.type === "ALL"
+      ? "ALL"
+      : enumValue(record.type, WALLET_TRANSACTION_TYPES, "type filter"),
+    status: record.status === "ALL"
+      ? "ALL"
+      : enumValue(record.status, WALLET_TRANSACTION_STATUSES, "status filter"),
+  };
+}
+
+export function walletTransactionFiltersForSelectedAsset(
+  selectionInput: unknown,
+  selectedAsset: unknown,
+): WalletTransactionFilters {
+  const selection = normalizeWalletTransactionFilterSelection(selectionInput);
+  return normalizeWalletTransactionFilters({
+    ...(selection.type === "ALL" ? {} : { type: selection.type }),
+    ...(selection.status === "ALL" ? {} : { status: selection.status }),
+    assetCode: assetCode(selectedAsset),
+    limit: WALLET_TRANSACTION_PAGE_SIZE,
+  });
+}
+
+export function walletTransactionFilterRequestAllowed(
+  account: WalletTransactionOwnedAccount | null,
+  ownedAccounts: readonly WalletTransactionOwnedAccount[],
+  selectedAccount: WalletTransactionOwnedAccount | null,
+  expectedScope: string | null,
+  currentScope: string | null,
+): boolean {
+  return Boolean(
+    account &&
+    expectedScope &&
+    expectedScope === currentScope &&
+    selectedAccount?.id === account.id &&
+    selectedAccount.assetCode === account.assetCode &&
+    ownedAccounts.some(row => row.id === account.id && row.assetCode === account.assetCode),
+  );
 }
 
 export function walletTransactionFilterKey(filters: WalletTransactionFilters): string {

@@ -2,13 +2,18 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import {
   WALLET_TRANSACTION_MAX_JSON_BYTES,
+  WALLET_TRANSACTION_STATUSES,
+  WALLET_TRANSACTION_TYPES,
   advanceWalletTransactionHistory,
   createWalletTransactionHistoryRequestIdentity,
   normalizeWalletTransactionFilters,
+  normalizeWalletTransactionFilterSelection,
   parseWalletTransactionDetailRaw,
   parseWalletTransactionPageRaw,
   readWalletTransactionHistory,
   walletTransactionFilterKey,
+  walletTransactionFilterRequestAllowed,
+  walletTransactionFiltersForSelectedAsset,
   walletTransactionHistoryRequestIsCurrent,
   walletTransactionPath,
   walletTransactionRequestWasAborted,
@@ -69,6 +74,66 @@ test("builds only the exact bounded Backend transaction history query", () => {
   assert.throws(() => walletTransactionPath(filters, "A"), /cursor/);
   assert.throws(() => walletTransactionPath(filters, "AB"), /cursor/);
   assert.equal(walletTransactionPath(filters, "AA").endsWith("cursor=AA"), true);
+});
+
+test("builds UI filters only from All or the public allowlists and the selected asset", () => {
+  assert.deepEqual(normalizeWalletTransactionFilterSelection({ type: "ALL", status: "ALL" }), {
+    type: "ALL",
+    status: "ALL",
+  });
+  for (const type of WALLET_TRANSACTION_TYPES)
+    assert.equal(normalizeWalletTransactionFilterSelection({ type, status: "ALL" }).type, type);
+  for (const status of WALLET_TRANSACTION_STATUSES)
+    assert.equal(normalizeWalletTransactionFilterSelection({ type: "ALL", status }).status, status);
+  const selected = walletTransactionFiltersForSelectedAsset(
+    { type: "TRANSFER", status: "COMPLETED" },
+    "USD",
+  );
+  assert.deepEqual(selected, {
+    type: "TRANSFER",
+    status: "COMPLETED",
+    assetCode: "USD",
+    limit: 25,
+  });
+  assert.equal(
+    walletTransactionPath(selected),
+    "/v1/wallet/transactions?type=TRANSFER&status=COMPLETED&assetCode=USD&limit=25",
+  );
+  for (const unsafe of [
+    { type: "TREASURY", status: "ALL" },
+    { type: "ALL", status: "CANCELLED" },
+    { type: "ALL", status: "ALL", assetCode: "EUR" },
+    { type: "ALL", status: "ALL", limit: 50 },
+    { type: "ALL", status: "ALL", tenantId: "attacker" },
+  ]) assert.throws(() => normalizeWalletTransactionFilterSelection(unsafe), /filter/);
+  assert.throws(
+    () => walletTransactionFiltersForSelectedAsset({ type: "ALL", status: "ALL" }, "usd"),
+    /asset/,
+  );
+});
+
+test("never reads or reflects internal fields from hostile filter controls", () => {
+  let reads = 0;
+  const hostile = { type: "ALL", status: "ALL" } as Record<string, unknown>;
+  Object.defineProperty(hostile, "providerPayload", {
+    enumerable: true,
+    get: () => {
+      reads += 1;
+      return "private";
+    },
+  });
+  assert.throws(() => normalizeWalletTransactionFilterSelection(hostile), /fields/);
+  assert.equal(reads, 0);
+});
+
+test("allows filter requests only for the current owned account and exact scope", () => {
+  const usd = { id: "account-usd", assetCode: "USD" };
+  const eur = { id: "account-eur", assetCode: "EUR" };
+  assert.equal(walletTransactionFilterRequestAllowed(usd, [usd, eur], usd, "scope-a", "scope-a"), true);
+  assert.equal(walletTransactionFilterRequestAllowed(usd, [eur], usd, "scope-a", "scope-a"), false);
+  assert.equal(walletTransactionFilterRequestAllowed(usd, [usd], eur, "scope-a", "scope-a"), false);
+  assert.equal(walletTransactionFilterRequestAllowed(usd, [usd], usd, "scope-a", "scope-b"), false);
+  assert.equal(walletTransactionFilterRequestAllowed(null, [usd], usd, "scope-a", "scope-a"), false);
 });
 
 test("reconstructs exactly the eight public fields and rejects every internal field", () => {
