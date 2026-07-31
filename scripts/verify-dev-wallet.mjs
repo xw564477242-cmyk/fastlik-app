@@ -47,13 +47,19 @@ assert(apiClient.includes("parseWalletTransferReceipt(await request<unknown>"), 
 assert(apiClient.includes("const idempotencyKey=crypto.randomUUID()"), "Each transfer invocation must retain one generated idempotency key");
 assert(apiClient.includes("walletTransferStatus:async"), "Wallet must consume the existing safe operation status endpoint");
 assert(apiClient.includes("walletTransactionPath(selectedAsset,cursor)"), "Wallet must consume bounded public customer Wallet history");
+assert(apiClient.includes("walletTransactionDetail:async"), "Wallet must consume the public selected transaction detail endpoint");
+assert(walletData.includes("walletTransactionDetailPath"), "Wallet detail must use a validated public transaction path");
+assert(walletData.includes("parseWalletTransactionDetail"), "Wallet detail must be reconstructed from the public transaction allowlist");
 assert(walletData.includes("walletRequestIsCurrent"), "Wallet responses must be isolated by scope, account and request generation");
 assert(walletData.includes("walletHistoryRequestIsCurrent"), "Wallet history must be isolated by scope, selected asset, cursor and request generation");
+assert(walletData.includes("walletTransactionDetailRequestIsCurrent"), "Wallet detail must be isolated by scope, asset, transaction and request generation");
 assert(walletData.includes("/v1/wallet/transactions?"), "Wallet history must use the public customer contract");
 assert(!walletData.includes("/v1/wallet/accounts/${encodeURIComponent(accountId)}/transactions"), "Legacy account history must remain removed");
 assert(walletData.includes("walletTransferStatusRequestIsCurrent"), "Transfer status must be isolated by scope, source account, operation and request generation");
 assert(walletData.includes("WALLET_TRANSFER_STATUS_REFRESH_LIMIT = 5"), "Transfer status refresh must remain bounded");
 assert(app.includes("No unvalidated or cross-account response displayed"), "Wallet UI must fail closed for stale or invalid responses");
+assert(app.includes("Transaction detail unavailable for this session"), "Wallet detail errors must use one safe public message");
+assert(app.includes("Selected transaction"), "Wallet UI must expose the validated selected transaction detail");
 
 const excluded = new Set([".git", "node_modules", "dist", "docs"]);
 const secretPatterns = [
