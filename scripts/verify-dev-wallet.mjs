@@ -4,6 +4,7 @@ import { join, relative } from "node:path";
 const root = process.cwd();
 const apiClient = readFileSync(join(root, "src/apiClient.ts"), "utf8");
 const app = readFileSync(join(root, "src/App.tsx"), "utf8");
+const walletData = readFileSync(join(root, "src/walletData.ts"), "utf8");
 const index = readFileSync(join(root, "index.html"), "utf8");
 const vite = readFileSync(join(root, "vite.config.ts"), "utf8");
 const runtimeTemplate = readFileSync(join(root, "runtime-config.template.js"), "utf8");
@@ -40,6 +41,10 @@ assert(!apiClient.includes("exquisite-surprise-production"), "Wallet source must
 assert(apiClient.includes("VITE_FASTLINK_API_URL"), "Wallet API must require an explicit build API URL");
 assert(apiClient.includes("VITE_FASTLINK_ENVIRONMENT"), "Wallet must require an explicit environment");
 assert(apiClient.includes("VITE_FASTLINK_BUILD_SHA"), "Wallet must expose the build SHA");
+assert(apiClient.includes("parseWalletAccounts(await request<unknown>"), "Wallet account responses must be reconstructed from a public allowlist");
+assert(apiClient.includes("internalTransfer:async") && apiClient.includes("Promise<void>"), "Internal transfer responses must not expose raw response objects");
+assert(walletData.includes("walletRequestIsCurrent"), "Wallet responses must be isolated by scope, account and request generation");
+assert(app.includes("No unvalidated or cross-account response displayed"), "Wallet UI must fail closed for stale or invalid responses");
 
 const excluded = new Set([".git", "node_modules", "dist", "docs"]);
 const secretPatterns = [

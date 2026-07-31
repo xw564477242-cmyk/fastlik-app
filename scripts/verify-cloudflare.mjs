@@ -12,6 +12,7 @@ const testConfig = read("wrangler.test.jsonc");
 const devConfig = read("wrangler.dev.jsonc");
 const apiClient = read("src/apiClient.ts");
 const app = read("src/App.tsx");
+const walletData = read("src/walletData.ts");
 const index = read("index.html");
 
 assert(index.includes('src="./runtime-config.js"'), "runtime config must load before the Wallet app");
@@ -20,7 +21,9 @@ assert(apiClient.includes("credentials:'include'"), "Wallet must retain HttpOnly
 assert(apiClient.includes("fastlink_csrf"), "Wallet must retain the CSRF cookie/header contract");
 assert(apiClient.includes("'/v1/wallet/accounts'"), "Wallet must read persisted wallet accounts");
 assert(apiClient.includes("'/v1/wallet/transfers'"), "Wallet must use the authenticated internal-transfer contract");
-assert(apiClient.includes("/transactions?limit=100"), "Wallet must read persisted wallet transactions");
+assert(apiClient.includes("walletTransactionPath(accountId,offset)"), "Wallet must use the bounded account transaction path");
+assert(walletData.includes("WALLET_TRANSACTION_PAGE_SIZE = 25"), "Wallet transaction pages must remain consumer-bounded");
+assert(walletData.includes("walletRequestIsCurrent"), "Wallet async responses must remain scope and account isolated");
 assert(app.includes("Real wallet balances"), "Wallet UI must expose Backend wallet balances");
 assert(app.includes("Internal transfer"), "Wallet UI must expose internal transfers");
 assert(app.includes("Card transactions"), "Wallet UI must expose card transaction history");
