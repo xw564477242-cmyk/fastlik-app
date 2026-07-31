@@ -26,6 +26,59 @@ export type CardPage = { cards: CardRecord[]; nextCursor: string | null };
 
 export type CardRequestIdentity = { requestId: number; scopeKey: string | null; cardId: string };
 
+export type CardStatusActionDecision = {
+  operation: "freeze" | "unfreeze" | null;
+  label: string;
+  allowed: boolean;
+  reason: string | null;
+};
+
+export function cardStatusActionDecision(
+  card: CardRecord,
+  expectedScopeKey: string | null,
+  currentScopeKey: string | null,
+  currentCardId: string | null,
+): CardStatusActionDecision {
+  if (
+    expectedScopeKey === null ||
+    expectedScopeKey !== currentScopeKey ||
+    card.id !== currentCardId
+  ) {
+    return {
+      operation: null,
+      label: "Card action unavailable",
+      allowed: false,
+      reason: "Card scope or selection changed. Refresh before trying again.",
+    };
+  }
+  if (card.status === "ACTIVE") {
+    return card.capabilities.freeze
+      ? { operation: "freeze", label: "Freeze", allowed: true, reason: null }
+      : {
+          operation: "freeze",
+          label: "Freeze unavailable",
+          allowed: false,
+          reason: "Freeze is not permitted by the current card capabilities.",
+        };
+  }
+  if (card.status === "FROZEN") {
+    return card.capabilities.unfreeze
+      ? { operation: "unfreeze", label: "Unfreeze", allowed: true, reason: null }
+      : {
+          operation: "unfreeze",
+          label: "Unfreeze unavailable",
+          allowed: false,
+          reason: "Unfreeze is not permitted by the current card capabilities.",
+        };
+  }
+  return {
+    operation: null,
+    label: "Card action unavailable",
+    allowed: false,
+    reason: `Card status ${card.status} does not permit freeze or unfreeze.`,
+  };
+}
+
 export function cardRequestIsCurrent(
   request: CardRequestIdentity,
   currentRequestId: number,

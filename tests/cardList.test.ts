@@ -3,6 +3,7 @@ import test from "node:test";
 import {
   CARD_LIST_PAGE_SIZE,
   cardRequestIsCurrent,
+  cardStatusActionDecision,
   cardListPath,
   mergeCardPages,
   parseCardPage,
@@ -99,4 +100,49 @@ test("rejects success, error and completion work after the session scope changes
 
   assert.equal(cardRequestIsCurrent(oldSessionRequest, 20, "scope-new", "card-a"), false);
   assert.equal(cardRequestIsCurrent(oldSessionRequest, 20, "scope-old", "card-a"), true);
+});
+
+test("authorizes only the capability matching the current card status", () => {
+  const active = parseCardRecord(rawCard("card-active"));
+  const frozen = parseCardRecord({
+    ...rawCard("card-frozen"),
+    status: "FROZEN",
+    capabilities: {
+      freeze: false,
+      unfreeze: true,
+      replace: true,
+      renew: true,
+      updateLimits: true,
+    },
+  });
+
+  assert.deepEqual(cardStatusActionDecision(active, "scope", "scope", active.id), {
+    operation: "freeze",
+    label: "Freeze",
+    allowed: true,
+    reason: null,
+  });
+  assert.deepEqual(cardStatusActionDecision(frozen, "scope", "scope", frozen.id), {
+    operation: "unfreeze",
+    label: "Unfreeze",
+    allowed: true,
+    reason: null,
+  });
+});
+
+test("denies an operation when capability, status, scope, or selected card is unsafe", () => {
+  const noFreeze = parseCardRecord({
+    ...rawCard("card-a"),
+    capabilities: { ...(rawCard("card-a").capabilities as object), freeze: false },
+  });
+  const pending = parseCardRecord({ ...rawCard("card-pending"), status: "PENDING" });
+
+  assert.equal(cardStatusActionDecision(noFreeze, "scope", "scope", noFreeze.id).allowed, false);
+  assert.match(
+    cardStatusActionDecision(noFreeze, "scope", "scope", noFreeze.id).reason ?? "",
+    /not permitted by the current card capabilities/,
+  );
+  assert.equal(cardStatusActionDecision(pending, "scope", "scope", pending.id).operation, null);
+  assert.equal(cardStatusActionDecision(noFreeze, "scope-old", "scope-new", noFreeze.id).allowed, false);
+  assert.equal(cardStatusActionDecision(noFreeze, "scope", "scope", "card-b").operation, null);
 });
