@@ -21,7 +21,7 @@ const isObject = (value: unknown): value is Record<string, unknown> =>
   typeof value === "object" && value !== null && !Array.isArray(value);
 
 function cardId(value: unknown): string {
-  if (typeof value !== "string" || !/^[A-Za-z0-9_-]{2,128}$/.test(value))
+  if (typeof value !== "string" || !/^[A-Za-z0-9._:-]{2,128}$/.test(value))
     throw new Error("Invalid card balance cardId");
   return value;
 }

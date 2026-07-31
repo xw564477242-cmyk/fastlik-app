@@ -52,12 +52,18 @@ test("reconstructs Card balance from the six-field public allowlist only", () =>
 test("requires the returned cardId to match the selected card", () => {
   assert.throws(() => parseCardBalance(rawBalance(), "card-2"), /selected card/);
   assert.throws(() => parseCardBalance({ ...rawBalance(), cardId: "bad$id" }, "card-1"), /cardId/);
+  assert.equal(parseCardBalance({ ...rawBalance(), cardId: "card:1" }, "card:1").cardId, "card:1");
+  assert.equal(parseCardBalance({ ...rawBalance(), cardId: "card.1" }, "card.1").cardId, "card.1");
 });
 
 test("builds only a validated Card balance path", () => {
   assert.equal(cardBalancePath("card_1-test"), "/v1/cards/card_1-test/balance");
+  assert.equal(cardBalancePath("card:1"), "/v1/cards/card%3A1/balance");
+  assert.equal(cardBalancePath("card.1"), "/v1/cards/card.1/balance");
   assert.throws(() => cardBalancePath("x"), /cardId/);
   assert.throws(() => cardBalancePath("bad/id"), /cardId/);
+  assert.throws(() => cardBalancePath("bad id"), /cardId/);
+  assert.throws(() => cardBalancePath("bad$id"), /cardId/);
 });
 
 test("accepts only canonical signed 64-bit integer minor amounts", () => {
