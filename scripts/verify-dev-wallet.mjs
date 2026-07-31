@@ -4,6 +4,7 @@ import { join, relative } from "node:path";
 const root = process.cwd();
 const apiClient = readFileSync(join(root, "src/apiClient.ts"), "utf8");
 const app = readFileSync(join(root, "src/App.tsx"), "utf8");
+const cardBalance = readFileSync(join(root, "src/cardBalance.ts"), "utf8");
 const walletData = readFileSync(join(root, "src/walletData.ts"), "utf8");
 const index = readFileSync(join(root, "index.html"), "utf8");
 const vite = readFileSync(join(root, "vite.config.ts"), "utf8");
@@ -42,6 +43,11 @@ assert(apiClient.includes("VITE_FASTLINK_API_URL"), "Wallet API must require an 
 assert(apiClient.includes("VITE_FASTLINK_ENVIRONMENT"), "Wallet must require an explicit environment");
 assert(apiClient.includes("VITE_FASTLINK_BUILD_SHA"), "Wallet must expose the build SHA");
 assert(apiClient.includes("parseWalletAccounts(await request<unknown>"), "Wallet account responses must be reconstructed from a public allowlist");
+assert(apiClient.includes("parseCardBalance(await request<unknown>(cardBalancePath(id)),id)"), "Card balance must be reconstructed from the public typed contract");
+assert(!apiClient.includes("balance:(id:string)=>request<Record<string,unknown>>"), "Card balance must not expose a raw response record");
+assert(cardBalance.includes("CardBalanceRecord"), "Card balance must expose a strict typed record");
+assert(cardBalance.includes("parseCardBalance"), "Card balance must use a public allowlist parser");
+assert(cardBalance.includes("cardBalanceRequestIsCurrent"), "Card balance must be isolated by scope, selected card and generation");
 assert(apiClient.includes("internalTransfer:async") && apiClient.includes("Promise<WalletTransferReceipt>"), "Internal transfer must expose only the typed public receipt");
 assert(apiClient.includes("parseWalletTransferReceipt(await request<unknown>"), "Transfer and status responses must pass through the public allowlist parser");
 assert(apiClient.includes("const idempotencyKey=crypto.randomUUID()"), "Each transfer invocation must retain one generated idempotency key");
@@ -58,6 +64,8 @@ assert(!walletData.includes("/v1/wallet/accounts/${encodeURIComponent(accountId)
 assert(walletData.includes("walletTransferStatusRequestIsCurrent"), "Transfer status must be isolated by scope, source account, operation and request generation");
 assert(walletData.includes("WALLET_TRANSFER_STATUS_REFRESH_LIMIT = 5"), "Transfer status refresh must remain bounded");
 assert(app.includes("No unvalidated or cross-account response displayed"), "Wallet UI must fail closed for stale or invalid responses");
+assert(app.includes("No unvalidated or cross-card balance displayed"), "Card balance UI must fail closed for stale or invalid responses");
+assert(app.includes("Card balance unavailable for this session"), "Card balance errors must use one safe public message");
 assert(app.includes("Transaction detail unavailable for this session"), "Wallet detail errors must use one safe public message");
 assert(app.includes("Selected transaction"), "Wallet UI must expose the validated selected transaction detail");
 
