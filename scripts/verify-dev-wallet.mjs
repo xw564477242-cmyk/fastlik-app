@@ -10,6 +10,7 @@ const walletData = readFileSync(join(root, "src/walletData.ts"), "utf8");
 const walletOperations = readFileSync(join(root, "src/walletOperations.ts"), "utf8");
 const virtualCardCreate = readFileSync(join(root, "src/virtualCardCreate.ts"), "utf8");
 const cardReplacement = readFileSync(join(root, "src/cardReplacement.ts"), "utf8");
+const cardRenewal = readFileSync(join(root, "src/cardRenewal.ts"), "utf8");
 const index = readFileSync(join(root, "index.html"), "utf8");
 const vite = readFileSync(join(root, "vite.config.ts"), "utf8");
 const runtimeTemplate = readFileSync(join(root, "runtime-config.template.js"), "utf8");
@@ -112,10 +113,24 @@ assert(app.includes("const idempotencyKey=crypto.randomUUID();try{const created=
 assert(app.includes("Automatic retries are disabled"), "Virtual Card UI must state the no-retry boundary");
 assert(app.includes("No Provider or internal error details displayed"), "Virtual Card errors must remain provider-neutral");
 assert(app.includes("replacementDecision?.allowed&&<form"), "Card replacement UI must be hidden unless capability, environment, scope and selection allow it");
-assert(app.includes("if(!session||!selectedCard||cardReplacementInFlight.current||virtualCardCreateInFlight.current)return"), "Card replacement must synchronously block duplicate submissions");
+assert(app.includes("if(!session||!selectedCard||cardReplacementInFlight.current||virtualCardCreateInFlight.current||cardRenewalInFlight.current)return"), "Card replacement must synchronously block duplicate or conflicting submissions");
 assert(app.includes("const idempotencyKey=crypto.randomUUID();try{const replacement=await walletApi.replaceCard"), "Each Card replacement submission must generate and reuse exactly one idempotency key");
 assert(app.includes("One user submission, one idempotency key. Automatic retries are disabled."), "Card replacement UI must state the no-retry boundary");
 assert(app.includes("Card replacement unavailable for this session · Trace"), "Card replacement errors must remain Provider and internal-detail neutral");
+assert(apiClient.includes("renewCard:async") && apiClient.includes("cardRenewalDecision(card,sessionEnvironment,walletRuntime.environment"), "Card renewal must fail closed against capability, selection, session and runtime environment");
+assert(apiClient.includes("request<unknown>(cardRenewalPath(card.id),'POST',undefined,validateCardRenewalIdempotencyKey(idempotencyKey))"), "Card renewal must make one typed request with the caller-owned idempotency key");
+assert(cardRenewal.includes('sessionEnvironment !== "SANDBOX" && sessionEnvironment !== "TEST"'), "Card renewal must be limited to SANDBOX and TEST");
+assert(cardRenewal.includes("card.capabilities.renew"), "Card renewal must require the Backend renew capability");
+assert(cardRenewal.includes('Object.getPrototypeOf(value) !== Object.prototype'), "Card renewal response must accept only ordinary JSON objects");
+assert(cardRenewal.includes("Object.getOwnPropertyDescriptor"), "Card renewal response must read only own data descriptors");
+assert(cardRenewal.includes("id !== expectedCardId"), "Card renewal must require the same selected Card identity");
+assert(cardRenewal.includes("renewedExpiry <= currentExpiry"), "Card renewal must require expiry year and month to advance strictly");
+assert(cardRenewal.includes("cardRenewalRequestIsCurrent"), "Card renewal must bind scope, selected Card and request generation");
+assert(app.includes("renewalDecision?.allowed&&<form"), "Card renewal UI must be hidden unless capability, environment, scope and selection allow it");
+assert(app.includes("if(!session||!selectedCard||cardRenewalInFlight.current||virtualCardCreateInFlight.current||cardReplacementInFlight.current)return"), "Card renewal must synchronously block duplicate or conflicting submissions");
+assert(app.includes("const idempotencyKey=crypto.randomUUID();try{const renewed=await walletApi.renewCard"), "Each Card renewal submission must generate and reuse exactly one idempotency key");
+assert(app.includes("One user submission, one canonical UUIDv4 idempotency key. Automatic retries are disabled."), "Card renewal UI must state its canonical UUIDv4 and no-retry boundary");
+assert(app.includes("Card renewal unavailable for this session · Trace"), "Card renewal errors must remain Provider and internal-detail neutral");
 
 const excluded = new Set([".git", "node_modules", "dist", "docs"]);
 const secretPatterns = [
