@@ -1,6 +1,6 @@
 import {cardListPath,parseCardPage,parseCardRecord} from './cardList'
 import {cardBalancePath,parseCardBalance} from './cardBalance'
-import {cardTransactionPath,parseCardTransactionPage} from './cardTransactions'
+import {cardTransactionPath,cardTransactionReadAllowed,parseCardTransactionPage} from './cardTransactions'
 import {cardLimitsPath,parseCardLimits} from './cardLimits'
 import {parseWalletAccounts,parseWalletBalance,parseWalletTransactionDetail,parseWalletTransactionPage,parseWalletTransferReceipt,walletOperationPath,walletTransactionDetailPath,walletTransactionPath} from './walletData'
 import type {WalletAccountRecord,WalletBalanceRecord,WalletTransactionPage,WalletTransactionRecord,WalletTransferReceipt} from './walletData'
@@ -89,7 +89,7 @@ export const walletApi={
  card:async(id:string)=>parseCardRecord(await request<unknown>(`/v1/cards/${encodeURIComponent(id)}`)),
  balance:async(id:string)=>parseCardBalance(await request<unknown>(cardBalancePath(id)),id),
  limits:async(id:string)=>parseCardLimits(await request<unknown>(cardLimitsPath(id)),id),
- transactions:async(id:string,cursor?:string)=>parseCardTransactionPage(await request<unknown>(cardTransactionPath(id,cursor))),
+ transactions:async(id:string,sessionEnvironment:FastLinkEnvironment,cursor?:string)=>{if(!cardTransactionReadAllowed(sessionEnvironment,walletRuntime.environment))throw new Error('Card transactions are available only in the matching SANDBOX or TEST session');return parseCardTransactionPage(await request<unknown>(cardTransactionPath(id,cursor)))},
  createVirtualCard:async(input:VirtualCardCreateInput,idempotencyKey:string,sessionEnvironment:FastLinkEnvironment)=>{const decision=virtualCardCreateDecision(sessionEnvironment,walletRuntime.environment);if(!decision.allowed)throw new Error(decision.reason??'Virtual card creation is unavailable');const normalized=parseVirtualCardCreateInput(input);return parseVirtualCardCreateResponse(await request<unknown>(virtualCardCreatePath(),'POST',normalized,validateVirtualCardIdempotencyKey(idempotencyKey)),normalized)},
  replaceCard:async(card:import('./cardList').CardRecord,input:CardReplacementInput,idempotencyKey:string,sessionEnvironment:FastLinkEnvironment,scopeKey:string,currentScopeKey:string|null,currentCardId:string|null)=>{const decision=cardReplacementDecision(card,sessionEnvironment,walletRuntime.environment,scopeKey,currentScopeKey,currentCardId);if(!decision.allowed)throw new Error(decision.reason??'Card replacement is unavailable');const normalized=parseCardReplacementInput(input);return parseCardReplacementResponse(await request<unknown>(cardReplacementPath(card.id),'POST',normalized,validateCardReplacementIdempotencyKey(idempotencyKey)),card.id)},
  renewCard:async(card:import('./cardList').CardRecord,idempotencyKey:string,sessionEnvironment:FastLinkEnvironment,scopeKey:string,currentScopeKey:string|null,currentCardId:string|null)=>{const decision=cardRenewalDecision(card,sessionEnvironment,walletRuntime.environment,scopeKey,currentScopeKey,currentCardId);if(!decision.allowed)throw new Error(decision.reason??'Card renewal is unavailable');return parseCardRenewalResponse(await request<unknown>(cardRenewalPath(card.id),'POST',undefined,validateCardRenewalIdempotencyKey(idempotencyKey)),card)},
