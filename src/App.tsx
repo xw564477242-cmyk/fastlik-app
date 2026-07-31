@@ -12,7 +12,7 @@ import {mergeWalletOperationPages,walletOperationActivityRequestIsCurrent,wallet
 import {parseVirtualCardCreateInput,virtualCardCreateDecision,virtualCardCreateRequestIsCurrent} from './virtualCardCreate'
 import type {VirtualCardCreateInput} from './virtualCardCreate'
 import {CARD_REPLACEMENT_REASONS,beginCardReplacement,captureCardReplacementVersion,cardReplacementDecision,cardReplacementRequestIsCurrent,cardReplacementVersionMatches,createCardReplacementCommit,createCardReplacementRequestIdentity,parseCardReplacementInput,settleCardReplacement} from './cardReplacement'
-import {cardRenewalDecision,cardRenewalRequestIsCurrent} from './cardRenewal'
+import {beginCardRenewal,captureCardRenewalVersion,cardRenewalDecision,cardRenewalRequestIsCurrent,cardRenewalVersionMatches,createCardRenewalCommit,createCardRenewalRequestIdentity,settleCardRenewal} from './cardRenewal'
 import {captureWalletAccountsVersion,walletBalanceSummaryRequestIsCurrent} from './walletBalanceSummary'
 import {beginWalletTransferSubmit,createWalletTransferRequestIdentity,normalizeWalletTransferInput,settleWalletTransferSubmit,walletTransferRequestIsCurrent,walletTransferSessionScope} from './walletTransfer'
 import {WALLET_TRANSACTION_STATUSES,WALLET_TRANSACTION_TYPES,createWalletTransactionDetailRequestIdentity,createWalletTransactionHistoryRequestIdentity,normalizeWalletTransactionFilterSelection,walletTransactionDetailRefreshAllowed,walletTransactionDetailRequestIsCurrent,walletTransactionFilterKey,walletTransactionFilterRequestAllowed,walletTransactionFiltersForSelectedAsset,walletTransactionHistoryRequestIsCurrent,walletTransactionRequestWasAborted,type WalletTransactionFilterSelection} from './walletTransactions'
@@ -114,6 +114,7 @@ export default function App(){
  const cardReplacementReasonRef=useRef<CardReplacementReason>('LOST')
  const cardRenewalRequestSequence=useRef(0)
  const cardRenewalTarget=useRef<string|null>(null)
+ const cardRenewalSubmitGate=useRef<{activeRequestId:number|null}>({activeRequestId:null})
  const cardRenewalInFlight=useRef(false)
  const selectedCardRef=useRef<CardRecord|null>(null)
  const cardsRef=useRef<CardRecord[]>([])
@@ -174,12 +175,12 @@ export default function App(){
  const clearCardTransactions=()=>{setCardTransactions([]);setCardTransactionNextCursor(null);setCardTransactionLoadingMore(false);setCardTransactionError('')}
  const clearVirtualCardCreate=()=>{virtualCardCreateRequestSequence.current+=1;virtualCardCreateInFlight.current=false;setVirtualCardCreating(false);setVirtualCardCreateError('');setVirtualCardCurrency('USD');setVirtualCardAlias('')}
  const clearCardReplacement=()=>{cardReplacementRequestSequence.current+=1;cardReplacementTarget.current=null;cardReplacementSubmitGate.current.activeRequestId=null;cardReplacementInFlight.current=false;cardReplacementReasonRef.current='LOST';setCardReplacing(false);setCardReplacementError('');setCardReplacementReasonState('LOST')}
- const clearCardRenewal=()=>{cardRenewalRequestSequence.current+=1;cardRenewalTarget.current=null;cardRenewalInFlight.current=false;setCardRenewing(false);setCardRenewalError('')}
+ const clearCardRenewal=()=>{cardRenewalRequestSequence.current+=1;cardRenewalTarget.current=null;cardRenewalSubmitGate.current.activeRequestId=null;cardRenewalInFlight.current=false;setCardRenewing(false);setCardRenewalError('')}
  const replaceAccounts=(rows:WalletAccountRecord[])=>{accountsRef.current=rows;setAccounts(rows)}
  const replaceSelectedAccount=(account:WalletAccountRecord|null)=>{selectedAccountRef.current=account;setSelectedAccount(account)}
  const clearWalletBalanceSummary=()=>{walletBalanceSummaryRequestSequence.current+=1;setWalletBalanceSummary(null);setWalletBalanceSummaryLoading(false);setWalletBalanceSummaryError('')}
  const updateCardReplacementReason=(reason:CardReplacementReason)=>{if(cardReplacementInFlight.current&&cardReplacementReasonRef.current!==reason)clearCardReplacement();cardReplacementReasonRef.current=reason;setCardReplacementReasonState(reason)}
- const setSelectedCard=(card:CardRecord|null)=>{const previous=selectedCardRef.current;const versionChanged=Boolean(previous&&!cardReplacementVersionMatches(captureCardReplacementVersion(previous),card));if(cardReplacementInFlight.current&&versionChanged)clearCardReplacement();if(cardRenewalInFlight.current&&previous&&card&&(previous.id!==card.id||previous.expiryMonth!==card.expiryMonth||previous.expiryYear!==card.expiryYear))clearCardRenewal();if(cardLimitsUpdateInFlight.current&&versionChanged)clearCardLimitsUpdate();if(cardStatusInFlight.current&&versionChanged)clearCardStatusAction();selectedCardRef.current=card;setSelectedCardState(card)}
+ const setSelectedCard=(card:CardRecord|null)=>{const previous=selectedCardRef.current;const versionChanged=Boolean(previous&&!cardReplacementVersionMatches(captureCardReplacementVersion(previous),card));if(cardReplacementInFlight.current&&versionChanged)clearCardReplacement();if(cardRenewalInFlight.current&&previous&&!cardRenewalVersionMatches(captureCardRenewalVersion(previous),card))clearCardRenewal();if(cardLimitsUpdateInFlight.current&&versionChanged)clearCardLimitsUpdate();if(cardStatusInFlight.current&&versionChanged)clearCardStatusAction();selectedCardRef.current=card;setSelectedCardState(card)}
  const invalidateWalletDetail=()=>{abortWalletHistoryRequest();abortWalletTransactionDetailRequest();walletAccountRequestSequence.current+=1;walletAccountTarget.current=null;walletHistoryRequestSequence.current+=1;walletHistoryAssetTarget.current=null;walletHistoryFilterTarget.current=null;walletHistoryCursorTarget.current=null;walletHistoryInFlight.current=false;walletTransactionDetailRequestSequence.current+=1;walletTransactionDetailAssetTarget.current=null;walletTransactionDetailTarget.current=null;walletTransferRequestSequence.current+=1;walletTransferTarget.current=null;walletTransferSubmitGate.current.activeRequestId=null;walletTransferStatusRequestSequence.current+=1;walletTransferStatusTarget.current=null;walletTransferStatusInFlight.current=false;walletBalanceSummaryRequestSequence.current+=1}
  const replaceSelectedWalletTransaction=(transaction:WalletTransactionRecord|null)=>{selectedWalletTransactionRef.current=transaction;setSelectedWalletTransaction(transaction)}
  const resetWalletTransactionDetailRequest=()=>{abortWalletTransactionDetailRequest();walletTransactionDetailRequestSequence.current+=1;walletTransactionDetailAssetTarget.current=null;walletTransactionDetailTarget.current=null;setWalletTransactionDetail(null);setWalletTransactionDetailLoading(false);setWalletTransactionDetailError('')}
@@ -206,7 +207,7 @@ export default function App(){
  const selectWalletTransaction=async(transaction:WalletTransactionRecord)=>{replaceSelectedWalletTransaction(transaction);await loadWalletTransactionDetail(transaction)}
  const refreshSelectedWalletTransaction=()=>{const transaction=selectedWalletTransactionRef.current;if(transaction)void loadWalletTransactionDetail(transaction)}
  useEffect(()=>{cardsRef.current=cards},[cards])
- useEffect(()=>{walletRequestMounted.current=true;return()=>{walletRequestMounted.current=false;walletHistoryRequestSequence.current+=1;walletTransactionDetailRequestSequence.current+=1;cardLimitsUpdateRequestSequence.current+=1;cardLimitsUpdateSubmitGate.current.activeRequestId=null;cardLimitsUpdateInFlight.current=false;cardActionRequestSequence.current+=1;cardActionTarget.current=null;cardStatusSubmitGate.current.activeRequestId=null;cardStatusInFlight.current=false;cardReplacementRequestSequence.current+=1;cardReplacementTarget.current=null;cardReplacementSubmitGate.current.activeRequestId=null;cardReplacementInFlight.current=false;abortWalletHistoryRequest();abortWalletTransactionDetailRequest()}},[])
+ useEffect(()=>{walletRequestMounted.current=true;return()=>{walletRequestMounted.current=false;walletHistoryRequestSequence.current+=1;walletTransactionDetailRequestSequence.current+=1;cardLimitsUpdateRequestSequence.current+=1;cardLimitsUpdateSubmitGate.current.activeRequestId=null;cardLimitsUpdateInFlight.current=false;cardActionRequestSequence.current+=1;cardActionTarget.current=null;cardStatusSubmitGate.current.activeRequestId=null;cardStatusInFlight.current=false;cardReplacementRequestSequence.current+=1;cardReplacementTarget.current=null;cardReplacementSubmitGate.current.activeRequestId=null;cardReplacementInFlight.current=false;cardRenewalRequestSequence.current+=1;cardRenewalTarget.current=null;cardRenewalSubmitGate.current.activeRequestId=null;cardRenewalInFlight.current=false;abortWalletHistoryRequest();abortWalletTransactionDetailRequest()}},[])
  useEffect(()=>{void (async()=>{try{await acceptSession(await walletApi.session())}catch(value){clear();if(!(value instanceof WalletApiError&&value.status===401))setError(describe(value))}finally{if(walletRequestMounted.current)setBusy(false)}})()},[])
  useEffect(()=>{if(!session)return;const expiresAt=typeof session.expiresAt==='string'?Date.parse(session.expiresAt):Number.NaN;const remaining=expiresAt-Date.now();if(!Number.isFinite(remaining)||remaining<=0){clear();return}const timeout=window.setTimeout(()=>clear(),Math.min(remaining,2_147_483_647));return()=>window.clearTimeout(timeout)},[session])
  const authenticate=async(event:FormEvent)=>{event.preventDefault();setBusy(true);setError('');clear();try{const credentials:WalletCredentials={tenantId:tenantId.trim(),email:email.trim(),password};const current=mode==='login'?await walletApi.login(credentials):await walletApi.register(credentials);await acceptSession(current);setPassword('')}catch(value){clear();setError(describe(value))}finally{setBusy(false)}}
@@ -259,7 +260,48 @@ export default function App(){
    if(currentRequest&&settled){cardReplacementInFlight.current=false;cardReplacementTarget.current=null;setCardReplacing(false)}
   }
  }
- const renewSelectedCard=async(event:FormEvent)=>{event.preventDefault();if(!session||!selectedCard||cardRenewalInFlight.current||virtualCardCreateInFlight.current||cardReplacementInFlight.current)return;const scope=sessionScope(session);const card=selectedCard;const decision=cardRenewalDecision(card,session.environment,walletRuntime.environment,scope,cardScope.current,cardDetailTarget.current);if(!decision.allowed||!Number.isInteger(card.expiryMonth)||!Number.isInteger(card.expiryYear)){setCardRenewalError('Card renewal unavailable for this session');return}const request={requestId:++cardRenewalRequestSequence.current,scopeKey:scope,cardId:card.id,expiryMonth:card.expiryMonth as number,expiryYear:card.expiryYear as number};cardRenewalTarget.current=card.id;const isCurrent=()=>cardRenewalRequestIsCurrent(request,cardRenewalRequestSequence.current,cardScope.current,selectedCardRef.current);cardRenewalInFlight.current=true;setCardRenewing(true);setCardRenewalError('');const idempotencyKey=crypto.randomUUID();try{const renewed=await walletApi.renewCard(card,idempotencyKey,session.environment,scope,cardScope.current,cardDetailTarget.current);if(!isCurrent())return;const page=await walletApi.cards();if(!isCurrent())return;cardRenewalInFlight.current=false;setCardRenewing(false);cardRenewalTarget.current=null;setBusy(true);setCards(mergeCardPages(page.cards,[renewed]));setCardNextCursor(page.nextCursor);setCardListError('');setSelectedCard(renewed);await loadCard(renewed,scope,detailCallbacks)}catch(value){if(isCurrent())setCardRenewalError(describeCardRenewal(value))}finally{if(isCurrent()){cardRenewalInFlight.current=false;setCardRenewing(false);cardRenewalTarget.current=null}}}
+ const renewSelectedCard=async(event:FormEvent)=>{
+  event.preventDefault()
+  const activeSession=session
+  const card=selectedCardRef.current
+  if(!activeSession||!card||cardRenewalInFlight.current||virtualCardCreateInFlight.current||cardReplacementInFlight.current||cardLimitsUpdateInFlight.current||cardStatusInFlight.current)return
+  const decision=cardRenewalDecision(card,activeSession,walletRuntime.environment,cardScope.current,cardDetailTarget.current)
+  if(!decision.allowed||!decision.scopeKey){setCardRenewalError('Card renewal unavailable for this session');return}
+  const requestId=++cardRenewalRequestSequence.current
+  if(!beginCardRenewal(cardRenewalSubmitGate.current,requestId))return
+  let request
+  try{request=createCardRenewalRequestIdentity(requestId,decision.scopeKey,card,crypto.randomUUID())}
+  catch{settleCardRenewal(cardRenewalSubmitGate.current,requestId);setCardRenewalError('Secure Card renewal is unavailable');return}
+  cardRenewalTarget.current=card.id
+  const isCurrent=()=>Boolean(
+   walletRequestMounted.current&&
+   cardRenewalSubmitGate.current.activeRequestId===requestId&&
+   cardRenewalTarget.current===card.id&&
+   cardRenewalRequestIsCurrent(request,cardRenewalRequestSequence.current,activeSession,walletRuntime.environment,cardScope.current,selectedCardRef.current)
+  )
+  cardRenewalInFlight.current=true
+  setCardRenewing(true)
+  setCardRenewalError('')
+  try{
+   const renewed=await walletApi.renewCard(activeSession,card,request.idempotencyKey,cardScope.current,cardDetailTarget.current)
+   if(!isCurrent())return
+   const commit=createCardRenewalCommit(cardsRef.current,selectedCardRef.current,request.oldCardVersion,renewed)
+   settleCardRenewal(cardRenewalSubmitGate.current,requestId)
+   cardRenewalInFlight.current=false
+   cardRenewalTarget.current=null
+   setCardRenewing(false)
+   setCards(commit.cards)
+   setSelectedCard(commit.selectedCard)
+   setCardListError('')
+   setBusy(true)
+   await loadCard(commit.selectedCard,request.scopeKey,detailCallbacks)
+  }catch(value){if(isCurrent())setCardRenewalError(describeCardRenewal(value))}
+  finally{
+   const currentRequest=isCurrent()
+   const settled=settleCardRenewal(cardRenewalSubmitGate.current,requestId)
+   if(currentRequest&&settled){cardRenewalInFlight.current=false;cardRenewalTarget.current=null;setCardRenewing(false)}
+  }
+ }
  const updateCardLimitsDraftValue=(field:CardLimitUpdateField,value:string)=>{if(cardLimitsUpdateDraftRef.current[field]===value)return;if(cardLimitsUpdateInFlight.current)clearCardLimitsUpdate();const next={...cardLimitsUpdateDraftRef.current,[field]:value};cardLimitsUpdateDraftRef.current=next;setCardLimitsUpdateDraftState(next);setCardLimitsUpdateError('')}
  const submitSelectedCardLimits=async(event:FormEvent)=>{
   event.preventDefault()
@@ -320,7 +362,7 @@ export default function App(){
  const reloadWallet=async()=>{if(!session||!selectedAccount||transferBusy)return;const scope=sessionScope(session);await Promise.all([loadWallet(selectedAccount,scope,session),loadWalletBalanceSummary(accountsRef.current,selectedAccount,session.environment,scope)])}
  const virtualCardDecision=virtualCardCreateDecision(session?.environment??null,walletRuntime.environment)
  const replacementDecision=selectedCard?cardReplacementDecision(selectedCard,session,walletRuntime.environment,cardScope.current,cardDetailTarget.current):null
- const renewalDecision=selectedCard?cardRenewalDecision(selectedCard,session?.environment??null,walletRuntime.environment,session?sessionScope(session):null,cardScope.current,cardDetailTarget.current):null
+ const renewalDecision=selectedCard?cardRenewalDecision(selectedCard,session,walletRuntime.environment,cardScope.current,cardDetailTarget.current):null
  const limitsUpdateDecision=selectedCard?cardLimitsUpdateDecision(selectedCard,cardLimits,session?.environment??null,walletRuntime.environment,session?walletTransferSessionScope(session,walletRuntime.environment):null,cardScope.current,cardDetailTarget.current):null
  const toggleDecision=selectedCard?cardStatusDecision(selectedCard,session,walletRuntime.environment,cardScope.current,cardDetailTarget.current):null
  const toggle=async()=>{
@@ -406,7 +448,7 @@ export default function App(){
      <p className="card-action-note">Manual SANDBOX/TEST action · one bodyless POST per click · no automatic retries.</p>
      {toggleDecision?.reason&&<p className="card-action-note">{toggleDecision.reason}</p>}
      {replacementDecision?.allowed&&<form className="transfer-form" onSubmit={replaceSelectedCard}><h3><RefreshCw/> Replace selected Card · {session?.environment}</h3><select value={cardReplacementReason} onChange={event=>updateCardReplacementReason(event.target.value as CardReplacementReason)} disabled={cardReplacing||virtualCardCreating||cardRenewing}>{CARD_REPLACEMENT_REASONS.map(reason=><option key={reason} value={reason}>{reason}</option>)}</select><button disabled={busy||cardReplacing||virtualCardCreating||cardRenewing}>{cardReplacing?'Replacing once…':'Replace selected Card'}</button>{cardReplacementError&&<div className="inline-error">{cardReplacementError} · No Provider or internal error details displayed.</div>}<p className="card-action-note">Manual SANDBOX/TEST only · one canonical UUIDv4 Idempotency-Key · at most one POST · no automatic retries.</p></form>}
-     {renewalDecision?.allowed&&<form className="transfer-form" onSubmit={renewSelectedCard}><h3><RefreshCw/> Renew selected Card · {session?.environment}</h3><button disabled={busy||cardRenewing||virtualCardCreating||cardReplacing}>{cardRenewing?'Renewing once…':'Renew selected Card'}</button>{cardRenewalError&&<div className="inline-error">{cardRenewalError} · No Provider or internal error details displayed.</div>}<p className="card-action-note">One user submission, one canonical UUIDv4 idempotency key. Automatic retries are disabled.</p></form>}
+     {renewalDecision?.allowed&&<form className="transfer-form" onSubmit={renewSelectedCard}><h3><RefreshCw/> Renew selected Card · {session?.environment}</h3><button disabled={busy||cardRenewing||virtualCardCreating||cardReplacing}>{cardRenewing?'Renewing once…':'Renew selected Card'}</button>{cardRenewalError&&<div className="inline-error">{cardRenewalError} · No Provider or internal error details displayed.</div>}<p className="card-action-note">Manual SANDBOX/TEST only · one canonical UUIDv4 Idempotency-Key · at most one bodyless POST · no automatic retries.</p></form>}
      <div className="record-list"><h3>Card transactions</h3>{cardTransactionError&&<div className="inline-error">{cardTransactionError} · No unvalidated transaction data displayed.</div>}{cardTransactions.length===0&&!cardTransactionError&&<p>No card transactions returned.</p>}{cardTransactions.map(transaction=><p key={transaction.id}><span><b>{transaction.merchantName??'Card transaction'}</b><small>{transaction.status} · {new Date(transaction.occurredAt).toLocaleString()} {transaction.merchantCategory?`· MCC ${transaction.merchantCategory}`:''}</small></span><b>{transaction.amountMinor} minor {transaction.currency}</b></p>)}{cardTransactionNextCursor&&<button className="load-more" onClick={()=>void loadMoreCardTransactions()} disabled={busy||cardTransactionLoadingMore||virtualCardCreating||cardReplacing||cardRenewing}>{cardTransactionLoadingMore?'Loading more transactions…':'Load more transactions'}</button>}</div>
     </>}
    </section>
