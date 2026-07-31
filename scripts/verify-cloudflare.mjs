@@ -16,6 +16,7 @@ const cardBalance = read("src/cardBalance.ts");
 const cardLimits = read("src/cardLimits.ts");
 const walletData = read("src/walletData.ts");
 const walletOperations = read("src/walletOperations.ts");
+const virtualCardCreate = read("src/virtualCardCreate.ts");
 const index = read("index.html");
 
 assert(index.includes('src="./runtime-config.js"'), "runtime config must load before the Wallet app");
@@ -28,6 +29,9 @@ assert(apiClient.includes("walletTransactionPath(selectedAsset,cursor)"), "Walle
 assert(apiClient.includes("walletTransactionDetail:async"), "Wallet must use the public selected transaction detail endpoint");
 assert(apiClient.includes("walletOperations:async"), "Wallet must use the public all-account operation activity endpoint");
 assert(apiClient.includes("walletOperationDetail:async"), "Wallet must use the public selected operation detail endpoint");
+assert(apiClient.includes("createVirtualCard:async"), "Wallet must use the typed public Virtual Card creation endpoint");
+assert(virtualCardCreate.includes('sessionEnvironment !== "SANDBOX" && sessionEnvironment !== "TEST"'), "Virtual Card creation must remain non-production only");
+assert(virtualCardCreate.includes("virtualCardCreateRequestIsCurrent"), "Virtual Card creation must remain session-scope and generation isolated");
 assert(walletOperations.includes("/v1/wallet/operations?"), "Wallet activity must use the public bounded operation contract");
 assert(walletOperations.includes("walletOperationActivityRequestIsCurrent"), "Wallet activity must remain scope, cursor and generation isolated");
 assert(walletOperations.includes("parseWalletOperationDetail"), "Wallet operation detail must bind its immutable public summary fields");
@@ -52,6 +56,8 @@ assert(app.includes("Transaction detail unavailable for this session"), "Wallet 
 assert(app.includes("Selected transaction"), "Wallet UI must expose the validated selected transaction detail");
 assert(app.includes("All-account Wallet activity · read only"), "Wallet UI must expose read-only all-account operation activity");
 assert(app.includes("Selected operation · read only"), "Wallet UI must expose read-only selected operation detail");
+assert(app.includes("Create virtual card"), "Wallet UI must expose the gated non-production Virtual Card form");
+assert(app.includes("Automatic retries are disabled"), "Wallet UI must retain the one-submit no-retry boundary");
 assert(app.includes("No unvalidated or cross-card balance displayed"), "Card balance UI must fail closed for stale or invalid responses");
 assert(app.includes("No unvalidated or cross-card limits displayed"), "Card limits UI must fail closed for stale or invalid responses");
 assert(app.includes("Card limits · read only"), "Card limits UI must remain read only");
