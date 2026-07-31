@@ -75,6 +75,15 @@ test("accepts empty pages and rejects malformed records or cursors", () => {
   );
 });
 
+test("fails closed when Backend returns more than the requested 25 records", () => {
+  const oversizedPage = {
+    transactions: Array.from({ length: 26 }, (_, index) => rawTransaction(`transaction-${index}`)),
+    nextCursor: "unexpected-cursor",
+  };
+
+  assert.throws(() => parseCardTransactionPage(oversizedPage), /exceeds the consumer limit/);
+});
+
 test("appends transaction pages without duplicate ids", () => {
   const first = parseCardTransaction(rawTransaction("transaction-1"));
   const updated = parseCardTransaction({ ...rawTransaction("transaction-1"), status: "REFUNDED" });

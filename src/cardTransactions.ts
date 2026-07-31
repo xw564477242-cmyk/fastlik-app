@@ -68,6 +68,8 @@ export function parseCardTransaction(value: unknown): CardTransactionRecord {
 export function parseCardTransactionPage(value: unknown): CardTransactionPage {
   if (!isObject(value) || !Array.isArray(value.transactions))
     throw new Error("Invalid card transaction page");
+  if (value.transactions.length > CARD_TRANSACTION_PAGE_SIZE)
+    throw new Error("Card transaction page exceeds the consumer limit");
   if (
     value.nextCursor !== null &&
     (typeof value.nextCursor !== "string" || value.nextCursor.length === 0 || value.nextCursor.length > 2048)
