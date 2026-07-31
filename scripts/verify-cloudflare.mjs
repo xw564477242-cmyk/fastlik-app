@@ -13,6 +13,7 @@ const devConfig = read("wrangler.dev.jsonc");
 const apiClient = read("src/apiClient.ts");
 const app = read("src/App.tsx");
 const cardBalance = read("src/cardBalance.ts");
+const cardLimits = read("src/cardLimits.ts");
 const walletData = read("src/walletData.ts");
 const index = read("index.html");
 
@@ -26,6 +27,8 @@ assert(apiClient.includes("walletTransactionPath(selectedAsset,cursor)"), "Walle
 assert(apiClient.includes("walletTransactionDetail:async"), "Wallet must use the public selected transaction detail endpoint");
 assert(apiClient.includes("parseCardBalance(await request<unknown>(cardBalancePath(id)),id)"), "Card balance must use the strict public response parser");
 assert(cardBalance.includes("cardBalanceRequestIsCurrent"), "Card balance must remain scope, selected-card and generation isolated");
+assert(apiClient.includes("parseCardLimits(await request<unknown>(cardLimitsPath(id)),id)"), "Card limits must use the strict public response parser");
+assert(cardLimits.includes("cardLimitsRequestIsCurrent"), "Card limits must remain scope, selected-card and generation isolated");
 assert(walletData.includes("WALLET_TRANSACTION_PAGE_SIZE = 25"), "Wallet transaction pages must remain consumer-bounded");
 assert(walletData.includes("/v1/wallet/transactions?"), "Wallet history must use the public customer transaction contract");
 assert(walletData.includes("walletTransactionDetailPath"), "Wallet detail must use a validated public transaction path");
@@ -41,6 +44,8 @@ assert(app.includes("Customer Wallet history"), "Wallet UI must expose public cu
 assert(app.includes("Transaction detail unavailable for this session"), "Wallet detail errors must remain safely normalized");
 assert(app.includes("Selected transaction"), "Wallet UI must expose the validated selected transaction detail");
 assert(app.includes("No unvalidated or cross-card balance displayed"), "Card balance UI must fail closed for stale or invalid responses");
+assert(app.includes("No unvalidated or cross-card limits displayed"), "Card limits UI must fail closed for stale or invalid responses");
+assert(app.includes("Card limits · read only"), "Card limits UI must remain read only");
 assert(app.includes("Card transactions"), "Wallet UI must expose card transaction history");
 assert(!app.includes("mock") && !app.includes("Mock"), "Wallet UI must not contain a Mock fallback");
 assert(worker.includes('url.pathname === "/runtime-config.js"'), "Worker must provide runtime config");
