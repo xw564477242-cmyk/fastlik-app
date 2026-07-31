@@ -2,6 +2,8 @@ import {cardListPath,parseCardPage,parseCardRecord} from './cardList'
 import {cardBalancePath,parseCardBalance} from './cardBalance'
 import {cardTransactionPath,parseCardTransactionPage} from './cardTransactions'
 import {cardLimitsPath,parseCardLimits} from './cardLimits'
+import {submitCardLimitsUpdate} from './cardLimitsUpdate'
+import type {CardLimitsUpdateInput,CardLimitsUpdateTransportRequest} from './cardLimitsUpdate'
 import {parseWalletBalance} from './walletData'
 import type {WalletAccountRecord,WalletBalanceRecord,WalletTransferReceipt} from './walletData'
 import {parseWalletOperationDetail,parseWalletOperationPage,walletOperationActivityPath,walletOperationDetailPath} from './walletOperations'
@@ -23,6 +25,7 @@ export type {WalletTransactionHistoryState as WalletTransactionPage,WalletTransa
 export type {WalletOperationPage,WalletOperationRecord} from './walletOperations'
 export type {CardBalanceRecord} from './cardBalance'
 export type {CardLimitsRecord} from './cardLimits'
+export type {CardLimitsUpdateInput} from './cardLimitsUpdate'
 export type {VirtualCardCreateInput} from './virtualCardCreate'
 export type {CardReplacementInput,CardReplacementReason} from './cardReplacement'
 export type {WalletBalanceSummary} from './walletBalanceSummary'
@@ -82,6 +85,7 @@ async function request<T>(path:string,method='GET',body?:unknown,idempotencyKey?
 
 const walletTransferTransport=({path,method,body,idempotencyKey}:WalletTransferTransportRequest)=>request<string>(path,method,body,idempotencyKey,'text')
 const walletTransactionTransport=({path,method,signal}:WalletTransactionTransportRequest)=>request<string>(path,method,undefined,undefined,'text',signal)
+const cardLimitsUpdateTransport=({path,method,body,idempotencyKey}:CardLimitsUpdateTransportRequest)=>request<unknown>(path,method,body,idempotencyKey)
 
 export const walletApi={
  register:(credentials:WalletCredentials)=>request<WalletSession>('/v1/auth/register','POST',credentials),
@@ -102,6 +106,7 @@ export const walletApi={
  card:async(id:string)=>parseCardRecord(await request<unknown>(`/v1/cards/${encodeURIComponent(id)}`)),
  balance:async(id:string)=>parseCardBalance(await request<unknown>(cardBalancePath(id)),id),
  limits:async(id:string)=>parseCardLimits(await request<unknown>(cardLimitsPath(id)),id),
+ updateCardLimits:async(card:import('./cardList').CardRecord,current:import('./cardLimits').CardLimitsRecord,input:CardLimitsUpdateInput,idempotencyKey:string,sessionEnvironment:FastLinkEnvironment,scopeKey:string,currentScopeKey:string|null,currentCardId:string|null)=>submitCardLimitsUpdate(cardLimitsUpdateTransport,card,current,input,idempotencyKey,sessionEnvironment,walletRuntime.environment,scopeKey,currentScopeKey,currentCardId),
  transactions:async(id:string,cursor?:string)=>parseCardTransactionPage(await request<unknown>(cardTransactionPath(id,cursor))),
  createVirtualCard:async(input:VirtualCardCreateInput,idempotencyKey:string,sessionEnvironment:FastLinkEnvironment)=>{const decision=virtualCardCreateDecision(sessionEnvironment,walletRuntime.environment);if(!decision.allowed)throw new Error(decision.reason??'Virtual card creation is unavailable');const normalized=parseVirtualCardCreateInput(input);return parseVirtualCardCreateResponse(await request<unknown>(virtualCardCreatePath(),'POST',normalized,validateVirtualCardIdempotencyKey(idempotencyKey)),normalized)},
  replaceCard:async(card:import('./cardList').CardRecord,input:CardReplacementInput,idempotencyKey:string,sessionEnvironment:FastLinkEnvironment,scopeKey:string,currentScopeKey:string|null,currentCardId:string|null)=>{const decision=cardReplacementDecision(card,sessionEnvironment,walletRuntime.environment,scopeKey,currentScopeKey,currentCardId);if(!decision.allowed)throw new Error(decision.reason??'Card replacement is unavailable');const normalized=parseCardReplacementInput(input);return parseCardReplacementResponse(await request<unknown>(cardReplacementPath(card.id),'POST',normalized,validateCardReplacementIdempotencyKey(idempotencyKey)),card.id)},

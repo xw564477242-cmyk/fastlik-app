@@ -14,6 +14,7 @@ const apiClient = read("src/apiClient.ts");
 const app = read("src/App.tsx");
 const cardBalance = read("src/cardBalance.ts");
 const cardLimits = read("src/cardLimits.ts");
+const cardLimitsUpdate = read("src/cardLimitsUpdate.ts");
 const walletData = read("src/walletData.ts");
 const walletTransfer = read("src/walletTransfer.ts");
 const walletTransactions = read("src/walletTransactions.ts");
@@ -44,6 +45,10 @@ assert(apiClient.includes("parseCardBalance(await request<unknown>(cardBalancePa
 assert(cardBalance.includes("cardBalanceRequestIsCurrent"), "Card balance must remain scope, selected-card and generation isolated");
 assert(apiClient.includes("parseCardLimits(await request<unknown>(cardLimitsPath(id)),id)"), "Card limits must use the strict public response parser");
 assert(cardLimits.includes("cardLimitsRequestIsCurrent"), "Card limits must remain scope, selected-card and generation isolated");
+assert(cardLimitsUpdate.includes('sessionEnvironment !== "SANDBOX" && sessionEnvironment !== "TEST"'), "Card limits updates must remain SANDBOX/TEST only");
+assert(cardLimitsUpdate.includes("CARD_LIMIT_UPDATE_MAX_MINOR = 9_000_000_000_000") && cardLimitsUpdate.includes("Number.isSafeInteger"), "Card limits updates must retain the Backend numeric contract");
+assert(cardLimitsUpdate.includes("beginCardLimitsUpdate") && cardLimitsUpdate.includes("cardLimitsUpdateRequestIsCurrent"), "Card limits updates must prevent duplicates and reject stale completion writes");
+assert(apiClient.includes("submitCardLimitsUpdate(cardLimitsUpdateTransport"), "Card limits updates must use the typed public POST contract");
 assert(walletTransactions.includes("WALLET_TRANSACTION_PAGE_SIZE = 25"), "Wallet transaction pages must remain consumer-bounded");
 assert(walletTransactions.includes('WALLET_TRANSACTION_PATH = "/v1/wallet/transactions"'), "Wallet history must use the public customer transaction contract");
 assert(walletTransactions.includes("walletTransactionDetailPath"), "Wallet detail must use a validated public transaction path");
@@ -71,7 +76,8 @@ assert(app.includes("Create virtual card"), "Wallet UI must expose the gated non
 assert(app.includes("Automatic retries are disabled"), "Wallet UI must retain the one-submit no-retry boundary");
 assert(app.includes("No unvalidated or cross-card balance displayed"), "Card balance UI must fail closed for stale or invalid responses");
 assert(app.includes("No unvalidated or cross-card limits displayed"), "Card limits UI must fail closed for stale or invalid responses");
-assert(app.includes("Card limits · read only"), "Card limits UI must remain read only");
+assert(app.includes("Card limits · public contract") && app.includes("Apply limits once"), "Card limits UI must expose the gated public update contract");
+assert(app.includes("one new UUIDv4 Idempotency-Key, at most one POST, no automatic retries"), "Card limits UI must state the one-submit no-retry boundary");
 assert(app.includes("Card transactions"), "Wallet UI must expose card transaction history");
 assert(!app.includes("mock") && !app.includes("Mock"), "Wallet UI must not contain a Mock fallback");
 assert(worker.includes('url.pathname === "/runtime-config.js"'), "Worker must provide runtime config");
