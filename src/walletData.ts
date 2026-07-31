@@ -34,18 +34,27 @@ export type WalletTransactionRecord = {
   status: "PENDING" | "COMPLETED" | "FAILED" | "REVERSED";
   assetCode: string;
   amount: string;
+  direction: "OUTGOING" | "INCOMING";
   createdAt: string;
+  updatedAt: string;
 };
 
 export type WalletTransactionPage = {
   items: WalletTransactionRecord[];
-  pagination: { total: number; limit: number; offset: number; hasMore: boolean };
+  nextCursor: string | null;
 };
 
 export type WalletRequestIdentity = {
   requestId: number;
   scopeKey: string | null;
   accountId: string;
+};
+
+export type WalletHistoryRequestIdentity = {
+  requestId: number;
+  scopeKey: string | null;
+  assetCode: string;
+  cursor: string | null;
 };
 
 export type WalletTransferReceipt = {
@@ -79,6 +88,7 @@ const transactionStatuses: WalletTransactionRecord["status"][] = [
   "FAILED",
   "REVERSED",
 ];
+const transactionDirections: WalletTransactionRecord["direction"][] = ["OUTGOING", "INCOMING"];
 const transferStatuses: WalletTransferReceipt["status"][] = [
   "PROCESSING",
   "PENDING_SETTLEMENT",
@@ -112,6 +122,12 @@ const transferOperationId = (value: unknown): string => {
   return value;
 };
 
+const walletTransactionId = (value: unknown): string => {
+  if (typeof value !== "string" || !/^[A-Za-z0-9._:-]{2,128}$/.test(value))
+    throw new Error("Invalid Wallet transaction id");
+  return value;
+};
+
 const assetCode = (value: unknown): string => {
   if (typeof value !== "string" || !/^[A-Z0-9]{2,12}$/.test(value))
     throw new Error("Invalid Wallet asset code");
@@ -121,6 +137,19 @@ const assetCode = (value: unknown): string => {
 const decimal = (value: unknown, name: string): string => {
   if (typeof value !== "string" || !/^-?\d+(?:\.\d{1,18})?$/.test(value))
     throw new Error(`Invalid Wallet ${name}`);
+  return value;
+};
+
+const unsignedDecimal = (value: unknown, name: string): string => {
+  if (typeof value !== "string" || !/^\d+(?:\.\d{1,18})?$/.test(value))
+    throw new Error(`Invalid Wallet ${name}`);
+  return value;
+};
+
+const walletCursor = (value: unknown): string | null => {
+  if (value === null) return null;
+  if (typeof value !== "string" || value.length > 512 || !/^[A-Za-z0-9_-]+$/.test(value))
+    throw new Error("Invalid Wallet transaction cursor");
   return value;
 };
 
@@ -196,37 +225,36 @@ export function parseWalletTransaction(value: unknown): WalletTransactionRecord 
     throw new Error("Invalid Wallet transaction type");
   if (!transactionStatuses.includes(value.status as WalletTransactionRecord["status"]))
     throw new Error("Invalid Wallet transaction status");
+  if (!transactionDirections.includes(value.direction as WalletTransactionRecord["direction"]))
+    throw new Error("Invalid Wallet transaction direction");
   return {
-    id: publicId(value.id, "transaction id"),
+    id: walletTransactionId(value.id),
     type: value.type as WalletTransactionRecord["type"],
     status: value.status as WalletTransactionRecord["status"],
     assetCode: assetCode(value.assetCode),
-    amount: decimal(value.amount, "transaction amount"),
+    amount: unsignedDecimal(value.amount, "transaction amount"),
+    direction: value.direction as WalletTransactionRecord["direction"],
     createdAt: dateTime(value.createdAt, "transaction createdAt"),
+    updatedAt: dateTime(value.updatedAt, "transaction updatedAt"),
   };
 }
 
-export function parseWalletTransactionPage(value: unknown, expectedOffset = 0): WalletTransactionPage {
-  if (!isObject(value) || !Array.isArray(value.items) || !isObject(value.pagination))
+export function parseWalletTransactionPage(value: unknown, expectedAsset?: string): WalletTransactionPage {
+  if (!isObject(value) || !Array.isArray(value.items))
     throw new Error("Invalid Wallet transaction page");
   if (value.items.length > WALLET_TRANSACTION_PAGE_SIZE)
     throw new Error("Wallet transaction page exceeds the consumer limit");
-  const { total, limit, offset, hasMore } = value.pagination;
-  if (!Number.isInteger(total) || (total as number) < 0)
-    throw new Error("Invalid Wallet transaction total");
-  if (limit !== WALLET_TRANSACTION_PAGE_SIZE)
-    throw new Error("Invalid Wallet transaction limit");
-  if (!Number.isInteger(expectedOffset) || expectedOffset < 0 || offset !== expectedOffset)
-    throw new Error("Invalid Wallet transaction offset");
-  if (typeof hasMore !== "boolean") throw new Error("Invalid Wallet transaction hasMore");
+  const items = value.items.map(parseWalletTransaction);
+  if (new Set(items.map((transaction) => transaction.id)).size !== items.length)
+    throw new Error("Duplicate Wallet transaction id");
+  if (
+    expectedAsset !== undefined &&
+    items.some((transaction) => transaction.assetCode !== assetCode(expectedAsset))
+  )
+    throw new Error("Wallet transaction asset does not match the selected asset");
   return {
-    items: value.items.map(parseWalletTransaction),
-    pagination: {
-      total: total as number,
-      limit: limit as number,
-      offset: offset as number,
-      hasMore,
-    },
+    items,
+    nextCursor: walletCursor(value.nextCursor),
   };
 }
 
@@ -267,13 +295,13 @@ export function walletOperationPath(operationId: string): string {
   return `/v1/wallet/operations/${encodeURIComponent(transferOperationId(operationId))}`;
 }
 
-export function walletTransactionPath(accountId: string, offset = 0): string {
-  if (!Number.isInteger(offset) || offset < 0) throw new Error("Invalid Wallet transaction offset");
+export function walletTransactionPath(selectedAsset: string, cursor?: string): string {
   const query = new URLSearchParams({
+    assetCode: assetCode(selectedAsset),
     limit: String(WALLET_TRANSACTION_PAGE_SIZE),
-    offset: String(offset),
   });
-  return `/v1/wallet/accounts/${encodeURIComponent(accountId)}/transactions?${query.toString()}`;
+  if (cursor !== undefined) query.set("cursor", walletCursor(cursor) as string);
+  return `/v1/wallet/transactions?${query.toString()}`;
 }
 
 export function mergeWalletTransactionPages(
@@ -295,6 +323,21 @@ export function walletRequestIsCurrent(
     request.requestId === currentRequestId &&
     request.scopeKey === currentScopeKey &&
     request.accountId === currentAccountId
+  );
+}
+
+export function walletHistoryRequestIsCurrent(
+  request: WalletHistoryRequestIdentity,
+  currentRequestId: number,
+  currentScopeKey: string | null,
+  currentAssetCode: string | null,
+  currentCursor: string | null,
+): boolean {
+  return (
+    request.requestId === currentRequestId &&
+    request.scopeKey === currentScopeKey &&
+    request.assetCode === currentAssetCode &&
+    request.cursor === currentCursor
   );
 }
 
