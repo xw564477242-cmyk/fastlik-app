@@ -45,6 +45,12 @@ jobs:
       - name: Repository Unit Tests
         run: npm test
 
+      - name: Internal transfer Mock integration in SANDBOX
+        run: npm run test:transfer:sandbox
+
+      - name: Internal transfer Mock integration in TEST
+        run: npm run test:transfer:test
+
       - name: Unit and Security Contract Test
         run: node scripts/verify-dev-wallet.mjs
 
@@ -108,8 +114,8 @@ jobs:
           SOURCE_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
         run: |
           set -euo pipefail
-          printf '{"format":"fastlink-wallet-pr-evidence-v1","sourceCommit":"%s","environment":"NON_PRODUCTION"}\n' "$SOURCE_SHA" > build-evidence.json
-          sha256sum dist/index.html dist/runtime-config.js package-lock.json build-evidence.json > build-provenance.sha256
+          printf '{"format":"fastlink-wallet-pr-evidence-v2","sourceCommit":"%s","environment":"NON_PRODUCTION","productionEnabled":false,"transferEnvironments":["SANDBOX","TEST"],"transferSource":"src/walletTransfer.ts","transferTests":["tests/walletTransfer.test.ts","tests/walletTransfer.integration.test.ts"]}\n' "$SOURCE_SHA" > build-evidence.json
+          sha256sum dist/index.html dist/runtime-config.js package-lock.json build-evidence.json src/walletTransfer.ts tests/walletTransfer.test.ts tests/walletTransfer.integration.test.ts > build-provenance.sha256
           sha256sum --check build-provenance.sha256
 
       - name: Upload non-production build evidence
@@ -121,5 +127,8 @@ jobs:
             package-lock.json
             build-evidence.json
             build-provenance.sha256
+            src/walletTransfer.ts
+            tests/walletTransfer.test.ts
+            tests/walletTransfer.integration.test.ts
           if-no-files-found: error
           retention-days: 7
