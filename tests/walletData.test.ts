@@ -174,6 +174,54 @@ test("reconstructs only public transaction fields and validates the opaque curso
   assert.throws(() => parseWalletTransaction({ ...rawTransaction("transaction-1"), amount: "-1" }), /amount/);
 });
 
+test("accepts only canonical absolute Decimal(36,18) Wallet history amounts", () => {
+  for (const amount of [
+    "0",
+    "0.000000000000000001",
+    "999999999999999999",
+    "999999999999999999.999999999999999999",
+  ])
+    assert.equal(parseWalletTransaction({ ...rawTransaction("transaction-1"), amount }).amount, amount);
+
+  for (const amount of [
+    "00",
+    "01",
+    "00.1",
+    "1000000000000000000",
+    "1.0000000000000000000",
+    "9999999999999999999.999999999999999999",
+  ])
+    assert.throws(
+      () => parseWalletTransaction({ ...rawTransaction("transaction-1"), amount }),
+      /transaction amount/,
+    );
+});
+
+test("accepts RFC3339 Wallet history timestamps and rejects Date.parse pseudo-dates", () => {
+  const boundary = parseWalletTransaction({
+    ...rawTransaction("transaction-1"),
+    createdAt: "2024-02-29T23:59:59.123456789+14:00",
+    updatedAt: "2024-02-29T09:59:59Z",
+  });
+  assert.equal(boundary.createdAt, "2024-02-29T23:59:59.123456789+14:00");
+
+  for (const createdAt of [
+    "0",
+    "2026-02-30T00:00:00Z",
+    "2026-01-01 00:00:00Z",
+    "2026-01-01T24:00:00Z",
+    "2026-01-01T00:00:00",
+  ])
+    assert.throws(
+      () => parseWalletTransaction({ ...rawTransaction("transaction-1"), createdAt }),
+      /transaction createdAt/,
+    );
+  assert.throws(
+    () => parseWalletTransaction({ ...rawTransaction("transaction-1"), updatedAt: "0" }),
+    /transaction updatedAt/,
+  );
+});
+
 test("fails closed when Backend returns more than the requested transaction page", () => {
   assert.throws(
     () =>

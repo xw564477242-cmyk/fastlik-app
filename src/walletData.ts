@@ -141,7 +141,25 @@ const decimal = (value: unknown, name: string): string => {
 };
 
 const unsignedDecimal = (value: unknown, name: string): string => {
-  if (typeof value !== "string" || !/^\d+(?:\.\d{1,18})?$/.test(value))
+  if (
+    typeof value !== "string" ||
+    value.length > 37 ||
+    !/^(?:0|[1-9]\d{0,17})(?:\.\d{1,18})?$/.test(value)
+  )
+    throw new Error(`Invalid Wallet ${name}`);
+  return value;
+};
+
+const rfc3339DateTime = (value: unknown, name: string): string => {
+  if (typeof value !== "string") throw new Error(`Invalid Wallet ${name}`);
+  const match = /^(\d{4})-(\d{2})-(\d{2})T(?:[01]\d|2[0-3]):[0-5]\d:[0-5]\d(?:\.\d{1,9})?(?:Z|[+-](?:[01]\d|2[0-3]):[0-5]\d)$/.exec(value);
+  if (!match) throw new Error(`Invalid Wallet ${name}`);
+  const year = Number(match[1]);
+  const month = Number(match[2]);
+  const day = Number(match[3]);
+  const leapYear = year % 4 === 0 && (year % 100 !== 0 || year % 400 === 0);
+  const daysInMonth = [31, leapYear ? 29 : 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31];
+  if (month < 1 || month > 12 || day < 1 || day > daysInMonth[month - 1] || Number.isNaN(Date.parse(value)))
     throw new Error(`Invalid Wallet ${name}`);
   return value;
 };
@@ -234,8 +252,8 @@ export function parseWalletTransaction(value: unknown): WalletTransactionRecord 
     assetCode: assetCode(value.assetCode),
     amount: unsignedDecimal(value.amount, "transaction amount"),
     direction: value.direction as WalletTransactionRecord["direction"],
-    createdAt: dateTime(value.createdAt, "transaction createdAt"),
-    updatedAt: dateTime(value.updatedAt, "transaction updatedAt"),
+    createdAt: rfc3339DateTime(value.createdAt, "transaction createdAt"),
+    updatedAt: rfc3339DateTime(value.updatedAt, "transaction updatedAt"),
   };
 }
 
