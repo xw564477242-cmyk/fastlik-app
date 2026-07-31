@@ -36,6 +36,9 @@ const transaction = (id: string, minute: number, overrides: Record<string, unkno
 });
 
 const filters = normalizeWalletTransactionFilters({ assetCode: "USD", limit: 25 });
+const cursorPage1 = "Y3Vyc29yLXBhZ2UtMQ";
+const cursorPage2 = "Y3Vyc29yLXBhZ2UtMg";
+const cursorPage3 = "Y3Vyc29yLXBhZ2UtMw";
 
 test("builds only the exact bounded Backend transaction history query", () => {
   assert.equal(
@@ -50,9 +53,9 @@ test("builds only the exact bounded Backend transaction history query", () => {
         assetCode: "USD",
         limit: 25,
       }),
-      "opaque_cursor-1",
+      cursorPage1,
     ),
-    "/v1/wallet/transactions?type=TRANSFER&status=COMPLETED&assetCode=USD&limit=25&cursor=opaque_cursor-1",
+    `/v1/wallet/transactions?type=TRANSFER&status=COMPLETED&assetCode=USD&limit=25&cursor=${cursorPage1}`,
   );
   for (const invalid of [
     { assetCode: "usd" },
@@ -62,6 +65,9 @@ test("builds only the exact bounded Backend transaction history query", () => {
     { assetCode: "USD", tenantId: "attacker" },
   ]) assert.throws(() => normalizeWalletTransactionFilters(invalid), /filter|limit|asset/);
   assert.throws(() => walletTransactionPath(filters, "bad/cursor"), /cursor/);
+  assert.throws(() => walletTransactionPath(filters, "A"), /cursor/);
+  assert.throws(() => walletTransactionPath(filters, "AB"), /cursor/);
+  assert.equal(walletTransactionPath(filters, "AA").endsWith("cursor=AA"), true);
 });
 
 test("reconstructs exactly the eight public fields and rejects every internal field", () => {
@@ -167,7 +173,7 @@ test("bounds raw bytes, dense items, page size, ids and opaque cursor", () => {
   assert.throws(
     () =>
       parseWalletTransactionPageRaw(
-        JSON.stringify({ items: [transaction("transaction-01", 59)], nextCursor: "cursor" }),
+        JSON.stringify({ items: [transaction("transaction-01", 59)], nextCursor: "AA" }),
         filters,
       ),
     /full page/,
@@ -181,6 +187,11 @@ test("validates exact type, status, direction, absolute Decimal(36,18), filters 
     { direction: "BETWEEN_OWN_ACCOUNTS" },
     { amount: "-1" },
     { amount: "01" },
+    { amount: "1.0" },
+    { amount: "0.00" },
+    { amount: "1.20" },
+    { amount: "0.000000000000000000" },
+    { amount: "1.0000000000000000000" },
     { amount: "1000000000000000000" },
     { createdAt: "2026-08-01T00:59:00Z" },
     { updatedAt: "2026-08-01T00:58:00.000Z" },
@@ -206,6 +217,36 @@ test("validates exact type, status, direction, absolute Decimal(36,18), filters 
     normalizeWalletTransactionFilters({ limit: 25 }),
   );
   assert.equal(accepted.items[0].amount, "999999999999999999.999999999999999999");
+  for (const amount of ["0", "1", "0.1", "1.01", "100000000000000000.000000000000000001"])
+    assert.equal(
+      parseWalletTransactionPageRaw(
+        JSON.stringify({ items: [transaction("transaction-02", 58, { amount })], nextCursor: null }),
+        normalizeWalletTransactionFilters({ limit: 25 }),
+      ).items[0].amount,
+      amount,
+    );
+});
+
+test("rejects noncanonical Base64URL-equivalent cursors from callers and service output", () => {
+  assert.deepEqual(Buffer.from("AA", "base64url"), Buffer.from("AB", "base64url"));
+  assert.throws(() => walletTransactionPath(filters, "AB"), /cursor/);
+  const fullPage = Array.from({ length: 25 }, (_, index) =>
+    transaction(`transaction-${String(99 - index).padStart(2, "0")}`, 59 - index));
+  assert.throws(
+    () =>
+      parseWalletTransactionPageRaw(
+        JSON.stringify({ items: fullPage, nextCursor: "AB" }),
+        filters,
+      ),
+    /cursor/,
+  );
+  assert.equal(
+    parseWalletTransactionPageRaw(
+      JSON.stringify({ items: fullPage, nextCursor: "AA" }),
+      filters,
+    ).nextCursor,
+    "AA",
+  );
 });
 
 test("requires strict createdAt/id descending order inside every page", () => {
@@ -238,7 +279,7 @@ test("fails closed on cross-page duplicate, non-monotonic page, cursor loop and 
     JSON.stringify({
       items: Array.from({ length: 25 }, (_, index) =>
         transaction(`transaction-${String(99 - index).padStart(2, "0")}`, 59 - index)),
-      nextCursor: "cursor_page_2",
+      nextCursor: cursorPage2,
     }),
     filters,
   );
@@ -248,7 +289,7 @@ test("fails closed on cross-page duplicate, non-monotonic page, cursor loop and 
     filters,
   );
   assert.equal(
-    advanceWalletTransactionHistory(first, older, filters, "cursor_page_2").items.length,
+    advanceWalletTransactionHistory(first, older, filters, cursorPage2).items.length,
     26,
   );
   assert.throws(
@@ -257,7 +298,7 @@ test("fails closed on cross-page duplicate, non-monotonic page, cursor loop and 
         first,
         { items: [first.items[0]], nextCursor: null },
         filters,
-        "cursor_page_2",
+        cursorPage2,
       ),
     /Duplicate|monotonic/,
   );
@@ -267,7 +308,7 @@ test("fails closed on cross-page duplicate, non-monotonic page, cursor loop and 
         first,
         { items: [transaction("transaction-newer", 58) as WalletTransactionRecord], nextCursor: null },
         filters,
-        "cursor_page_2",
+        cursorPage2,
       ),
     /monotonic/,
   );
@@ -275,32 +316,32 @@ test("fails closed on cross-page duplicate, non-monotonic page, cursor loop and 
     () =>
       advanceWalletTransactionHistory(
         first,
-        { items: [transaction("transaction-74", 34) as WalletTransactionRecord], nextCursor: "cursor_page_2" },
+        { items: [transaction("transaction-74", 34) as WalletTransactionRecord], nextCursor: cursorPage2 },
         filters,
-        "cursor_page_2",
+        cursorPage2,
       ),
     /loop|rollback/,
   );
   assert.throws(
-    () => advanceWalletTransactionHistory(first, older, { ...filters, assetCode: "EUR" }, "cursor_page_2"),
+    () => advanceWalletTransactionHistory(first, older, { ...filters, assetCode: "EUR" }, cursorPage2),
     /bound/,
   );
   const secondPage = parseWalletTransactionPageRaw(
     JSON.stringify({
       items: Array.from({ length: 25 }, (_, index) =>
         transaction(`transaction-${String(74 - index).padStart(2, "0")}`, 34 - index)),
-      nextCursor: "cursor_page_3",
+      nextCursor: cursorPage3,
     }),
     filters,
   );
-  const second = advanceWalletTransactionHistory(first, secondPage, filters, "cursor_page_2");
+  const second = advanceWalletTransactionHistory(first, secondPage, filters, cursorPage2);
   assert.throws(
     () =>
       advanceWalletTransactionHistory(
         second,
-        { items: [transaction("transaction-49", 9) as WalletTransactionRecord], nextCursor: "cursor_page_2" },
+        { items: [transaction("transaction-49", 9) as WalletTransactionRecord], nextCursor: cursorPage2 },
         filters,
-        "cursor_page_3",
+        cursorPage3,
       ),
     /loop|rollback/,
   );
@@ -333,13 +374,13 @@ test("permits exactly one GET per page and blocks mismatch or expiry before tran
 
 test("binds request identity to scope, filters, cursor and generation", () => {
   const scope = JSON.stringify(["actor", "tenant", "customer", "SANDBOX", "expiry"]);
-  const request = createWalletTransactionHistoryRequestIdentity(1, scope, filters, "cursor_page_2");
+  const request = createWalletTransactionHistoryRequestIdentity(1, scope, filters, cursorPage2);
   const key = walletTransactionFilterKey(filters);
-  assert.equal(walletTransactionHistoryRequestIsCurrent(request, 1, scope, key, "cursor_page_2"), true);
-  assert.equal(walletTransactionHistoryRequestIsCurrent(request, 2, scope, key, "cursor_page_2"), false);
-  assert.equal(walletTransactionHistoryRequestIsCurrent(request, 1, "other", key, "cursor_page_2"), false);
-  assert.equal(walletTransactionHistoryRequestIsCurrent(request, 1, scope, "other", "cursor_page_2"), false);
-  assert.equal(walletTransactionHistoryRequestIsCurrent(request, 1, scope, key, "cursor_page_3"), false);
+  assert.equal(walletTransactionHistoryRequestIsCurrent(request, 1, scope, key, cursorPage2), true);
+  assert.equal(walletTransactionHistoryRequestIsCurrent(request, 2, scope, key, cursorPage2), false);
+  assert.equal(walletTransactionHistoryRequestIsCurrent(request, 1, "other", key, cursorPage2), false);
+  assert.equal(walletTransactionHistoryRequestIsCurrent(request, 1, scope, "other", cursorPage2), false);
+  assert.equal(walletTransactionHistoryRequestIsCurrent(request, 1, scope, key, cursorPage3), false);
 });
 
 test("selected detail remains exact, public and immutable", () => {

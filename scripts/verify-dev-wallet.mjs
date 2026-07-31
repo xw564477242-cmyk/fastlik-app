@@ -116,6 +116,7 @@ assert(walletTransactions.includes("exactDataRecord(value, transactionFields") &
 assert(walletTransactions.includes("rejectDuplicateJsonObjectKeys(raw)"), "Wallet history must reject duplicate and escaped-equivalent JSON keys before parsing");
 assert(walletTransactions.includes("walletTransactionSessionScope(session, runtimeEnvironment)"), "Wallet history must require a matching unexpired SANDBOX or TEST session");
 assert(walletTransactions.includes("Duplicate Wallet transaction id across pages") && walletTransactions.includes("cursor loop or rollback") && walletTransactions.includes("pages are not strictly monotonic"), "Wallet history pagination must fail closed on duplicate IDs, cursor regression, and ordering regression");
+assert(walletTransactions.includes("\\.\\d{0,17}[1-9]") && walletTransactions.includes("finalAlphabetIndex % 16") && walletTransactions.includes("finalAlphabetIndex % 4"), "Wallet history amounts and opaque cursors must use unique canonical representations");
 assert(app.includes("walletHistoryInFlight.current=false") && app.includes("replaceWalletTransactions(null)"), "Wallet identity and filter changes must synchronously clear Wallet history state");
 assert(!walletData.includes("/v1/wallet/accounts/${encodeURIComponent(accountId)}/transactions"), "Legacy account history must remain removed");
 assert(walletData.includes("walletTransferStatusRequestIsCurrent"), "Transfer status must be isolated by scope, source account, operation and request generation");

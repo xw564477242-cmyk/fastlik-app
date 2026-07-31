@@ -287,7 +287,7 @@ function absoluteAmount(value: unknown): string {
   if (
     typeof value !== "string" ||
     value.length > 37 ||
-    !/^(?:0|[1-9]\d{0,17})(?:\.\d{1,18})?$/.test(value)
+    !/^(?:0|[1-9]\d{0,17}|(?:0|[1-9]\d{0,17})\.\d{0,17}[1-9])$/.test(value)
   )
     throw new Error("Invalid Wallet transaction amount");
   return value;
@@ -305,6 +305,16 @@ function canonicalTimestamp(value: unknown, name: string): string {
 function opaqueCursor(value: unknown): string | null {
   if (value === null) return null;
   if (typeof value !== "string" || value.length < 1 || value.length > 512 || !/^[A-Za-z0-9_-]+$/.test(value))
+    throw new Error("Invalid Wallet transaction cursor");
+  const remainder = value.length % 4;
+  const finalAlphabetIndex = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_".indexOf(
+    value[value.length - 1],
+  );
+  if (
+    remainder === 1 ||
+    (remainder === 2 && finalAlphabetIndex % 16 !== 0) ||
+    (remainder === 3 && finalAlphabetIndex % 4 !== 0)
+  )
     throw new Error("Invalid Wallet transaction cursor");
   return value;
 }

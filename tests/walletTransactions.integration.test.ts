@@ -45,6 +45,7 @@ const filters = normalizeWalletTransactionFilters({
   assetCode: "USD",
   limit: 25,
 });
+const cursorPage2 = "Y3Vyc29yLXBhZ2UtMg";
 
 integration(`Wallet transaction history exact consumer (${environment ?? "ENVIRONMENT_REQUIRED"})`, async () => {
   const calls: WalletTransactionTransportRequest[] = [];
@@ -54,7 +55,7 @@ integration(`Wallet transaction history exact consumer (${environment ?? "ENVIRO
     calls.push(request);
     return request.path.includes("cursor=")
       ? JSON.stringify({ items: [transaction("transaction-74", 34)], nextCursor: null })
-      : JSON.stringify({ items: firstItems, nextCursor: "cursor_page_2" });
+      : JSON.stringify({ items: firstItems, nextCursor: cursorPage2 });
   };
   const currentSession = session();
   const first = await readWalletTransactionHistory(
@@ -72,7 +73,7 @@ integration(`Wallet transaction history exact consumer (${environment ?? "ENVIRO
   );
   assert.deepEqual(calls, [
     { path: walletTransactionPath(filters), method: "GET" },
-    { path: walletTransactionPath(filters, "cursor_page_2"), method: "GET" },
+    { path: walletTransactionPath(filters, cursorPage2), method: "GET" },
   ]);
   assert.equal(second.items.length, 26);
   assert.equal(second.nextCursor, null);
@@ -104,7 +105,7 @@ integration("makes one GET per page, never retries, and keeps filter-bound curso
   const fullPage = Array.from({ length: 25 }, (_, index) =>
     transaction(`transaction-${String(99 - index).padStart(2, "0")}`, 59 - index));
   const first = await readWalletTransactionHistory(
-    async () => JSON.stringify({ items: fullPage, nextCursor: "cursor_page_2" }),
+    async () => JSON.stringify({ items: fullPage, nextCursor: cursorPage2 }),
     session(),
     environment!,
     filters,
@@ -173,7 +174,7 @@ integration("fails closed on internal fields, duplicate IDs, cursor loops and pa
   const fullPage = Array.from({ length: 25 }, (_, index) =>
     transaction(`transaction-${String(99 - index).padStart(2, "0")}`, 59 - index));
   const first = await readWalletTransactionHistory(
-    async () => JSON.stringify({ items: fullPage, nextCursor: "cursor_page_2" }),
+    async () => JSON.stringify({ items: fullPage, nextCursor: cursorPage2 }),
     session(),
     environment!,
     filters,
@@ -195,7 +196,7 @@ integration("fails closed on internal fields, duplicate IDs, cursor loops and pa
         JSON.stringify({
           items: Array.from({ length: 25 }, (_, index) =>
             transaction(`transaction-${String(74 - index).padStart(2, "0")}`, 34 - index)),
-          nextCursor: "cursor_page_2",
+          nextCursor: cursorPage2,
         }),
       session(),
       environment!,
