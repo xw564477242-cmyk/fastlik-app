@@ -42,8 +42,13 @@ assert(apiClient.includes("VITE_FASTLINK_API_URL"), "Wallet API must require an 
 assert(apiClient.includes("VITE_FASTLINK_ENVIRONMENT"), "Wallet must require an explicit environment");
 assert(apiClient.includes("VITE_FASTLINK_BUILD_SHA"), "Wallet must expose the build SHA");
 assert(apiClient.includes("parseWalletAccounts(await request<unknown>"), "Wallet account responses must be reconstructed from a public allowlist");
-assert(apiClient.includes("internalTransfer:async") && apiClient.includes("Promise<void>"), "Internal transfer responses must not expose raw response objects");
+assert(apiClient.includes("internalTransfer:async") && apiClient.includes("Promise<WalletTransferReceipt>"), "Internal transfer must expose only the typed public receipt");
+assert(apiClient.includes("parseWalletTransferReceipt(await request<unknown>"), "Transfer and status responses must pass through the public allowlist parser");
+assert(apiClient.includes("const idempotencyKey=crypto.randomUUID()"), "Each transfer invocation must retain one generated idempotency key");
+assert(apiClient.includes("walletTransferStatus:async"), "Wallet must consume the existing safe operation status endpoint");
 assert(walletData.includes("walletRequestIsCurrent"), "Wallet responses must be isolated by scope, account and request generation");
+assert(walletData.includes("walletTransferStatusRequestIsCurrent"), "Transfer status must be isolated by scope, source account, operation and request generation");
+assert(walletData.includes("WALLET_TRANSFER_STATUS_REFRESH_LIMIT = 5"), "Transfer status refresh must remain bounded");
 assert(app.includes("No unvalidated or cross-account response displayed"), "Wallet UI must fail closed for stale or invalid responses");
 
 const excluded = new Set([".git", "node_modules", "dist", "docs"]);

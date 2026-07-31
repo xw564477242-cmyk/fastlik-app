@@ -2,13 +2,17 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import {
   WALLET_TRANSACTION_PAGE_SIZE,
+  WALLET_TRANSFER_STATUS_REFRESH_LIMIT,
   mergeWalletTransactionPages,
   parseWalletAccount,
   parseWalletAccounts,
   parseWalletBalance,
   parseWalletTransaction,
   parseWalletTransactionPage,
+  parseWalletTransferReceipt,
   walletRequestIsCurrent,
+  walletOperationPath,
+  walletTransferStatusRequestIsCurrent,
   walletTransactionPath,
 } from "../src/walletData.ts";
 
@@ -54,6 +58,26 @@ const rawTransaction = (id: string): Record<string, unknown> => ({
   walletAccountId: "account-private",
   referenceId: "operation-private",
   metadata: { providerPayload: true },
+});
+
+const rawTransferReceipt = (id = "operation-1"): Record<string, unknown> => ({
+  id,
+  type: "INTERNAL_TRANSFER",
+  status: "PROCESSING",
+  assetCode: "USD",
+  amount: "25.5",
+  direction: "OUTGOING",
+  createdAt: "2026-07-31T01:02:03.000Z",
+  completedAt: null,
+  updatedAt: "2026-07-31T01:02:04.000Z",
+  tenantId: "tenant-private",
+  environment: "SANDBOX",
+  idempotencyKey: "must-not-reach-ui",
+  sourceAccountId: "source-private",
+  destinationAccountId: "destination-private",
+  journalIds: ["journal-private"],
+  failureReason: "internal-private",
+  providerPayload: { raw: true },
 });
 
 test("reconstructs Wallet accounts and balances from public allowlists only", () => {
@@ -179,4 +203,84 @@ test("rejects success, error and finally work after actor or tenant scope change
   assert.equal(walletRequestIsCurrent(oldScopeRequest, 20, "actor-b|tenant-a", "account-a"), false);
   assert.equal(walletRequestIsCurrent(oldScopeRequest, 20, "actor-a|tenant-b", "account-a"), false);
   assert.equal(walletRequestIsCurrent(oldScopeRequest, 20, "actor-a|tenant-a", "account-a"), true);
+});
+
+test("parses a typed transfer receipt from the public operation allowlist only", () => {
+  const receipt = parseWalletTransferReceipt(rawTransferReceipt(), {
+    assetCode: "USD",
+    amount: "025.5000",
+  });
+
+  assert.deepEqual(Object.keys(receipt).sort(), [
+    "amount",
+    "assetCode",
+    "completedAt",
+    "createdAt",
+    "direction",
+    "id",
+    "status",
+    "type",
+    "updatedAt",
+  ]);
+  for (const forbidden of [
+    "tenantId",
+    "environment",
+    "idempotencyKey",
+    "sourceAccountId",
+    "destinationAccountId",
+    "journalIds",
+    "failureReason",
+    "providerPayload",
+  ])
+    assert.equal(forbidden in receipt, false);
+});
+
+test("accepts only existing public transfer status values and matching request fields", () => {
+  for (const status of ["PROCESSING", "PENDING_SETTLEMENT", "COMPLETED", "FAILED"])
+    assert.equal(parseWalletTransferReceipt({ ...rawTransferReceipt(), status }).status, status);
+  assert.throws(() => parseWalletTransferReceipt({ ...rawTransferReceipt(), status: "SETTLED" }), /status/);
+  assert.throws(() => parseWalletTransferReceipt({ ...rawTransferReceipt(), type: "TREASURY_RESERVE" }), /type/);
+  assert.throws(() => parseWalletTransferReceipt(rawTransferReceipt("bad/id")), /operation id/);
+  assert.throws(
+    () => parseWalletTransferReceipt(rawTransferReceipt(), { assetCode: "EUR" }),
+    /asset/,
+  );
+  assert.throws(
+    () => parseWalletTransferReceipt(rawTransferReceipt(), { amount: "25.6" }),
+    /amount/,
+  );
+  assert.throws(
+    () => parseWalletTransferReceipt(rawTransferReceipt(), { operationId: "operation-2" }),
+    /requested operation/,
+  );
+});
+
+test("builds only a validated existing operation status path", () => {
+  assert.equal(WALLET_TRANSFER_STATUS_REFRESH_LIMIT, 5);
+  assert.equal(walletOperationPath("operation:1"), "/v1/wallet/operations/operation%3A1");
+  assert.throws(() => walletOperationPath("bad/id"), /operation id/);
+});
+
+test("rejects stale transfer status after source account, scope, operation, or generation changes", () => {
+  const request = {
+    requestId: 4,
+    scopeKey: "actor-a|tenant-a|customer-a|TEST",
+    accountId: "account-a",
+    operationId: "operation-a",
+  };
+
+  assert.equal(
+    walletTransferStatusRequestIsCurrent(
+      request,
+      4,
+      request.scopeKey,
+      request.accountId,
+      request.operationId,
+    ),
+    true,
+  );
+  assert.equal(walletTransferStatusRequestIsCurrent(request, 5, request.scopeKey, request.accountId, request.operationId), false);
+  assert.equal(walletTransferStatusRequestIsCurrent(request, 4, "scope-b", request.accountId, request.operationId), false);
+  assert.equal(walletTransferStatusRequestIsCurrent(request, 4, request.scopeKey, "account-b", request.operationId), false);
+  assert.equal(walletTransferStatusRequestIsCurrent(request, 4, request.scopeKey, request.accountId, "operation-b"), false);
 });

@@ -1,9 +1,9 @@
 import {cardListPath,parseCardPage,parseCardRecord} from './cardList'
 import {cardTransactionPath,parseCardTransactionPage} from './cardTransactions'
-import {parseWalletAccounts,parseWalletBalance,parseWalletTransactionPage,walletTransactionPath} from './walletData'
-import type {WalletAccountRecord,WalletBalanceRecord,WalletTransactionPage} from './walletData'
+import {parseWalletAccounts,parseWalletBalance,parseWalletTransactionPage,parseWalletTransferReceipt,walletOperationPath,walletTransactionPath} from './walletData'
+import type {WalletAccountRecord,WalletBalanceRecord,WalletTransactionPage,WalletTransferReceipt} from './walletData'
 
-export type {WalletAccountRecord,WalletBalanceRecord,WalletTransactionPage} from './walletData'
+export type {WalletAccountRecord,WalletBalanceRecord,WalletTransactionPage,WalletTransferReceipt} from './walletData'
 
 export type FastLinkEnvironment='LOCAL'|'SANDBOX'|'TEST'|'UAT'|'PRODUCTION'
 export type WalletSession={actorId:string;tenantId:string;customerId:string;environment:FastLinkEnvironment;expiresAt?:string}
@@ -66,7 +66,8 @@ export const walletApi={
  walletAccounts:async():Promise<WalletAccountRecord[]>=>parseWalletAccounts(await request<unknown>('/v1/wallet/accounts')),
  walletBalance:async(accountId:string):Promise<WalletBalanceRecord>=>{const balance=parseWalletBalance(await request<unknown>(`/v1/wallet/accounts/${encodeURIComponent(accountId)}/balance`));if(balance.accountId!==accountId)throw new Error('Wallet balance account does not match the requested account');return balance},
  walletTransactions:async(accountId:string,offset=0):Promise<WalletTransactionPage>=>parseWalletTransactionPage(await request<unknown>(walletTransactionPath(accountId,offset)),offset),
- internalTransfer:async(input:InternalTransferInput):Promise<void>=>{const idempotencyKey=crypto.randomUUID();await request<unknown>('/v1/wallet/transfers','POST',input,idempotencyKey)},
+ internalTransfer:async(input:InternalTransferInput):Promise<WalletTransferReceipt>=>{const idempotencyKey=crypto.randomUUID();return parseWalletTransferReceipt(await request<unknown>('/v1/wallet/transfers','POST',input,idempotencyKey),{assetCode:input.assetCode,amount:input.amount})},
+ walletTransferStatus:async(operationId:string,expected:{assetCode:string;amount:string}):Promise<WalletTransferReceipt>=>parseWalletTransferReceipt(await request<unknown>(walletOperationPath(operationId)),{operationId,...expected}),
  cards:async(cursor?:string)=>parseCardPage(await request<unknown>(cardListPath(cursor))),
  card:async(id:string)=>parseCardRecord(await request<unknown>(`/v1/cards/${encodeURIComponent(id)}`)),
  balance:(id:string)=>request<Record<string,unknown>>(`/v1/cards/${encodeURIComponent(id)}/balance`),
