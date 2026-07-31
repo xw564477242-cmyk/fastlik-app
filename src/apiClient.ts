@@ -1,4 +1,5 @@
 import {cardListPath,parseCardPage,parseCardRecord} from './cardList'
+import {cardTransactionPath,parseCardTransactionPage} from './cardTransactions'
 
 export type FastLinkEnvironment='LOCAL'|'SANDBOX'|'TEST'|'UAT'|'PRODUCTION'
 export type WalletSession={actorId:string;tenantId:string;customerId:string;environment:FastLinkEnvironment;expiresAt?:string}
@@ -67,7 +68,7 @@ export const walletApi={
  cards:async(cursor?:string)=>parseCardPage(await request<unknown>(cardListPath(cursor))),
  card:async(id:string)=>parseCardRecord(await request<unknown>(`/v1/cards/${encodeURIComponent(id)}`)),
  balance:(id:string)=>request<Record<string,unknown>>(`/v1/cards/${encodeURIComponent(id)}/balance`),
- transactions:(id:string)=>request<Record<string,unknown>>(`/v1/cards/${encodeURIComponent(id)}/transactions`),
+ transactions:async(id:string,cursor?:string)=>parseCardTransactionPage(await request<unknown>(cardTransactionPath(id,cursor))),
  freeze:(id:string)=>request<Record<string,unknown>>(`/v1/cards/${encodeURIComponent(id)}/freeze`,'POST',undefined,crypto.randomUUID()),
  unfreeze:(id:string)=>request<Record<string,unknown>>(`/v1/cards/${encodeURIComponent(id)}/unfreeze`,'POST',undefined,crypto.randomUUID()),
 }
