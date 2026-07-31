@@ -2,7 +2,7 @@ import {cardListPath,parseCardPage,parseCardRecord} from './cardList'
 import {cardBalancePath,parseCardBalance} from './cardBalance'
 import {cardTransactionPath,parseCardTransactionPage} from './cardTransactions'
 import {cardLimitsPath,parseCardLimits} from './cardLimits'
-import {parseWalletAccounts,parseWalletBalance,parseWalletTransactionDetail,parseWalletTransactionPage,parseWalletTransferReceipt,walletOperationPath,walletTransactionDetailPath,walletTransactionPath} from './walletData'
+import {parseWalletBalance,parseWalletTransactionDetail,parseWalletTransactionPage,walletTransactionDetailPath,walletTransactionPath} from './walletData'
 import type {WalletAccountRecord,WalletBalanceRecord,WalletTransactionPage,WalletTransactionRecord,WalletTransferReceipt} from './walletData'
 import {parseWalletOperationDetail,parseWalletOperationPage,walletOperationActivityPath,walletOperationDetailPath} from './walletOperations'
 import type {WalletOperationPage,WalletOperationRecord} from './walletOperations'
@@ -13,6 +13,8 @@ import type {CardReplacementInput} from './cardReplacement'
 import {cardRenewalDecision,cardRenewalPath,parseCardRenewalResponse,validateCardRenewalIdempotencyKey} from './cardRenewal'
 import {parseWalletBalanceSummary,WALLET_BALANCE_SUMMARY_PATH,walletBalanceSummaryReadAllowed} from './walletBalanceSummary'
 import type {WalletBalanceSummary} from './walletBalanceSummary'
+import {readWalletTransferAccounts,readWalletTransferStatus,submitWalletTransfer} from './walletTransfer'
+import type {WalletTransferInput,WalletTransferTransportRequest} from './walletTransfer'
 
 export type {WalletAccountRecord,WalletBalanceRecord,WalletTransactionPage,WalletTransactionRecord,WalletTransferReceipt} from './walletData'
 export type {WalletOperationPage,WalletOperationRecord} from './walletOperations'
@@ -25,7 +27,7 @@ export type {WalletBalanceSummary} from './walletBalanceSummary'
 export type FastLinkEnvironment='LOCAL'|'SANDBOX'|'TEST'|'UAT'|'PRODUCTION'
 export type WalletSession={actorId:string;tenantId:string;customerId:string;environment:FastLinkEnvironment;expiresAt?:string}
 export type WalletCredentials={tenantId:string;email:string;password:string}
-export type InternalTransferInput={sourceAccountId:string;destinationAccountId:string;assetCode:string;amount:string}
+export type InternalTransferInput=WalletTransferInput
 
 const buildApiUrl=(import.meta.env.VITE_FASTLINK_API_URL as string|undefined)?.trim()
 const buildEnvironment=(import.meta.env.VITE_FASTLINK_ENVIRONMENT as FastLinkEnvironment|undefined)
@@ -74,21 +76,23 @@ async function request<T>(path:string,method='GET',body?:unknown,idempotencyKey?
  }finally{window.clearTimeout(timeout)}
 }
 
+const walletTransferTransport=({path,method,body,idempotencyKey}:WalletTransferTransportRequest)=>request<string>(path,method,body,idempotencyKey,'text')
+
 export const walletApi={
  register:(credentials:WalletCredentials)=>request<WalletSession>('/v1/auth/register','POST',credentials),
  login:(credentials:WalletCredentials)=>request<WalletSession>('/v1/auth/login','POST',credentials),
  refresh:()=>request<WalletSession>('/v1/auth/refresh','POST'),
  logout:()=>request<void>('/v1/auth/logout','POST'),
  session:()=>request<WalletSession>('/v1/session'),
- walletAccounts:async():Promise<WalletAccountRecord[]>=>parseWalletAccounts(await request<unknown>('/v1/wallet/accounts')),
+ walletAccounts:async(session:WalletSession):Promise<WalletAccountRecord[]>=>readWalletTransferAccounts(walletTransferTransport,session,walletRuntime.environment),
  walletBalanceSummary:async(sessionEnvironment:FastLinkEnvironment):Promise<WalletBalanceSummary>=>{if(!walletBalanceSummaryReadAllowed(sessionEnvironment,walletRuntime.environment))throw new Error('Wallet balance summary is available only in the matching SANDBOX or TEST session');return parseWalletBalanceSummary(await request<string>(WALLET_BALANCE_SUMMARY_PATH,'GET',undefined,undefined,'text'))},
  walletBalance:async(accountId:string):Promise<WalletBalanceRecord>=>{const balance=parseWalletBalance(await request<unknown>(`/v1/wallet/accounts/${encodeURIComponent(accountId)}/balance`));if(balance.accountId!==accountId)throw new Error('Wallet balance account does not match the requested account');return balance},
  walletTransactions:async(selectedAsset:string,cursor?:string):Promise<WalletTransactionPage>=>parseWalletTransactionPage(await request<unknown>(walletTransactionPath(selectedAsset,cursor)),selectedAsset),
  walletOperations:async(cursor?:string):Promise<WalletOperationPage>=>parseWalletOperationPage(await request<unknown>(walletOperationActivityPath(cursor))),
  walletOperationDetail:async(selected:WalletOperationRecord):Promise<WalletOperationRecord>=>parseWalletOperationDetail(await request<unknown>(walletOperationDetailPath(selected.id)),selected),
  walletTransactionDetail:async(selected:{id:string;assetCode:string;amount:string}):Promise<WalletTransactionRecord>=>parseWalletTransactionDetail(await request<unknown>(walletTransactionDetailPath(selected.id)),{transactionId:selected.id,assetCode:selected.assetCode,amount:selected.amount}),
- internalTransfer:async(input:InternalTransferInput):Promise<WalletTransferReceipt>=>{const idempotencyKey=crypto.randomUUID();return parseWalletTransferReceipt(await request<unknown>('/v1/wallet/transfers','POST',input,idempotencyKey),{assetCode:input.assetCode,amount:input.amount})},
- walletTransferStatus:async(operationId:string,expected:{assetCode:string;amount:string}):Promise<WalletTransferReceipt>=>parseWalletTransferReceipt(await request<unknown>(walletOperationPath(operationId)),{operationId,...expected}),
+ internalTransfer:async(session:WalletSession,accounts:readonly WalletAccountRecord[],input:InternalTransferInput,idempotencyKey:string):Promise<WalletTransferReceipt>=>submitWalletTransfer(walletTransferTransport,session,walletRuntime.environment,accounts,input,idempotencyKey),
+ walletTransferStatus:async(session:WalletSession,previous:WalletTransferReceipt):Promise<WalletTransferReceipt>=>readWalletTransferStatus(walletTransferTransport,session,walletRuntime.environment,previous),
  cards:async(cursor?:string)=>parseCardPage(await request<unknown>(cardListPath(cursor))),
  card:async(id:string)=>parseCardRecord(await request<unknown>(`/v1/cards/${encodeURIComponent(id)}`)),
  balance:async(id:string)=>parseCardBalance(await request<unknown>(cardBalancePath(id)),id),

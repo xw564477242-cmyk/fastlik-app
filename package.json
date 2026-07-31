@@ -9,6 +9,8 @@
     "build:cloudflare": "bash scripts/build-cloudflare.sh",
     "preview": "vite preview",
     "test": "node --experimental-strip-types --test tests/*.test.ts",
+    "test:transfer:sandbox": "FASTLINK_TEST_ENVIRONMENT=SANDBOX node --experimental-strip-types --test tests/walletTransfer.integration.test.ts",
+    "test:transfer:test": "FASTLINK_TEST_ENVIRONMENT=TEST node --experimental-strip-types --test tests/walletTransfer.integration.test.ts",
     "test:cloudflare": "node scripts/verify-cloudflare.mjs"
   },
   "dependencies": {
