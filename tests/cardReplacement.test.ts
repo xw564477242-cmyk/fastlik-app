@@ -81,10 +81,15 @@ test("uses the existing endpoint and one validated caller-owned idempotency key"
   assert.equal(cardReplacementPath("card_old-1"), "/v1/cards/card_old-1/replace");
   assert.equal(cardReplacementPath("card.old:1"), "/v1/cards/card.old%3A1/replace");
   assert.throws(() => cardReplacementPath("bad/id"), /old Card ID/);
-  const key = "123e4567-e89b-12d3-a456-426614174000";
+  const key = "123e4567-e89b-42d3-a456-426614174000";
   assert.equal(validateCardReplacementIdempotencyKey(key), key);
-  assert.throws(() => validateCardReplacementIdempotencyKey("short"), /idempotency key/);
-  assert.throws(() => validateCardReplacementIdempotencyKey("bad/key-value"), /idempotency key/);
+  for (const invalid of [
+    "123e4567-e89b-12d3-a456-426614174000",
+    "123E4567-E89B-42D3-A456-426614174000",
+    "short",
+    "123e4567-e89b-42d3-7456-426614174000",
+  ])
+    assert.throws(() => validateCardReplacementIdempotencyKey(invalid), /idempotency key/);
 });
 
 test("reconstructs only the public Card allowlist and requires a distinct replacement identity", () => {
