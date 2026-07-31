@@ -1,0 +1,536 @@
+import type { WalletTransferEnvironment, WalletTransferSession } from "./walletTransfer";
+
+export const WALLET_TRANSACTION_PAGE_SIZE = 25;
+export const WALLET_TRANSACTION_MAX_JSON_BYTES = 131_072;
+export const WALLET_TRANSACTION_MAX_JSON_DEPTH = 64;
+export const WALLET_TRANSACTION_PATH = "/v1/wallet/transactions";
+
+export const WALLET_TRANSACTION_TYPES = [
+  "DEPOSIT",
+  "WITHDRAWAL",
+  "TRANSFER",
+  "MERCHANT_PAYMENT",
+  "REFUND",
+  "FX",
+] as const;
+export const WALLET_TRANSACTION_STATUSES = [
+  "PENDING",
+  "COMPLETED",
+  "FAILED",
+  "REVERSED",
+] as const;
+export const WALLET_TRANSACTION_DIRECTIONS = ["OUTGOING", "INCOMING"] as const;
+
+export type WalletTransactionType = (typeof WALLET_TRANSACTION_TYPES)[number];
+export type WalletTransactionStatus = (typeof WALLET_TRANSACTION_STATUSES)[number];
+export type WalletTransactionDirection = (typeof WALLET_TRANSACTION_DIRECTIONS)[number];
+
+export type WalletTransactionRecord = Readonly<{
+  id: string;
+  type: WalletTransactionType;
+  status: WalletTransactionStatus;
+  assetCode: string;
+  amount: string;
+  direction: WalletTransactionDirection;
+  createdAt: string;
+  updatedAt: string;
+}>;
+
+export type WalletTransactionFilters = Readonly<{
+  type?: WalletTransactionType;
+  status?: WalletTransactionStatus;
+  assetCode?: string;
+  limit: number;
+}>;
+
+export type WalletTransactionHistoryState = Readonly<{
+  items: readonly WalletTransactionRecord[];
+  nextCursor: string | null;
+  filterKey: string;
+  cursorTrail: readonly string[];
+}>;
+
+export type WalletTransactionTransportRequest = Readonly<{
+  path: string;
+  method: "GET";
+}>;
+
+export type WalletTransactionTransport = (
+  request: WalletTransactionTransportRequest,
+) => Promise<string>;
+
+export type WalletTransactionHistoryRequestIdentity = Readonly<{
+  requestId: number;
+  scopeKey: string;
+  filterKey: string;
+  cursor: string | null;
+}>;
+
+const pageFields = ["items", "nextCursor"] as const;
+const transactionFields = [
+  "id",
+  "type",
+  "status",
+  "assetCode",
+  "amount",
+  "direction",
+  "createdAt",
+  "updatedAt",
+] as const;
+const filterFields = ["type", "status", "assetCode", "limit"] as const;
+
+function walletTransactionSessionScope(
+  session: WalletTransferSession | null,
+  runtimeEnvironment: WalletTransferEnvironment | undefined,
+  now = Date.now(),
+): string | null {
+  if (
+    !session ||
+    (runtimeEnvironment !== "SANDBOX" && runtimeEnvironment !== "TEST") ||
+    session.environment !== runtimeEnvironment ||
+    typeof session.expiresAt !== "string"
+  )
+    return null;
+  const expiresAt = Date.parse(session.expiresAt);
+  if (!Number.isFinite(expiresAt) || expiresAt <= now) return null;
+  if (
+    ![session.actorId, session.tenantId, session.customerId].every(
+      (value) => typeof value === "string" && value.length > 0 && value.length <= 128,
+    )
+  )
+    return null;
+  return JSON.stringify([
+    session.actorId,
+    session.tenantId,
+    session.customerId,
+    session.environment,
+    session.expiresAt,
+  ]);
+}
+
+function rejectDuplicateJsonObjectKeys(raw: string): void {
+  let index = 0;
+  const invalid = () => new Error("Invalid Wallet transaction JSON response");
+  const skipWhitespace = () => {
+    while (
+      index < raw.length &&
+      (raw[index] === " " || raw[index] === "\t" || raw[index] === "\n" || raw[index] === "\r")
+    )
+      index += 1;
+  };
+  const readString = (): string => {
+    const start = index;
+    if (raw[index] !== '"') throw invalid();
+    index += 1;
+    while (index < raw.length) {
+      const code = raw.charCodeAt(index);
+      if (code === 0x22) {
+        index += 1;
+        try {
+          const decoded = JSON.parse(raw.slice(start, index)) as unknown;
+          if (typeof decoded !== "string") throw invalid();
+          return decoded;
+        } catch {
+          throw invalid();
+        }
+      }
+      if (code <= 0x1f) throw invalid();
+      if (code === 0x5c) {
+        index += 1;
+        if (index >= raw.length) throw invalid();
+        if (raw[index] === "u") {
+          if (!/^[0-9A-Fa-f]{4}$/.test(raw.slice(index + 1, index + 5))) throw invalid();
+          index += 5;
+        } else index += 1;
+      } else index += 1;
+    }
+    throw invalid();
+  };
+  const parseValue = (depth: number): void => {
+    if (depth > WALLET_TRANSACTION_MAX_JSON_DEPTH) throw invalid();
+    skipWhitespace();
+    if (raw[index] === "{") {
+      index += 1;
+      skipWhitespace();
+      const keys = new Set<string>();
+      if (raw[index] === "}") {
+        index += 1;
+        return;
+      }
+      while (index < raw.length) {
+        const key = readString();
+        if (keys.has(key)) throw new Error("Duplicate Wallet transaction JSON object key");
+        keys.add(key);
+        skipWhitespace();
+        if (raw[index] !== ":") throw invalid();
+        index += 1;
+        parseValue(depth + 1);
+        skipWhitespace();
+        if (raw[index] === "}") {
+          index += 1;
+          return;
+        }
+        if (raw[index] !== ",") throw invalid();
+        index += 1;
+        skipWhitespace();
+      }
+      throw invalid();
+    }
+    if (raw[index] === "[") {
+      index += 1;
+      skipWhitespace();
+      if (raw[index] === "]") {
+        index += 1;
+        return;
+      }
+      while (index < raw.length) {
+        parseValue(depth + 1);
+        skipWhitespace();
+        if (raw[index] === "]") {
+          index += 1;
+          return;
+        }
+        if (raw[index] !== ",") throw invalid();
+        index += 1;
+      }
+      throw invalid();
+    }
+    if (raw[index] === '"') {
+      readString();
+      return;
+    }
+    for (const literal of ["true", "false", "null"])
+      if (raw.startsWith(literal, index)) {
+        index += literal.length;
+        return;
+      }
+    const number = /^-?(?:0|[1-9]\d*)(?:\.\d+)?(?:[eE][+-]?\d+)?/.exec(raw.slice(index));
+    if (!number) throw invalid();
+    index += number[0].length;
+  };
+  parseValue(0);
+  skipWhitespace();
+  if (index !== raw.length) throw invalid();
+}
+
+function boundedRawJson(raw: unknown): unknown {
+  if (typeof raw !== "string") throw new Error("Invalid Wallet transaction raw response");
+  if (
+    raw.length > WALLET_TRANSACTION_MAX_JSON_BYTES ||
+    new TextEncoder().encode(raw).byteLength > WALLET_TRANSACTION_MAX_JSON_BYTES
+  )
+    throw new Error("Wallet transaction response exceeds the consumer limit");
+  rejectDuplicateJsonObjectKeys(raw);
+  try {
+    return JSON.parse(raw) as unknown;
+  } catch {
+    throw new Error("Invalid Wallet transaction JSON response");
+  }
+}
+
+function exactDataRecord<T extends readonly string[]>(
+  value: unknown,
+  fields: T,
+  name: string,
+): Record<T[number], unknown> {
+  if (
+    typeof value !== "object" ||
+    value === null ||
+    Array.isArray(value) ||
+    Object.getPrototypeOf(value) !== Object.prototype
+  )
+    throw new Error(`Invalid ${name}`);
+  const allowed = new Set<string>(fields);
+  const keys = Reflect.ownKeys(value);
+  if (keys.length !== fields.length || keys.some((key) => typeof key !== "string" || !allowed.has(key)))
+    throw new Error(`Invalid ${name} fields`);
+  for (const field of fields) {
+    const descriptor = Object.getOwnPropertyDescriptor(value, field);
+    if (!descriptor || !("value" in descriptor) || !descriptor.enumerable)
+      throw new Error(`Invalid ${name} field`);
+  }
+  return value as Record<T[number], unknown>;
+}
+
+function optionalDataRecord(value: unknown): Record<string, unknown> {
+  if (
+    typeof value !== "object" ||
+    value === null ||
+    Array.isArray(value) ||
+    Object.getPrototypeOf(value) !== Object.prototype
+  )
+    throw new Error("Invalid Wallet transaction filters");
+  const allowed = new Set<string>(filterFields);
+  for (const key of Reflect.ownKeys(value)) {
+    if (typeof key !== "string" || !allowed.has(key))
+      throw new Error("Invalid Wallet transaction filter field");
+    const descriptor = Object.getOwnPropertyDescriptor(value, key);
+    if (!descriptor || !("value" in descriptor) || !descriptor.enumerable)
+      throw new Error("Invalid Wallet transaction filter field");
+  }
+  return value as Record<string, unknown>;
+}
+
+function publicId(value: unknown): string {
+  if (typeof value !== "string" || !/^[A-Za-z0-9._:-]{2,128}$/.test(value))
+    throw new Error("Invalid Wallet transaction id");
+  return value;
+}
+
+function assetCode(value: unknown): string {
+  if (typeof value !== "string" || !/^[A-Z0-9]{2,12}$/.test(value))
+    throw new Error("Invalid Wallet transaction asset code");
+  return value;
+}
+
+function absoluteAmount(value: unknown): string {
+  if (
+    typeof value !== "string" ||
+    value.length > 37 ||
+    !/^(?:0|[1-9]\d{0,17})(?:\.\d{1,18})?$/.test(value)
+  )
+    throw new Error("Invalid Wallet transaction amount");
+  return value;
+}
+
+function canonicalTimestamp(value: unknown, name: string): string {
+  if (typeof value !== "string" || !/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/.test(value))
+    throw new Error(`Invalid Wallet transaction ${name}`);
+  const parsed = new Date(value);
+  if (Number.isNaN(parsed.valueOf()) || parsed.toISOString() !== value)
+    throw new Error(`Invalid Wallet transaction ${name}`);
+  return value;
+}
+
+function opaqueCursor(value: unknown): string | null {
+  if (value === null) return null;
+  if (typeof value !== "string" || value.length < 1 || value.length > 512 || !/^[A-Za-z0-9_-]+$/.test(value))
+    throw new Error("Invalid Wallet transaction cursor");
+  return value;
+}
+
+function enumValue<T extends string>(value: unknown, allowed: readonly T[], name: string): T {
+  if (typeof value !== "string" || !allowed.includes(value as T))
+    throw new Error(`Invalid Wallet transaction ${name}`);
+  return value as T;
+}
+
+export function normalizeWalletTransactionFilters(value: unknown): WalletTransactionFilters {
+  const record = optionalDataRecord(value);
+  const type = record.type === undefined
+    ? undefined
+    : enumValue(record.type, WALLET_TRANSACTION_TYPES, "type filter");
+  const status = record.status === undefined
+    ? undefined
+    : enumValue(record.status, WALLET_TRANSACTION_STATUSES, "status filter");
+  const selectedAsset = record.assetCode === undefined ? undefined : assetCode(record.assetCode);
+  const limit = record.limit === undefined ? WALLET_TRANSACTION_PAGE_SIZE : record.limit;
+  if (!Number.isInteger(limit) || (limit as number) < 1 || (limit as number) > 50)
+    throw new Error("Invalid Wallet transaction page limit");
+  return { type, status, assetCode: selectedAsset, limit: limit as number };
+}
+
+export function walletTransactionFilterKey(filters: WalletTransactionFilters): string {
+  return JSON.stringify([
+    filters.type ?? null,
+    filters.status ?? null,
+    filters.assetCode ?? null,
+    filters.limit,
+  ]);
+}
+
+export function walletTransactionPath(
+  filtersInput: unknown,
+  cursorInput?: unknown,
+): string {
+  const filters = normalizeWalletTransactionFilters(filtersInput);
+  const query = new URLSearchParams();
+  if (filters.type) query.set("type", filters.type);
+  if (filters.status) query.set("status", filters.status);
+  if (filters.assetCode) query.set("assetCode", filters.assetCode);
+  query.set("limit", String(filters.limit));
+  if (cursorInput !== undefined) query.set("cursor", opaqueCursor(cursorInput) as string);
+  return `${WALLET_TRANSACTION_PATH}?${query.toString()}`;
+}
+
+function parseRecord(value: unknown): WalletTransactionRecord {
+  const record = exactDataRecord(value, transactionFields, "Wallet transaction record");
+  const createdAt = canonicalTimestamp(record.createdAt, "createdAt");
+  const updatedAt = canonicalTimestamp(record.updatedAt, "updatedAt");
+  if (Date.parse(updatedAt) < Date.parse(createdAt))
+    throw new Error("Invalid Wallet transaction time order");
+  return {
+    id: publicId(record.id),
+    type: enumValue(record.type, WALLET_TRANSACTION_TYPES, "type"),
+    status: enumValue(record.status, WALLET_TRANSACTION_STATUSES, "status"),
+    assetCode: assetCode(record.assetCode),
+    amount: absoluteAmount(record.amount),
+    direction: enumValue(record.direction, WALLET_TRANSACTION_DIRECTIONS, "direction"),
+    createdAt,
+    updatedAt,
+  };
+}
+
+function precedes(left: WalletTransactionRecord, right: WalletTransactionRecord): boolean {
+  return left.createdAt > right.createdAt || (left.createdAt === right.createdAt && left.id > right.id);
+}
+
+export function parseWalletTransactionPageRaw(
+  raw: unknown,
+  filtersInput: unknown,
+): { items: WalletTransactionRecord[]; nextCursor: string | null } {
+  const filters = normalizeWalletTransactionFilters(filtersInput);
+  const page = exactDataRecord(boundedRawJson(raw), pageFields, "Wallet transaction page");
+  if (!Array.isArray(page.items) || page.items.length > filters.limit)
+    throw new Error("Invalid Wallet transaction page size");
+  for (let index = 0; index < page.items.length; index += 1)
+    if (!Object.prototype.hasOwnProperty.call(page.items, index))
+      throw new Error("Invalid sparse Wallet transaction page");
+  const items = page.items.map(parseRecord);
+  if (new Set(items.map(({ id }) => id)).size !== items.length)
+    throw new Error("Duplicate Wallet transaction id");
+  if (
+    items.some(
+      (item) =>
+        (filters.type !== undefined && item.type !== filters.type) ||
+        (filters.status !== undefined && item.status !== filters.status) ||
+        (filters.assetCode !== undefined && item.assetCode !== filters.assetCode),
+    )
+  )
+    throw new Error("Wallet transaction does not match the requested filters");
+  for (let index = 1; index < items.length; index += 1)
+    if (!precedes(items[index - 1], items[index]))
+      throw new Error("Wallet transaction page is not strictly monotonic");
+  const nextCursor = opaqueCursor(page.nextCursor);
+  if (nextCursor !== null && items.length !== filters.limit)
+    throw new Error("Wallet transaction cursor does not match a full page");
+  return { items, nextCursor };
+}
+
+export function advanceWalletTransactionHistory(
+  previous: WalletTransactionHistoryState | null,
+  page: { items: readonly WalletTransactionRecord[]; nextCursor: string | null },
+  filtersInput: unknown,
+  requestedCursor: string | null,
+): WalletTransactionHistoryState {
+  const filters = normalizeWalletTransactionFilters(filtersInput);
+  const filterKey = walletTransactionFilterKey(filters);
+  if (previous !== null) {
+    if (previous.filterKey !== filterKey || previous.nextCursor !== requestedCursor)
+      throw new Error("Wallet transaction cursor is not bound to the current filters");
+    const priorLast = previous.items.at(-1);
+    const nextFirst = page.items[0];
+    if (priorLast && nextFirst && !precedes(priorLast, nextFirst))
+      throw new Error("Wallet transaction pages are not strictly monotonic");
+  } else if (requestedCursor !== null) {
+    throw new Error("Wallet transaction initial page cannot use a cursor");
+  }
+  const previousIds = new Set(previous?.items.map(({ id }) => id) ?? []);
+  if (page.items.some(({ id }) => previousIds.has(id)))
+    throw new Error("Duplicate Wallet transaction id across pages");
+  const trail = previous?.cursorTrail ?? [];
+  if (
+    page.nextCursor !== null &&
+    (page.nextCursor === requestedCursor || trail.includes(page.nextCursor))
+  )
+    throw new Error("Wallet transaction cursor loop or rollback");
+  return {
+    items: [...(previous?.items ?? []), ...page.items],
+    nextCursor: page.nextCursor,
+    filterKey,
+    cursorTrail: page.nextCursor === null ? [...trail] : [...trail, page.nextCursor],
+  };
+}
+
+export async function readWalletTransactionHistory(
+  transport: WalletTransactionTransport,
+  session: WalletTransferSession,
+  runtimeEnvironment: WalletTransferEnvironment,
+  filtersInput: unknown,
+  previous: WalletTransactionHistoryState | null = null,
+): Promise<WalletTransactionHistoryState> {
+  const scope = walletTransactionSessionScope(session, runtimeEnvironment);
+  if (!scope) throw new Error("Wallet transaction history is unavailable for this session");
+  const filters = normalizeWalletTransactionFilters(filtersInput);
+  const filterKey = walletTransactionFilterKey(filters);
+  if (previous && previous.filterKey !== filterKey)
+    throw new Error("Wallet transaction filters changed before pagination");
+  const requestedCursor = previous?.nextCursor ?? null;
+  if (previous && requestedCursor === null)
+    throw new Error("Wallet transaction history has no next page");
+  const raw = await transport({
+    path: walletTransactionPath(filters, requestedCursor ?? undefined),
+    method: "GET",
+  });
+  if (walletTransactionSessionScope(session, runtimeEnvironment) !== scope)
+    throw new Error("Wallet transaction session expired during the request");
+  const page = parseWalletTransactionPageRaw(raw, filters);
+  return advanceWalletTransactionHistory(previous, page, filters, requestedCursor);
+}
+
+export function walletTransactionDetailPath(transactionId: unknown): string {
+  return `${WALLET_TRANSACTION_PATH}/${encodeURIComponent(publicId(transactionId))}`;
+}
+
+export function parseWalletTransactionDetailRaw(
+  raw: unknown,
+  selected: WalletTransactionRecord,
+): WalletTransactionRecord {
+  const detail = parseRecord(boundedRawJson(raw));
+  if (
+    detail.id !== selected.id ||
+    detail.type !== selected.type ||
+    detail.assetCode !== selected.assetCode ||
+    detail.amount !== selected.amount ||
+    detail.direction !== selected.direction ||
+    detail.createdAt !== selected.createdAt ||
+    Date.parse(detail.updatedAt) < Date.parse(selected.updatedAt)
+  )
+    throw new Error("Wallet transaction detail changed immutable fields");
+  return detail;
+}
+
+export async function readWalletTransactionDetail(
+  transport: WalletTransactionTransport,
+  session: WalletTransferSession,
+  runtimeEnvironment: WalletTransferEnvironment,
+  selected: WalletTransactionRecord,
+): Promise<WalletTransactionRecord> {
+  const scope = walletTransactionSessionScope(session, runtimeEnvironment);
+  if (!scope) throw new Error("Wallet transaction detail is unavailable for this session");
+  const raw = await transport({ path: walletTransactionDetailPath(selected.id), method: "GET" });
+  if (walletTransactionSessionScope(session, runtimeEnvironment) !== scope)
+    throw new Error("Wallet transaction session expired during the request");
+  return parseWalletTransactionDetailRaw(raw, selected);
+}
+
+export function createWalletTransactionHistoryRequestIdentity(
+  requestId: number,
+  scopeKey: string,
+  filtersInput: unknown,
+  cursor: string | null,
+): WalletTransactionHistoryRequestIdentity {
+  if (!Number.isSafeInteger(requestId) || requestId < 1)
+    throw new Error("Invalid Wallet transaction request generation");
+  return {
+    requestId,
+    scopeKey,
+    filterKey: walletTransactionFilterKey(normalizeWalletTransactionFilters(filtersInput)),
+    cursor,
+  };
+}
+
+export function walletTransactionHistoryRequestIsCurrent(
+  request: WalletTransactionHistoryRequestIdentity,
+  currentRequestId: number,
+  currentScopeKey: string | null,
+  currentFilterKey: string | null,
+  currentCursor: string | null,
+): boolean {
+  return (
+    request.requestId === currentRequestId &&
+    request.scopeKey === currentScopeKey &&
+    request.filterKey === currentFilterKey &&
+    request.cursor === currentCursor
+  );
+}
