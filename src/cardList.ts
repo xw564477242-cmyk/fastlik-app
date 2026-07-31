@@ -24,6 +24,21 @@ export type CardRecord = {
 
 export type CardPage = { cards: CardRecord[]; nextCursor: string | null };
 
+export type CardRequestIdentity = { requestId: number; scopeKey: string | null; cardId: string };
+
+export function cardRequestIsCurrent(
+  request: CardRequestIdentity,
+  currentRequestId: number,
+  currentScopeKey: string | null,
+  currentCardId: string | null,
+): boolean {
+  return (
+    request.requestId === currentRequestId &&
+    request.scopeKey === currentScopeKey &&
+    request.cardId === currentCardId
+  );
+}
+
 const isObject = (value: unknown): value is Record<string, unknown> =>
   typeof value === "object" && value !== null && !Array.isArray(value);
 

@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import {
   CARD_LIST_PAGE_SIZE,
+  cardRequestIsCurrent,
   cardListPath,
   mergeCardPages,
   parseCardPage,
@@ -84,4 +85,18 @@ test("appends pages without duplicating a card id", () => {
       ["card-2", "Travel"],
     ],
   );
+});
+
+test("rejects a late Card A response after Card B becomes the target", () => {
+  const cardARequest = { requestId: 11, scopeKey: "scope-1", cardId: "card-a" };
+
+  assert.equal(cardRequestIsCurrent(cardARequest, 12, "scope-1", "card-b"), false);
+  assert.equal(cardRequestIsCurrent(cardARequest, 11, "scope-1", "card-b"), false);
+});
+
+test("rejects success, error and completion work after the session scope changes", () => {
+  const oldSessionRequest = { requestId: 20, scopeKey: "scope-old", cardId: "card-a" };
+
+  assert.equal(cardRequestIsCurrent(oldSessionRequest, 20, "scope-new", "card-a"), false);
+  assert.equal(cardRequestIsCurrent(oldSessionRequest, 20, "scope-old", "card-a"), true);
 });
