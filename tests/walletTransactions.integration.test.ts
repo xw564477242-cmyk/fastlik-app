@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import {
+  createWalletTransactionDetailRequestIdentity,
   createWalletTransactionHistoryRequestIdentity,
   normalizeWalletTransactionFilters,
   readWalletTransactionDetail,
@@ -9,6 +10,7 @@ import {
   walletTransactionFilterRequestAllowed,
   walletTransactionFiltersForSelectedAsset,
   walletTransactionHistoryRequestIsCurrent,
+  walletTransactionDetailRequestIsCurrent,
   walletTransactionPath,
   walletTransactionRequestWasAborted,
   type WalletTransactionTransportRequest,
@@ -434,4 +436,89 @@ integration("filter request gate blocks unowned and cross-scope accounts before 
   await attempt(unowned, unowned, "scope-a", "scope-a");
   await attempt(owned, owned, "scope-a", "scope-b");
   assert.equal(calls, 0);
+});
+
+integration("manual detail refresh cancels the prior click and stale success error finally write nothing", async () => {
+  const detailFilters = walletTransactionFiltersForSelectedAsset(
+    { type: "TRANSFER", status: "COMPLETED" },
+    "USD",
+  );
+  const history = await readWalletTransactionHistory(
+    async () => JSON.stringify({ items: [transaction("transaction-refresh", 59)], nextCursor: null }),
+    session(),
+    environment!,
+    detailFilters,
+  );
+  const selected = history.items[0];
+  const scope = "scope-current";
+  const accountId = "account-usd";
+  let generation = 0;
+  let activeController: AbortController | null = null;
+  let calls = 0;
+  const writes = { success: 0, error: 0, finally: 0 };
+  const pending: Promise<void>[] = [];
+  let resolveFirst!: (value: string) => void;
+
+  const clickRefresh = (mode: "late-success" | "abort-error" | "current-success") => {
+    activeController?.abort();
+    const controller = new AbortController();
+    activeController = controller;
+    const request = createWalletTransactionDetailRequestIdentity(
+      ++generation,
+      scope,
+      accountId,
+      detailFilters,
+      selected,
+    );
+    const isCurrent = () =>
+      activeController === controller &&
+      walletTransactionDetailRequestIsCurrent(
+        request,
+        generation,
+        scope,
+        accountId,
+        detailFilters,
+        history,
+        selected,
+      );
+    const operation = readWalletTransactionDetail(
+      ({ signal }) => {
+        calls += 1;
+        if (mode === "current-success") return Promise.resolve(JSON.stringify(selected));
+        return new Promise((resolve, reject) => {
+          if (mode === "late-success") resolveFirst = resolve;
+          else signal?.addEventListener(
+            "abort",
+            () => reject(new DOMException("cancelled", "AbortError")),
+            { once: true },
+          );
+        });
+      },
+      session(),
+      environment!,
+      selected,
+      controller.signal,
+    ).then(
+      () => {
+        if (isCurrent()) writes.success += 1;
+      },
+      () => {
+        if (isCurrent()) writes.error += 1;
+      },
+    ).finally(() => {
+      if (isCurrent()) writes.finally += 1;
+    });
+    pending.push(operation);
+  };
+
+  clickRefresh("late-success");
+  await Promise.resolve();
+  clickRefresh("abort-error");
+  await Promise.resolve();
+  clickRefresh("current-success");
+  resolveFirst(JSON.stringify(selected));
+  await Promise.all(pending);
+
+  assert.equal(calls, 3, "three manual clicks must issue exactly three GETs");
+  assert.deepEqual(writes, { success: 1, error: 0, finally: 1 });
 });

@@ -77,6 +77,14 @@ export type WalletTransactionHistoryRequestIdentity = Readonly<{
   cursor: string | null;
 }>;
 
+export type WalletTransactionDetailRequestIdentity = Readonly<{
+  requestId: number;
+  scopeKey: string;
+  accountId: string;
+  filterKey: string;
+  transactionKey: string;
+}>;
+
 const pageFields = ["items", "nextCursor"] as const;
 const transactionFields = [
   "id",
@@ -622,5 +630,80 @@ export function walletTransactionHistoryRequestIsCurrent(
     request.scopeKey === currentScopeKey &&
     request.filterKey === currentFilterKey &&
     request.cursor === currentCursor
+  );
+}
+
+function walletTransactionRecordKey(record: WalletTransactionRecord): string {
+  return JSON.stringify([
+    record.id,
+    record.type,
+    record.status,
+    record.assetCode,
+    record.amount,
+    record.direction,
+    record.createdAt,
+    record.updatedAt,
+  ]);
+}
+
+export function walletTransactionDetailRefreshAllowed(
+  selected: WalletTransactionRecord | null,
+  history: WalletTransactionHistoryState | null,
+  filtersInput: unknown,
+): boolean {
+  if (!selected || !history) return false;
+  let filterKey: string;
+  try {
+    filterKey = walletTransactionFilterKey(normalizeWalletTransactionFilters(filtersInput));
+  } catch {
+    return false;
+  }
+  const selectedKey = walletTransactionRecordKey(selected);
+  return (
+    history.filterKey === filterKey &&
+    history.items.some(item => walletTransactionRecordKey(item) === selectedKey)
+  );
+}
+
+export function createWalletTransactionDetailRequestIdentity(
+  requestId: number,
+  scopeKey: string,
+  accountId: string,
+  filtersInput: unknown,
+  selected: WalletTransactionRecord,
+): WalletTransactionDetailRequestIdentity {
+  if (!Number.isSafeInteger(requestId) || requestId < 1)
+    throw new Error("Invalid Wallet transaction detail request generation");
+  if (typeof scopeKey !== "string" || scopeKey.length < 1 || scopeKey.length > 1024)
+    throw new Error("Invalid Wallet transaction detail request scope");
+  if (typeof accountId !== "string" || accountId.length < 1 || accountId.length > 128)
+    throw new Error("Invalid Wallet transaction detail request account");
+  return {
+    requestId,
+    scopeKey,
+    accountId,
+    filterKey: walletTransactionFilterKey(normalizeWalletTransactionFilters(filtersInput)),
+    transactionKey: walletTransactionRecordKey(selected),
+  };
+}
+
+export function walletTransactionDetailRequestIsCurrent(
+  request: WalletTransactionDetailRequestIdentity,
+  currentRequestId: number,
+  currentScopeKey: string | null,
+  currentAccountId: string | null,
+  currentFilters: unknown,
+  currentHistory: WalletTransactionHistoryState | null,
+  currentSelected: WalletTransactionRecord | null,
+): boolean {
+  if (
+    request.requestId !== currentRequestId ||
+    request.scopeKey !== currentScopeKey ||
+    request.accountId !== currentAccountId ||
+    !walletTransactionDetailRefreshAllowed(currentSelected, currentHistory, currentFilters)
+  ) return false;
+  return (
+    request.filterKey === currentHistory?.filterKey &&
+    request.transactionKey === walletTransactionRecordKey(currentSelected as WalletTransactionRecord)
   );
 }
