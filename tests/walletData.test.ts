@@ -8,11 +8,14 @@ import {
   parseWalletAccounts,
   parseWalletBalance,
   parseWalletTransaction,
+  parseWalletTransactionDetail,
   parseWalletTransactionPage,
   parseWalletTransferReceipt,
   walletHistoryRequestIsCurrent,
   walletRequestIsCurrent,
   walletOperationPath,
+  walletTransactionDetailPath,
+  walletTransactionDetailRequestIsCurrent,
   walletTransferStatusRequestIsCurrent,
   walletTransactionPath,
 } from "../src/walletData.ts";
@@ -174,6 +177,54 @@ test("reconstructs only public transaction fields and validates the opaque curso
   assert.throws(() => parseWalletTransaction({ ...rawTransaction("transaction-1"), amount: "-1" }), /amount/);
 });
 
+test("reconstructs selected transaction detail and allows its status to evolve", () => {
+  const selected = parseWalletTransaction(rawTransaction("transaction-1"));
+  const detail = parseWalletTransactionDetail(
+    { ...rawTransaction("transaction-1"), status: "REVERSED" },
+    { transactionId: selected.id, assetCode: selected.assetCode, amount: selected.amount },
+  );
+
+  assert.equal(detail.status, "REVERSED");
+  assert.deepEqual(Object.keys(detail).sort(), [
+    "amount",
+    "assetCode",
+    "createdAt",
+    "direction",
+    "id",
+    "status",
+    "type",
+    "updatedAt",
+  ]);
+  for (const forbidden of ["tenantId", "walletAccountId", "providerTransactionId", "journalIds", "referenceId", "metadata"])
+    assert.equal(forbidden in detail, false);
+});
+
+test("fails closed when selected transaction identity, asset or amount changes", () => {
+  const expected = { transactionId: "transaction-1", assetCode: "USD", amount: "25.5" };
+
+  assert.throws(
+    () => parseWalletTransactionDetail(rawTransaction("transaction-2"), expected),
+    /detail id/,
+  );
+  assert.throws(
+    () => parseWalletTransactionDetail({ ...rawTransaction("transaction-1"), assetCode: "EUR" }, expected),
+    /detail asset/,
+  );
+  assert.throws(
+    () => parseWalletTransactionDetail({ ...rawTransaction("transaction-1"), amount: "25.6" }, expected),
+    /detail amount/,
+  );
+  assert.equal(
+    parseWalletTransactionDetail(rawTransaction("transaction-1"), { ...expected, amount: "25.5000" }).amount,
+    "25.5",
+  );
+});
+
+test("builds only a validated public transaction detail path", () => {
+  assert.equal(walletTransactionDetailPath("transaction:1"), "/v1/wallet/transactions/transaction%3A1");
+  assert.throws(() => walletTransactionDetailPath("bad/id"), /transaction id/);
+});
+
 test("accepts only canonical absolute Decimal(36,18) Wallet history amounts", () => {
   for (const amount of [
     "0",
@@ -275,6 +326,21 @@ test("rejects Wallet history work after asset, cursor, scope, or generation chan
   assert.equal(walletHistoryRequestIsCurrent(request, 7, "scope-b", "USD", "cursor-a"), false);
   assert.equal(walletHistoryRequestIsCurrent(request, 7, request.scopeKey, "EUR", "cursor-a"), false);
   assert.equal(walletHistoryRequestIsCurrent(request, 7, request.scopeKey, "USD", "cursor-b"), false);
+});
+
+test("rejects transaction detail work after transaction, asset, scope, or generation changes", () => {
+  const request = {
+    requestId: 9,
+    scopeKey: "actor-a|tenant-a|customer-a|TEST",
+    assetCode: "USD",
+    transactionId: "transaction-1",
+  };
+
+  assert.equal(walletTransactionDetailRequestIsCurrent(request, 9, request.scopeKey, "USD", "transaction-1"), true);
+  assert.equal(walletTransactionDetailRequestIsCurrent(request, 10, request.scopeKey, "USD", "transaction-1"), false);
+  assert.equal(walletTransactionDetailRequestIsCurrent(request, 9, "scope-b", "USD", "transaction-1"), false);
+  assert.equal(walletTransactionDetailRequestIsCurrent(request, 9, request.scopeKey, "EUR", "transaction-1"), false);
+  assert.equal(walletTransactionDetailRequestIsCurrent(request, 9, request.scopeKey, "USD", "transaction-2"), false);
 });
 
 test("parses a typed transfer receipt from the public operation allowlist only", () => {

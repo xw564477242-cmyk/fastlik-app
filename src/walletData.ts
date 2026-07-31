@@ -57,6 +57,13 @@ export type WalletHistoryRequestIdentity = {
   cursor: string | null;
 };
 
+export type WalletTransactionDetailRequestIdentity = {
+  requestId: number;
+  scopeKey: string | null;
+  assetCode: string;
+  transactionId: string;
+};
+
 export type WalletTransferReceipt = {
   id: string;
   type: "INTERNAL_TRANSFER";
@@ -257,6 +264,23 @@ export function parseWalletTransaction(value: unknown): WalletTransactionRecord 
   };
 }
 
+export function parseWalletTransactionDetail(
+  value: unknown,
+  expected: { transactionId: string; assetCode: string; amount: string },
+): WalletTransactionRecord {
+  const detail = parseWalletTransaction(value);
+  if (detail.id !== walletTransactionId(expected.transactionId))
+    throw new Error("Wallet transaction detail id does not match the selected transaction");
+  if (detail.assetCode !== assetCode(expected.assetCode))
+    throw new Error("Wallet transaction detail asset does not match the selected transaction");
+  if (
+    canonicalDecimal(detail.amount) !==
+    canonicalDecimal(unsignedDecimal(expected.amount, "selected transaction amount"))
+  )
+    throw new Error("Wallet transaction detail amount does not match the selected transaction");
+  return detail;
+}
+
 export function parseWalletTransactionPage(value: unknown, expectedAsset?: string): WalletTransactionPage {
   if (!isObject(value) || !Array.isArray(value.items))
     throw new Error("Invalid Wallet transaction page");
@@ -322,6 +346,10 @@ export function walletTransactionPath(selectedAsset: string, cursor?: string): s
   return `/v1/wallet/transactions?${query.toString()}`;
 }
 
+export function walletTransactionDetailPath(transactionId: string): string {
+  return `/v1/wallet/transactions/${encodeURIComponent(walletTransactionId(transactionId))}`;
+}
+
 export function mergeWalletTransactionPages(
   current: WalletTransactionRecord[],
   incoming: WalletTransactionRecord[],
@@ -356,6 +384,21 @@ export function walletHistoryRequestIsCurrent(
     request.scopeKey === currentScopeKey &&
     request.assetCode === currentAssetCode &&
     request.cursor === currentCursor
+  );
+}
+
+export function walletTransactionDetailRequestIsCurrent(
+  request: WalletTransactionDetailRequestIdentity,
+  currentRequestId: number,
+  currentScopeKey: string | null,
+  currentAssetCode: string | null,
+  currentTransactionId: string | null,
+): boolean {
+  return (
+    request.requestId === currentRequestId &&
+    request.scopeKey === currentScopeKey &&
+    request.assetCode === currentAssetCode &&
+    request.transactionId === currentTransactionId
   );
 }
 
