@@ -11,7 +11,11 @@ export type CardRenewalRequestIdentity = {
   requestId: number;
   scopeKey: string | null;
   cardId: string;
+  expiryMonth: number;
+  expiryYear: number;
 };
+
+export type CardRenewalSelection = Pick<CardRecord, "id" | "expiryMonth" | "expiryYear">;
 
 const minSigned64 = -(2n ** 63n);
 const maxSigned64 = 2n ** 63n - 1n;
@@ -94,7 +98,14 @@ export function cardRenewalDecision(
     return { allowed: false, reason: "Card scope or selection changed. Refresh before renewing." };
   if (!card.capabilities.renew)
     return { allowed: false, reason: "Renewal is not permitted by the current Card capabilities." };
-  if (card.expiryMonth === null || card.expiryYear === null)
+  if (
+    !Number.isInteger(card.expiryMonth) ||
+    (card.expiryMonth as number) < 1 ||
+    (card.expiryMonth as number) > 12 ||
+    !Number.isInteger(card.expiryYear) ||
+    (card.expiryYear as number) < 2000 ||
+    (card.expiryYear as number) > 9999
+  )
     return { allowed: false, reason: "Card renewal requires a current expiry." };
   return { allowed: true, reason: null };
 }
@@ -114,8 +125,8 @@ export function cardRenewalPath(cardId: string): string {
 
 export function parseCardRenewalResponse(value: unknown, currentCard: CardRecord): CardRecord {
   const expectedCardId = opaqueCardId(currentCard.id, "selected Card ID");
-  if (currentCard.expiryMonth === null || currentCard.expiryYear === null)
-    throw new Error("Card renewal requires a current expiry");
+  const currentExpiryMonth = requiredInteger(currentCard.expiryMonth, "current expiryMonth", 1, 12);
+  const currentExpiryYear = requiredInteger(currentCard.expiryYear, "current expiryYear", 2000, 9999);
 
   const response = ordinaryJsonObject(value, "response");
   const id = opaqueCardId(ownDataProperty(response, "id", "Card ID"), "Card ID");
@@ -131,7 +142,7 @@ export function parseCardRenewalResponse(value: unknown, currentCard: CardRecord
   const availableBalanceMinor = optionalOwnDataProperty(response, "availableBalanceMinor", "balance");
 
   if (id !== expectedCardId) throw new Error("Card renewal identity does not match the selected Card");
-  const currentExpiry = currentCard.expiryYear * 12 + currentCard.expiryMonth;
+  const currentExpiry = currentExpiryYear * 12 + currentExpiryMonth;
   const renewedExpiry = expiryYear * 12 + expiryMonth;
   if (renewedExpiry <= currentExpiry) throw new Error("Card renewal expiry did not advance");
   if (type !== "VIRTUAL" && type !== "PHYSICAL") throw new Error("Invalid Card renewal type");
@@ -184,9 +195,12 @@ export function cardRenewalRequestIsCurrent(
   request: CardRenewalRequestIdentity,
   currentRequestId: number,
   currentScopeKey: string | null,
-  currentCardId: string | null,
+  currentCard: CardRenewalSelection | null,
 ): boolean {
   return request.requestId === currentRequestId &&
     request.scopeKey === currentScopeKey &&
-    request.cardId === currentCardId;
+    currentCard !== null &&
+    request.cardId === currentCard.id &&
+    request.expiryMonth === currentCard.expiryMonth &&
+    request.expiryYear === currentCard.expiryYear;
 }

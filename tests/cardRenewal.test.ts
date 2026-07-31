@@ -58,6 +58,10 @@ test("shows and executes renewal only for a renewable selected Card in matching 
   ).allowed, false);
   assert.equal(cardRenewalDecision(selectedCard({ expiryMonth: null }), "TEST", "TEST", "scope", "scope", card.id).allowed, false);
   assert.equal(cardRenewalDecision(selectedCard({ expiryYear: null }), "TEST", "TEST", "scope", "scope", card.id).allowed, false);
+  for (const expiryMonth of [0, 13, 1.5, Number.NaN])
+    assert.equal(cardRenewalDecision(selectedCard({ expiryMonth }), "TEST", "TEST", "scope", "scope", card.id).allowed, false);
+  for (const expiryYear of [1999, 10000, 2030.5, Number.NaN])
+    assert.equal(cardRenewalDecision(selectedCard({ expiryYear }), "TEST", "TEST", "scope", "scope", card.id).allowed, false);
 });
 
 test("uses the existing endpoint and accepts only a canonical lowercase RFC4122 UUIDv4", () => {
@@ -164,14 +168,19 @@ test("strictly validates status, timestamp and canonical signed-64 optional bala
     assert.throws(() => parseCardRenewalResponse(rawRenewal({ capabilities: { ...(rawRenewal().capabilities as object), [key]: 1 } }), selectedCard()), /capability/);
 });
 
-test("rejects success, error and finally writes after scope, generation or selected Card changes", () => {
+test("rejects success, error and finally writes after scope, generation, selection or same-Card expiry changes", () => {
   const scope = '["actor","tenant","customer","TEST"]';
-  const request = { requestId: 7, scopeKey: scope, cardId: "card_renew-1" };
-  assert.equal(cardRenewalRequestIsCurrent(request, 7, scope, "card_renew-1"), true);
-  assert.equal(cardRenewalRequestIsCurrent(request, 8, scope, "card_renew-1"), false);
-  assert.equal(cardRenewalRequestIsCurrent(request, 7, '["other","tenant","customer","TEST"]', "card_renew-1"), false);
-  assert.equal(cardRenewalRequestIsCurrent(request, 7, '["actor","other","customer","TEST"]', "card_renew-1"), false);
-  assert.equal(cardRenewalRequestIsCurrent(request, 7, '["actor","tenant","other","TEST"]', "card_renew-1"), false);
-  assert.equal(cardRenewalRequestIsCurrent(request, 7, '["actor","tenant","customer","SANDBOX"]', "card_renew-1"), false);
-  assert.equal(cardRenewalRequestIsCurrent(request, 7, scope, "card_other"), false);
+  const request = { requestId: 7, scopeKey: scope, cardId: "card_renew-1", expiryMonth: 12, expiryYear: 2030 };
+  const current = { id: "card_renew-1", expiryMonth: 12, expiryYear: 2030 };
+  assert.equal(cardRenewalRequestIsCurrent(request, 7, scope, current), true);
+  assert.equal(cardRenewalRequestIsCurrent(request, 8, scope, current), false);
+  assert.equal(cardRenewalRequestIsCurrent(request, 7, '["other","tenant","customer","TEST"]', current), false);
+  assert.equal(cardRenewalRequestIsCurrent(request, 7, '["actor","other","customer","TEST"]', current), false);
+  assert.equal(cardRenewalRequestIsCurrent(request, 7, '["actor","tenant","other","TEST"]', current), false);
+  assert.equal(cardRenewalRequestIsCurrent(request, 7, '["actor","tenant","customer","SANDBOX"]', current), false);
+  assert.equal(cardRenewalRequestIsCurrent(request, 7, scope, { ...current, id: "card_other" }), false);
+  assert.equal(cardRenewalRequestIsCurrent(request, 7, scope, { ...current, expiryMonth: 1, expiryYear: 2031 }), false);
+  assert.equal(cardRenewalRequestIsCurrent(request, 7, scope, { ...current, expiryMonth: 11 }), false);
+  assert.equal(cardRenewalRequestIsCurrent(request, 7, scope, { ...current, expiryYear: 2031 }), false);
+  assert.equal(cardRenewalRequestIsCurrent(request, 7, scope, null), false);
 });
