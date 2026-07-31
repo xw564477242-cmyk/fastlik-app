@@ -40,6 +40,12 @@ export type WalletOperationActivityRequestIdentity = {
   cursor: string | null;
 };
 
+export type WalletOperationDetailRequestIdentity = {
+  requestId: number;
+  scopeKey: string | null;
+  operationId: string;
+};
+
 const operationTypes: WalletOperationType[] = [
   "DEPOSIT",
   "INTERNAL_TRANSFER",
@@ -81,6 +87,12 @@ const amount = (value: unknown): string => {
   )
     throw new Error("Invalid Wallet operation amount");
   return value;
+};
+
+const canonicalAmount = (value: string): string => {
+  const [whole, rawFraction = ""] = value.split(".");
+  const fraction = rawFraction.replace(/0+$/, "");
+  return fraction ? `${whole}.${fraction}` : whole;
 };
 
 const rfc3339DateTime = (value: unknown, name: string): string => {
@@ -139,10 +151,30 @@ export function parseWalletOperationPage(value: unknown): WalletOperationPage {
   return { items, nextCursor: cursor(value.nextCursor) };
 }
 
+export function parseWalletOperationDetail(
+  value: unknown,
+  expected: Pick<WalletOperationRecord, "id" | "type" | "assetCode" | "amount">,
+): WalletOperationRecord {
+  const detail = parseWalletOperation(value);
+  if (detail.id !== operationId(expected.id))
+    throw new Error("Wallet operation detail id does not match the selected operation");
+  if (detail.type !== expected.type || !operationTypes.includes(expected.type))
+    throw new Error("Wallet operation detail type does not match the selected operation");
+  if (detail.assetCode !== assetCode(expected.assetCode))
+    throw new Error("Wallet operation detail asset does not match the selected operation");
+  if (canonicalAmount(detail.amount) !== canonicalAmount(amount(expected.amount)))
+    throw new Error("Wallet operation detail amount does not match the selected operation");
+  return detail;
+}
+
 export function walletOperationActivityPath(nextCursor?: string): string {
   const query = new URLSearchParams({ limit: String(WALLET_OPERATION_PAGE_SIZE) });
   if (nextCursor !== undefined) query.set("cursor", cursor(nextCursor) as string);
   return `/v1/wallet/operations?${query.toString()}`;
+}
+
+export function walletOperationDetailPath(selectedOperationId: string): string {
+  return `/v1/wallet/operations/${encodeURIComponent(operationId(selectedOperationId))}`;
 }
 
 export function mergeWalletOperationPages(
@@ -164,5 +196,18 @@ export function walletOperationActivityRequestIsCurrent(
     request.requestId === currentRequestId &&
     request.scopeKey === currentScopeKey &&
     request.cursor === currentCursor
+  );
+}
+
+export function walletOperationDetailRequestIsCurrent(
+  request: WalletOperationDetailRequestIdentity,
+  currentRequestId: number,
+  currentScopeKey: string | null,
+  currentOperationId: string | null,
+): boolean {
+  return (
+    request.requestId === currentRequestId &&
+    request.scopeKey === currentScopeKey &&
+    request.operationId === currentOperationId
   );
 }

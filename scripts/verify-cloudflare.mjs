@@ -27,8 +27,11 @@ assert(apiClient.includes("'/v1/wallet/transfers'"), "Wallet must use the authen
 assert(apiClient.includes("walletTransactionPath(selectedAsset,cursor)"), "Wallet must use the bounded public customer history path");
 assert(apiClient.includes("walletTransactionDetail:async"), "Wallet must use the public selected transaction detail endpoint");
 assert(apiClient.includes("walletOperations:async"), "Wallet must use the public all-account operation activity endpoint");
+assert(apiClient.includes("walletOperationDetail:async"), "Wallet must use the public selected operation detail endpoint");
 assert(walletOperations.includes("/v1/wallet/operations?"), "Wallet activity must use the public bounded operation contract");
 assert(walletOperations.includes("walletOperationActivityRequestIsCurrent"), "Wallet activity must remain scope, cursor and generation isolated");
+assert(walletOperations.includes("parseWalletOperationDetail"), "Wallet operation detail must bind its immutable public summary fields");
+assert(walletOperations.includes("walletOperationDetailRequestIsCurrent"), "Wallet operation detail must remain scope, selection and generation isolated");
 assert(apiClient.includes("parseCardBalance(await request<unknown>(cardBalancePath(id)),id)"), "Card balance must use the strict public response parser");
 assert(cardBalance.includes("cardBalanceRequestIsCurrent"), "Card balance must remain scope, selected-card and generation isolated");
 assert(apiClient.includes("parseCardLimits(await request<unknown>(cardLimitsPath(id)),id)"), "Card limits must use the strict public response parser");
@@ -48,6 +51,7 @@ assert(app.includes("Customer Wallet history"), "Wallet UI must expose public cu
 assert(app.includes("Transaction detail unavailable for this session"), "Wallet detail errors must remain safely normalized");
 assert(app.includes("Selected transaction"), "Wallet UI must expose the validated selected transaction detail");
 assert(app.includes("All-account Wallet activity · read only"), "Wallet UI must expose read-only all-account operation activity");
+assert(app.includes("Selected operation · read only"), "Wallet UI must expose read-only selected operation detail");
 assert(app.includes("No unvalidated or cross-card balance displayed"), "Card balance UI must fail closed for stale or invalid responses");
 assert(app.includes("No unvalidated or cross-card limits displayed"), "Card limits UI must fail closed for stale or invalid responses");
 assert(app.includes("Card limits · read only"), "Card limits UI must remain read only");

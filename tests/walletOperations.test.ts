@@ -4,9 +4,12 @@ import {
   WALLET_OPERATION_PAGE_SIZE,
   mergeWalletOperationPages,
   parseWalletOperation,
+  parseWalletOperationDetail,
   parseWalletOperationPage,
   walletOperationActivityPath,
   walletOperationActivityRequestIsCurrent,
+  walletOperationDetailPath,
+  walletOperationDetailRequestIsCurrent,
 } from "../src/walletOperations.ts";
 
 const rawOperation = (id = "operation-1"): Record<string, unknown> => ({
@@ -45,6 +48,37 @@ test("reconstructs exactly the nine public Wallet operation fields", () => {
   ]);
   for (const forbidden of ["tenantId", "customerId", "environment", "sourceAccountId", "destinationAccountId", "providerPayload", "journalIds", "failureReason"])
     assert.equal(forbidden in operation, false);
+});
+
+test("reconstructs operation detail and permits only non-identity fields to evolve", () => {
+  const selected = parseWalletOperation(rawOperation());
+  const detail = parseWalletOperationDetail({
+    ...rawOperation(),
+    status: "FAILED",
+    direction: "OUTGOING",
+    completedAt: null,
+    updatedAt: "2026-07-31T01:03:04.000Z",
+  }, selected);
+  assert.equal(detail.status, "FAILED");
+  assert.equal(detail.direction, "OUTGOING");
+  assert.equal(detail.completedAt, null);
+  assert.deepEqual(Object.keys(detail).sort(), [
+    "amount", "assetCode", "completedAt", "createdAt", "direction", "id", "status", "type", "updatedAt",
+  ]);
+});
+
+test("fails closed when operation detail identity, type, asset or amount changes", () => {
+  const selected = parseWalletOperation(rawOperation());
+  assert.throws(() => parseWalletOperationDetail(rawOperation("operation-2"), selected), /detail id/);
+  assert.throws(() => parseWalletOperationDetail({ ...rawOperation(), type: "DEPOSIT" }, selected), /detail type/);
+  assert.throws(() => parseWalletOperationDetail({ ...rawOperation(), assetCode: "EUR" }, selected), /detail asset/);
+  assert.throws(() => parseWalletOperationDetail({ ...rawOperation(), amount: "25.6" }, selected), /detail amount/);
+  assert.equal(parseWalletOperationDetail({ ...rawOperation(), amount: "25.5000" }, selected).amount, "25.5000");
+});
+
+test("builds a separately validated public operation detail path", () => {
+  assert.equal(walletOperationDetailPath("operation:1"), "/v1/wallet/operations/operation%3A1");
+  assert.throws(() => walletOperationDetailPath("bad/id"), /operation id/);
 });
 
 test("accepts only the public operation enums", () => {
@@ -105,4 +139,12 @@ test("rejects operation activity success, error and finally after scope, cursor 
   assert.equal(walletOperationActivityRequestIsCurrent(request, 7, "actor|tenant|other-customer|TEST", "cursor-a"), false);
   assert.equal(walletOperationActivityRequestIsCurrent(request, 7, "actor|tenant|customer|SANDBOX", "cursor-a"), false);
   assert.equal(walletOperationActivityRequestIsCurrent(request, 7, request.scopeKey, "cursor-b"), false);
+});
+
+test("rejects operation detail success, error and finally after selection, scope or generation changes", () => {
+  const request = { requestId: 11, scopeKey: "actor|tenant|customer|TEST", operationId: "operation-1" };
+  assert.equal(walletOperationDetailRequestIsCurrent(request, 11, request.scopeKey, "operation-1"), true);
+  assert.equal(walletOperationDetailRequestIsCurrent(request, 12, request.scopeKey, "operation-1"), false);
+  assert.equal(walletOperationDetailRequestIsCurrent(request, 11, "actor|tenant|other-customer|TEST", "operation-1"), false);
+  assert.equal(walletOperationDetailRequestIsCurrent(request, 11, request.scopeKey, "operation-2"), false);
 });
