@@ -53,6 +53,7 @@ export type WalletTransactionHistoryState = Readonly<{
 export type WalletTransactionTransportRequest = Readonly<{
   path: string;
   method: "GET";
+  signal?: AbortSignal;
 }>;
 
 export type WalletTransactionTransport = (
@@ -78,6 +79,15 @@ const transactionFields = [
   "updatedAt",
 ] as const;
 const filterFields = ["type", "status", "assetCode", "limit"] as const;
+
+function throwIfWalletTransactionRequestAborted(signal: AbortSignal | undefined): void {
+  if (signal?.aborted)
+    throw new DOMException("Wallet transaction request cancelled", "AbortError");
+}
+
+export function walletTransactionRequestWasAborted(value: unknown): boolean {
+  return value instanceof DOMException && value.name === "AbortError";
+}
 
 function walletTransactionSessionScope(
   session: WalletTransferSession | null,
@@ -458,7 +468,9 @@ export async function readWalletTransactionHistory(
   runtimeEnvironment: WalletTransferEnvironment,
   filtersInput: unknown,
   previous: WalletTransactionHistoryState | null = null,
+  signal?: AbortSignal,
 ): Promise<WalletTransactionHistoryState> {
+  throwIfWalletTransactionRequestAborted(signal);
   const scope = walletTransactionSessionScope(session, runtimeEnvironment);
   if (!scope) throw new Error("Wallet transaction history is unavailable for this session");
   const filters = normalizeWalletTransactionFilters(filtersInput);
@@ -471,7 +483,9 @@ export async function readWalletTransactionHistory(
   const raw = await transport({
     path: walletTransactionPath(filters, requestedCursor ?? undefined),
     method: "GET",
+    ...(signal ? { signal } : {}),
   });
+  throwIfWalletTransactionRequestAborted(signal);
   if (walletTransactionSessionScope(session, runtimeEnvironment) !== scope)
     throw new Error("Wallet transaction session expired during the request");
   const page = parseWalletTransactionPageRaw(raw, filters);
@@ -505,10 +519,17 @@ export async function readWalletTransactionDetail(
   session: WalletTransferSession,
   runtimeEnvironment: WalletTransferEnvironment,
   selected: WalletTransactionRecord,
+  signal?: AbortSignal,
 ): Promise<WalletTransactionRecord> {
+  throwIfWalletTransactionRequestAborted(signal);
   const scope = walletTransactionSessionScope(session, runtimeEnvironment);
   if (!scope) throw new Error("Wallet transaction detail is unavailable for this session");
-  const raw = await transport({ path: walletTransactionDetailPath(selected.id), method: "GET" });
+  const raw = await transport({
+    path: walletTransactionDetailPath(selected.id),
+    method: "GET",
+    ...(signal ? { signal } : {}),
+  });
+  throwIfWalletTransactionRequestAborted(signal);
   if (walletTransactionSessionScope(session, runtimeEnvironment) !== scope)
     throw new Error("Wallet transaction session expired during the request");
   return parseWalletTransactionDetailRaw(raw, selected);

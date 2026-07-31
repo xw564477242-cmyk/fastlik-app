@@ -11,6 +11,7 @@ import {
   walletTransactionFilterKey,
   walletTransactionHistoryRequestIsCurrent,
   walletTransactionPath,
+  walletTransactionRequestWasAborted,
   type WalletTransactionRecord,
 } from "../src/walletTransactions.ts";
 
@@ -370,6 +371,29 @@ test("permits exactly one GET per page and blocks mismatch or expiry before tran
     /unavailable/,
   );
   assert.equal(calls, 1);
+});
+
+test("rejects a pre-cancelled request without transport or abort-reason reflection", async () => {
+  let calls = 0;
+  const controller = new AbortController();
+  controller.abort({ providerPayload: "must-not-reflect" });
+  await assert.rejects(
+    readWalletTransactionHistory(
+      async () => {
+        calls += 1;
+        return JSON.stringify({ items: [], nextCursor: null });
+      },
+      session(),
+      "SANDBOX",
+      filters,
+      null,
+      controller.signal,
+    ),
+    error =>
+      walletTransactionRequestWasAborted(error) &&
+      (error as Error).message === "Wallet transaction request cancelled",
+  );
+  assert.equal(calls, 0);
 });
 
 test("binds request identity to scope, filters, cursor and generation", () => {

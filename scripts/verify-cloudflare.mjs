@@ -29,7 +29,7 @@ assert(walletTransfer.includes('WALLET_TRANSFER_ACCOUNTS_PATH = "/v1/wallet/acco
 assert(walletTransfer.includes('WALLET_TRANSFER_PATH = "/v1/wallet/transfers"'), "Wallet must use the authenticated internal-transfer contract");
 assert(apiClient.includes("readWalletTransferAccounts(walletTransferTransport,session,walletRuntime.environment)"), "Wallet account reads must use the bounded session-gated transfer contract");
 assert(apiClient.includes("submitWalletTransfer(walletTransferTransport,session,walletRuntime.environment,accounts,input,idempotencyKey)"), "Wallet transfer writes must use the bounded exact contract");
-assert(apiClient.includes("readWalletTransactionHistory(walletTransactionTransport,session,walletRuntime.environment,filters,previous)"), "Wallet must use the bounded session-gated public customer history path");
+assert(apiClient.includes("readWalletTransactionHistory(walletTransactionTransport,session,walletRuntime.environment,filters,previous,signal)"), "Wallet must use the bounded session-gated public customer history path with caller cancellation");
 assert(apiClient.includes("walletTransactionDetail:async"), "Wallet must use the public selected transaction detail endpoint");
 assert(apiClient.includes("walletOperations:async"), "Wallet must use the public all-account operation activity endpoint");
 assert(apiClient.includes("walletOperationDetail:async"), "Wallet must use the public selected operation detail endpoint");
@@ -49,6 +49,7 @@ assert(walletTransactions.includes('WALLET_TRANSACTION_PATH = "/v1/wallet/transa
 assert(walletTransactions.includes("walletTransactionDetailPath"), "Wallet detail must use a validated public transaction path");
 assert(!walletData.includes("/v1/wallet/accounts/${encodeURIComponent(accountId)}/transactions"), "Wallet history must not use the legacy account transaction route");
 assert(walletTransactions.includes("walletTransactionHistoryRequestIsCurrent"), "Wallet history must be isolated by scope, filters, cursor and generation");
+assert(walletTransactions.includes("throwIfWalletTransactionRequestAborted(signal)"), "Wallet history and detail must reject responses after caller cancellation");
 assert(walletData.includes("walletTransactionDetailRequestIsCurrent"), "Wallet detail must remain scope, asset, transaction and generation isolated");
 assert(walletData.includes("walletRequestIsCurrent"), "Wallet async responses must remain scope and account isolated");
 assert(walletData.includes("walletOperationPath"), "Wallet transfer status must use the existing safe operation endpoint");
@@ -58,6 +59,7 @@ assert(app.includes("Internal transfer"), "Wallet UI must expose internal transf
 assert(app.includes("Customer Wallet history"), "Wallet UI must expose public customer Wallet history");
 assert(app.includes("Transaction detail unavailable for this session"), "Wallet detail errors must remain safely normalized");
 assert(app.includes("Selected transaction"), "Wallet UI must expose the validated selected transaction detail");
+assert(app.includes("walletHistoryAbortController.current?.abort()") && app.includes("walletTransactionDetailAbortController.current?.abort()"), "Wallet transaction requests must actively cancel on invalidation or unmount");
 assert(app.includes("All-account Wallet activity · read only"), "Wallet UI must expose read-only all-account operation activity");
 assert(app.includes("Selected operation · read only"), "Wallet UI must expose read-only selected operation detail");
 assert(app.includes("Create virtual card"), "Wallet UI must expose the gated non-production Virtual Card form");
