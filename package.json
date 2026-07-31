@@ -8,6 +8,7 @@
     "build": "tsc --noEmit && vite build",
     "build:cloudflare": "bash scripts/build-cloudflare.sh",
     "preview": "vite preview",
+    "test": "node --experimental-strip-types --test tests/*.test.ts",
     "test:cloudflare": "node scripts/verify-cloudflare.mjs"
   },
   "dependencies": {

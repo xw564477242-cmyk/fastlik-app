@@ -1,3 +1,5 @@
+import {cardListPath,parseCardPage,parseCardRecord} from './cardList'
+
 export type FastLinkEnvironment='LOCAL'|'SANDBOX'|'TEST'|'UAT'|'PRODUCTION'
 export type WalletSession={actorId:string;tenantId:string;customerId:string;environment:FastLinkEnvironment;expiresAt?:string}
 export type WalletCredentials={tenantId:string;email:string;password:string}
@@ -62,8 +64,8 @@ export const walletApi={
  walletBalance:(accountId:string)=>request<Record<string,unknown>>(`/v1/wallet/accounts/${encodeURIComponent(accountId)}/balance`),
  walletTransactions:(accountId:string)=>request<WalletTransactionPage>(`/v1/wallet/accounts/${encodeURIComponent(accountId)}/transactions?limit=100`),
  internalTransfer:(input:InternalTransferInput)=>request<Record<string,unknown>>('/v1/wallet/transfers','POST',input,crypto.randomUUID()),
- cards:()=>request<Array<Record<string,unknown>>>('/v1/cards'),
- card:(id:string)=>request<Record<string,unknown>>(`/v1/cards/${encodeURIComponent(id)}`),
+ cards:async(cursor?:string)=>parseCardPage(await request<unknown>(cardListPath(cursor))),
+ card:async(id:string)=>parseCardRecord(await request<unknown>(`/v1/cards/${encodeURIComponent(id)}`)),
  balance:(id:string)=>request<Record<string,unknown>>(`/v1/cards/${encodeURIComponent(id)}/balance`),
  transactions:(id:string)=>request<Record<string,unknown>>(`/v1/cards/${encodeURIComponent(id)}/transactions`),
  freeze:(id:string)=>request<Record<string,unknown>>(`/v1/cards/${encodeURIComponent(id)}/freeze`,'POST',undefined,crypto.randomUUID()),
