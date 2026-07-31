@@ -119,8 +119,54 @@ test("accepts only bounded exact account JSON and validates ledger balances", ()
     /available balance/,
   );
   assert.throws(
+    () =>
+      parseWalletTransferAccountsRaw(
+        JSON.stringify([account("account-source-01", { availableBalance: "100" })]),
+      ),
+    /available balance/,
+  );
+  assert.throws(
     () => parseWalletTransferAccountsRaw("x".repeat(WALLET_TRANSFER_ACCOUNT_MAX_JSON_BYTES + 1)),
     /limit/,
+  );
+});
+
+test("rejects duplicate account JSON keys before parsing, including escaped equivalents", () => {
+  const encoded = JSON.stringify(account("account-source-01"));
+  assert.throws(
+    () => parseWalletTransferAccountsRaw(`[${encoded.slice(0, -1)},"name":"Duplicate"}]`),
+    /Duplicate.*key/,
+  );
+  assert.throws(
+    () =>
+      parseWalletTransferAccountsRaw(
+        `[${encoded.slice(0, -1)},"na\\u006de":"Duplicate"}]`,
+      ),
+    /Duplicate.*key/,
+  );
+});
+
+test("requires trimmed control-free account text bounded by UTF-8 bytes", () => {
+  for (const name of ["", "   ", " Wallet", "Wallet ", "Wallet\u0000Name", "Wallet\u007fName"])
+    assert.throws(
+      () =>
+        parseWalletTransferAccountsRaw(
+          JSON.stringify([account("account-source-01", { name })]),
+        ),
+      /account name/,
+    );
+  assert.throws(
+    () =>
+      parseWalletTransferAccountsRaw(
+        JSON.stringify([account("account-source-01", { name: "界".repeat(41) })]),
+      ),
+    /account name/,
+  );
+  assert.equal(
+    parseWalletTransferAccountsRaw(
+      JSON.stringify([account("account-source-01", { name: "界".repeat(40) })]),
+    )[0].name,
+    "界".repeat(40),
   );
 });
 
@@ -229,6 +275,30 @@ test("accepts only the exact bounded public receipt and rejects internal fields"
         input,
       ),
     /time order/,
+  );
+});
+
+test("rejects duplicate receipt JSON keys at every object level and after escape decoding", () => {
+  const encoded = JSON.stringify(receipt());
+  assert.throws(
+    () => parseWalletTransferReceiptRaw(`${encoded.slice(0, -1)},"status":"FAILED"}`, input),
+    /Duplicate.*key/,
+  );
+  assert.throws(
+    () =>
+      parseWalletTransferReceiptRaw(
+        `${encoded.slice(0, -1)},"sta\\u0074us":"FAILED"}`,
+        input,
+      ),
+    /Duplicate.*key/,
+  );
+  assert.throws(
+    () =>
+      parseWalletTransferReceiptRaw(
+        `${encoded.slice(0, -1)},"metadata":{"trace":"one","tr\\u0061ce":"two"}}`,
+        input,
+      ),
+    /Duplicate.*key/,
   );
 });
 

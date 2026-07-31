@@ -6,6 +6,7 @@ import type {
 export const WALLET_TRANSFER_ACCOUNT_MAX_ITEMS = 100;
 export const WALLET_TRANSFER_ACCOUNT_MAX_JSON_BYTES = 65_536;
 export const WALLET_TRANSFER_RESPONSE_MAX_JSON_BYTES = 16_384;
+export const WALLET_TRANSFER_MAX_JSON_DEPTH = 128;
 export const WALLET_TRANSFER_ACCOUNTS_PATH = "/v1/wallet/accounts";
 export const WALLET_TRANSFER_PATH = "/v1/wallet/transfers";
 
@@ -83,10 +84,119 @@ const inputFields = [
   "amount",
 ] as const;
 
+function rejectDuplicateJsonObjectKeys(raw: string, name: string): void {
+  let index = 0;
+  const invalid = () => new Error(`Invalid ${name} JSON response`);
+  const skipWhitespace = () => {
+    while (
+      index < raw.length &&
+      (raw[index] === " " ||
+        raw[index] === "\t" ||
+        raw[index] === "\n" ||
+        raw[index] === "\r")
+    )
+      index += 1;
+  };
+  const readString = (): string => {
+    const start = index;
+    if (raw[index] !== '"') throw invalid();
+    index += 1;
+    while (index < raw.length) {
+      const code = raw.charCodeAt(index);
+      if (code === 0x22) {
+        index += 1;
+        try {
+          const decoded = JSON.parse(raw.slice(start, index)) as unknown;
+          if (typeof decoded !== "string") throw invalid();
+          return decoded;
+        } catch {
+          throw invalid();
+        }
+      }
+      if (code <= 0x1f) throw invalid();
+      if (code === 0x5c) {
+        index += 1;
+        if (index >= raw.length) throw invalid();
+        if (raw[index] === "u") {
+          if (!/^[0-9A-Fa-f]{4}$/.test(raw.slice(index + 1, index + 5))) throw invalid();
+          index += 5;
+        } else index += 1;
+      } else index += 1;
+    }
+    throw invalid();
+  };
+  const parseValue = (depth: number): void => {
+    if (depth > WALLET_TRANSFER_MAX_JSON_DEPTH) throw invalid();
+    skipWhitespace();
+    if (raw[index] === "{") {
+      index += 1;
+      skipWhitespace();
+      const keys = new Set<string>();
+      if (raw[index] === "}") {
+        index += 1;
+        return;
+      }
+      while (index < raw.length) {
+        const key = readString();
+        if (keys.has(key)) throw new Error(`Duplicate ${name} JSON object key`);
+        keys.add(key);
+        skipWhitespace();
+        if (raw[index] !== ":") throw invalid();
+        index += 1;
+        parseValue(depth + 1);
+        skipWhitespace();
+        if (raw[index] === "}") {
+          index += 1;
+          return;
+        }
+        if (raw[index] !== ",") throw invalid();
+        index += 1;
+        skipWhitespace();
+      }
+      throw invalid();
+    }
+    if (raw[index] === "[") {
+      index += 1;
+      skipWhitespace();
+      if (raw[index] === "]") {
+        index += 1;
+        return;
+      }
+      while (index < raw.length) {
+        parseValue(depth + 1);
+        skipWhitespace();
+        if (raw[index] === "]") {
+          index += 1;
+          return;
+        }
+        if (raw[index] !== ",") throw invalid();
+        index += 1;
+      }
+      throw invalid();
+    }
+    if (raw[index] === '"') {
+      readString();
+      return;
+    }
+    for (const literal of ["true", "false", "null"])
+      if (raw.startsWith(literal, index)) {
+        index += literal.length;
+        return;
+      }
+    const number = /^-?(?:0|[1-9]\d*)(?:\.\d+)?(?:[eE][+-]?\d+)?/.exec(raw.slice(index));
+    if (!number) throw invalid();
+    index += number[0].length;
+  };
+  parseValue(0);
+  skipWhitespace();
+  if (index !== raw.length) throw invalid();
+}
+
 function boundedRawJson(raw: unknown, maximumBytes: number, name: string): unknown {
   if (typeof raw !== "string") throw new Error(`Invalid ${name} raw response`);
   if (raw.length > maximumBytes || new TextEncoder().encode(raw).byteLength > maximumBytes)
     throw new Error(`${name} raw response exceeds the consumer limit`);
+  rejectDuplicateJsonObjectKeys(raw, name);
   try {
     return JSON.parse(raw) as unknown;
   } catch {
@@ -128,7 +238,13 @@ function publicId(value: unknown, name: string): string {
 }
 
 function publicText(value: unknown, name: string, maximum = 120): string {
-  if (typeof value !== "string" || value.length < 1 || value.length > maximum)
+  if (
+    typeof value !== "string" ||
+    value.length < 1 ||
+    value !== value.trim() ||
+    /[\u0000-\u001f\u007f]/.test(value) ||
+    new TextEncoder().encode(value).byteLength > maximum
+  )
     throw new Error(`Invalid ${name}`);
   return value;
 }
@@ -200,7 +316,7 @@ function parseAccount(value: unknown): WalletAccountRecord {
   const available = decimalParts(record.availableBalance, "available balance");
   if (current.scaled !== posted.scaled + pending.scaled)
     throw new Error("Inconsistent Wallet transfer account balance");
-  if (available.scaled < 0n || available.scaled > posted.scaled)
+  if (available.scaled < 0n || available.scaled !== posted.scaled)
     throw new Error("Inconsistent Wallet transfer available balance");
   if (!(["ACTIVE", "FROZEN", "CLOSED"] as unknown[]).includes(record.status))
     throw new Error("Invalid Wallet transfer account status");
