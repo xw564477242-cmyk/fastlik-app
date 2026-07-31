@@ -76,8 +76,9 @@ assert(app.includes("setTransferReceipt(null)") && app.includes("replaceAccounts
 assert(app.includes("useEffect(()=>{if(!session)return;const expiresAt=") && app.includes("window.setTimeout(()=>clear()"), "Wallet must clear transfer state when the session expires");
 assert(app.includes("const isCurrent=()=>walletTransferSessionScope(session,walletRuntime.environment)===scope"), "Wallet transfer completions must re-check session expiry before every write");
 assert(app.includes("catch{if(isCurrent())setWalletError(describeWalletTransfer())}"), "Wallet transfer errors must remain Provider, trace, and internal-detail neutral");
-assert(apiClient.includes("readWalletTransactionHistory(walletTransactionTransport,session,walletRuntime.environment,filters,previous)"), "Wallet must consume bounded session-gated customer Wallet history");
+assert(apiClient.includes("readWalletTransactionHistory(walletTransactionTransport,session,walletRuntime.environment,filters,previous,signal)"), "Wallet must consume bounded session-gated customer Wallet history with caller cancellation");
 assert(apiClient.includes("walletTransactionDetail:async"), "Wallet must consume the public selected transaction detail endpoint");
+assert(apiClient.includes("walletTransactionTransport=({path,method,signal}") && apiClient.includes("externalSignal?.addEventListener('abort',cancel,{once:true})"), "Wallet transaction fetches must compose timeout and caller cancellation signals");
 assert(apiClient.includes("walletOperations:async") && apiClient.includes("parseWalletOperationPage(await request<unknown>(walletOperationActivityPath(cursor)))"), "Wallet must consume typed all-account operation activity");
 assert(apiClient.includes("walletOperationDetail:async") && apiClient.includes("parseWalletOperationDetail(await request<unknown>(walletOperationDetailPath(selected.id)),selected)"), "Wallet must consume typed selected operation detail");
 assert(apiClient.includes("createVirtualCard:async") && apiClient.includes("virtualCardCreateDecision(sessionEnvironment,walletRuntime.environment)"), "Virtual Card creation must fail closed against both session and runtime environment");
@@ -109,6 +110,7 @@ assert(walletTransactions.includes("walletTransactionDetailPath"), "Wallet detai
 assert(walletTransactions.includes("parseWalletTransactionDetailRaw"), "Wallet detail must be reconstructed from the exact bounded public transaction allowlist");
 assert(walletData.includes("walletRequestIsCurrent"), "Wallet responses must be isolated by scope, account and request generation");
 assert(walletTransactions.includes("walletTransactionHistoryRequestIsCurrent"), "Wallet history must be isolated by session scope, filters, opaque cursor and request generation");
+assert(walletTransactions.includes("throwIfWalletTransactionRequestAborted(signal)") && walletTransactions.includes("walletTransactionRequestWasAborted"), "Wallet history and detail must fail closed before committing an aborted response");
 assert(walletData.includes("walletTransactionDetailRequestIsCurrent"), "Wallet detail must be isolated by scope, asset, transaction and request generation");
 assert(walletTransactions.includes('WALLET_TRANSACTION_PATH = "/v1/wallet/transactions"'), "Wallet history must use the public customer contract");
 assert(walletTransactions.includes("WALLET_TRANSACTION_MAX_JSON_BYTES = 131_072"), "Wallet history raw JSON must remain bounded");
@@ -118,6 +120,11 @@ assert(walletTransactions.includes("walletTransactionSessionScope(session, runti
 assert(walletTransactions.includes("Duplicate Wallet transaction id across pages") && walletTransactions.includes("cursor loop or rollback") && walletTransactions.includes("pages are not strictly monotonic"), "Wallet history pagination must fail closed on duplicate IDs, cursor regression, and ordering regression");
 assert(walletTransactions.includes("\\.\\d{0,17}[1-9]") && walletTransactions.includes("finalAlphabetIndex % 16") && walletTransactions.includes("finalAlphabetIndex % 4"), "Wallet history amounts and opaque cursors must use unique canonical representations");
 assert(app.includes("walletHistoryInFlight.current=false") && app.includes("replaceWalletTransactions(null)"), "Wallet identity and filter changes must synchronously clear Wallet history state");
+assert(app.includes("walletHistoryAbortController.current?.abort()") && app.includes("walletTransactionDetailAbortController.current?.abort()"), "Wallet history and detail invalidation must actively cancel transport");
+assert(app.includes("walletRequestMounted.current=false") && app.includes("walletHistoryRequestSequence.current+=1;walletTransactionDetailRequestSequence.current+=1"), "Wallet unmount must invalidate and cancel every Wallet transaction request");
+assert(app.includes("walletApi.walletTransactions(activeSession,filters,null,historyController.signal)") && app.includes("walletApi.walletTransactions(session,filters,previous,historyController.signal)"), "Wallet list and next-page requests must carry their active cancellation signal");
+assert(app.includes("walletApi.walletTransactionDetail(session,transaction,detailController.signal)"), "Wallet detail requests must carry their active cancellation signal");
+assert(app.includes("!walletTransactionRequestWasAborted") && !app.includes("describe(value instanceof DOMException"), "Wallet cancellation must never reflect upstream abort data");
 assert(!walletData.includes("/v1/wallet/accounts/${encodeURIComponent(accountId)}/transactions"), "Legacy account history must remain removed");
 assert(walletData.includes("walletTransferStatusRequestIsCurrent"), "Transfer status must be isolated by scope, source account, operation and request generation");
 assert(walletData.includes("WALLET_TRANSFER_STATUS_REFRESH_LIMIT = 5"), "Transfer status refresh must remain bounded");

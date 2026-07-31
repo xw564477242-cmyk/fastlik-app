@@ -3,10 +3,12 @@ import test from "node:test";
 import {
   createWalletTransactionHistoryRequestIdentity,
   normalizeWalletTransactionFilters,
+  readWalletTransactionDetail,
   readWalletTransactionHistory,
   walletTransactionFilterKey,
   walletTransactionHistoryRequestIsCurrent,
   walletTransactionPath,
+  walletTransactionRequestWasAborted,
   type WalletTransactionTransportRequest,
 } from "../src/walletTransactions.ts";
 import { walletTransferSessionScope } from "../src/walletTransfer.ts";
@@ -205,4 +207,111 @@ integration("fails closed on internal fields, duplicate IDs, cursor loops and pa
     ),
     /loop|rollback/,
   );
+});
+
+integration("actively cancels mounted history and next-page requests on scope or filter invalidation", async () => {
+  const firstItems = Array.from({ length: 25 }, (_, index) =>
+    transaction(`transaction-${String(99 - index).padStart(2, "0")}`, 59 - index));
+  const first = await readWalletTransactionHistory(
+    async () => JSON.stringify({ items: firstItems, nextCursor: cursorPage2 }),
+    session(),
+    environment!,
+    filters,
+  );
+  for (const scenario of [
+    {
+      name: "scope",
+      previous: null,
+      response: JSON.stringify({ items: firstItems, nextCursor: cursorPage2 }),
+    },
+    {
+      name: "filter",
+      previous: first,
+      response: JSON.stringify({ items: [transaction("transaction-74", 34)], nextCursor: null }),
+    },
+  ]) {
+    const controller = new AbortController();
+    let transportSignal: AbortSignal | undefined;
+    let resolveResponse!: (value: string) => void;
+    let committed = false;
+    const pending = readWalletTransactionHistory(
+      ({ signal }) => {
+        transportSignal = signal;
+        return new Promise((resolve, reject) => {
+          resolveResponse = resolve;
+          if (scenario.name === "scope")
+            signal?.addEventListener(
+              "abort",
+              () => reject(new DOMException("transport cancelled", "AbortError")),
+              { once: true },
+            );
+        });
+      },
+      session(),
+      environment!,
+      filters,
+      scenario.previous,
+      controller.signal,
+    ).then(
+      () => {
+        committed = true;
+        return null;
+      },
+      error => error,
+    );
+    await Promise.resolve();
+    assert.equal(transportSignal, controller.signal, `${scenario.name} request must receive its signal`);
+    controller.abort();
+    if (scenario.name === "filter") resolveResponse(scenario.response);
+    const error = await pending;
+    resolveResponse(scenario.response);
+    await Promise.resolve();
+    assert.equal(walletTransactionRequestWasAborted(error), true);
+    assert.equal(committed, false, `${scenario.name} late response must not commit`);
+  }
+});
+
+integration("actively cancels mounted transaction detail on selection change or unmount", async () => {
+  for (const scenario of ["selection", "unmount"] as const) {
+    const controller = new AbortController();
+    let transportSignal: AbortSignal | undefined;
+    let resolveResponse!: (value: string) => void;
+    let mounted = true;
+    let committed = false;
+    const selected = transaction("transaction-01", 59);
+    const pending = readWalletTransactionDetail(
+      ({ signal }) => {
+        transportSignal = signal;
+        return new Promise((resolve, reject) => {
+          resolveResponse = resolve;
+          if (scenario === "selection")
+            signal?.addEventListener(
+              "abort",
+              () => reject(new DOMException("transport cancelled", "AbortError")),
+              { once: true },
+            );
+        });
+      },
+      session(),
+      environment!,
+      selected,
+      controller.signal,
+    ).then(
+      () => {
+        if (mounted) committed = true;
+        return null;
+      },
+      error => error,
+    );
+    await Promise.resolve();
+    assert.equal(transportSignal, controller.signal);
+    if (scenario === "unmount") mounted = false;
+    controller.abort();
+    if (scenario === "unmount") resolveResponse(JSON.stringify(selected));
+    const error = await pending;
+    resolveResponse(JSON.stringify(selected));
+    await Promise.resolve();
+    assert.equal(walletTransactionRequestWasAborted(error), true);
+    assert.equal(committed, false, `${scenario} late detail must not commit`);
+  }
 });
