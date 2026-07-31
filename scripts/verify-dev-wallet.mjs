@@ -61,11 +61,15 @@ assert(apiClient.includes("walletTransferStatus:async"), "Wallet must consume th
 assert(apiClient.includes("walletTransactionPath(selectedAsset,cursor)"), "Wallet must consume bounded public customer Wallet history");
 assert(apiClient.includes("walletTransactionDetail:async"), "Wallet must consume the public selected transaction detail endpoint");
 assert(apiClient.includes("walletOperations:async") && apiClient.includes("parseWalletOperationPage(await request<unknown>(walletOperationActivityPath(cursor)))"), "Wallet must consume typed all-account operation activity");
+assert(apiClient.includes("walletOperationDetail:async") && apiClient.includes("parseWalletOperationDetail(await request<unknown>(walletOperationDetailPath(selected.id)),selected)"), "Wallet must consume typed selected operation detail");
 assert(walletOperations.includes("/v1/wallet/operations?"), "Wallet activity must use the public operation history contract");
 assert(walletOperations.includes("new URLSearchParams({ limit:"), "Wallet activity requests must remain bounded");
 assert(!walletOperations.includes("new URLSearchParams({ assetCode"), "Wallet activity must not invent an asset filter");
 assert(walletOperations.includes("parseWalletOperationPage"), "Wallet activity must reconstruct the public response allowlist");
 assert(walletOperations.includes("walletOperationActivityRequestIsCurrent"), "Wallet activity must be isolated by session scope, cursor and request generation");
+assert(walletOperations.includes("parseWalletOperationDetail"), "Wallet operation detail must reconstruct the public response allowlist and bind immutable summary fields");
+assert(walletOperations.includes("walletOperationDetailPath"), "Wallet operation detail must use its own validated public path helper");
+assert(walletOperations.includes("walletOperationDetailRequestIsCurrent"), "Wallet operation detail must be isolated by session scope, selection and request generation");
 assert(walletData.includes("walletTransactionDetailPath"), "Wallet detail must use a validated public transaction path");
 assert(walletData.includes("parseWalletTransactionDetail"), "Wallet detail must be reconstructed from the public transaction allowlist");
 assert(walletData.includes("walletRequestIsCurrent"), "Wallet responses must be isolated by scope, account and request generation");
@@ -84,6 +88,9 @@ assert(app.includes("Transaction detail unavailable for this session"), "Wallet 
 assert(app.includes("Selected transaction"), "Wallet UI must expose the validated selected transaction detail");
 assert(app.includes("All-account Wallet activity · read only"), "Wallet activity UI must remain explicitly read only");
 assert(app.includes("No unvalidated or cross-session activity displayed"), "Wallet activity UI must fail closed for stale or invalid responses");
+assert(app.includes("Selected operation · read only"), "Wallet operation detail UI must remain explicitly read only");
+assert(app.includes("Wallet operation detail unavailable for this session"), "Wallet operation detail errors must use one safe public message");
+assert(app.includes("clearWalletOperationDetail();const request={requestId:++walletOperationRequestSequence.current"), "Wallet pagination must synchronously clear selected operation detail");
 
 const excluded = new Set([".git", "node_modules", "dist", "docs"]);
 const secretPatterns = [
