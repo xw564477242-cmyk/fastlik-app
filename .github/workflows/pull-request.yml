@@ -42,6 +42,9 @@ jobs:
       - name: Lint and Type Check
         run: npx tsc --noEmit
 
+      - name: Repository Unit Tests
+        run: npm test
+
       - name: Unit and Security Contract Test
         run: node scripts/verify-dev-wallet.mjs
 
@@ -50,7 +53,7 @@ jobs:
           VITE_PUBLIC_BASE: /
           VITE_FASTLINK_API_URL: https://fastlink-backend-dev-development-a.up.railway.app/api
           VITE_FASTLINK_ENVIRONMENT: SANDBOX
-          VITE_FASTLINK_BUILD_SHA: ${{ github.sha }}
+          VITE_FASTLINK_BUILD_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
         run: |
           npm run build
           test -f dist/runtime-config.js
@@ -61,7 +64,7 @@ jobs:
           VITE_PUBLIC_BASE: /fastlik-app/
           VITE_FASTLINK_API_URL: https://fastlink-backend-dev-development-a.up.railway.app/api
           VITE_FASTLINK_ENVIRONMENT: SANDBOX
-          VITE_FASTLINK_BUILD_SHA: ${{ github.sha }}
+          VITE_FASTLINK_BUILD_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
         run: |
           npm run build
           test -f dist/runtime-config.js
@@ -98,3 +101,24 @@ jobs:
 
       - name: Secret Scan
         run: node scripts/verify-dev-wallet.mjs
+
+      - name: Record immutable non-production evidence
+        shell: bash
+        env:
+          SOURCE_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+        run: |
+          set -euo pipefail
+          printf '{"format":"fastlink-wallet-pr-evidence-v1","sourceCommit":"%s","environment":"NON_PRODUCTION"}\n' "$SOURCE_SHA" > build-evidence.json
+          sha256sum dist/index.html dist/runtime-config.js package-lock.json build-evidence.json > build-provenance.sha256
+          sha256sum --check build-provenance.sha256
+
+      - name: Upload non-production build evidence
+        uses: actions/upload-artifact@v4
+        with:
+          name: fastlink-wallet-pr-${{ github.event.pull_request.head.sha || github.sha }}
+          path: |
+            dist/
+            build-evidence.json
+            build-provenance.sha256
+          if-no-files-found: error
+          retention-days: 7
