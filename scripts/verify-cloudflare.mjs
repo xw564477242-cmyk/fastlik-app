@@ -49,6 +49,7 @@ assert(walletTransactions.includes('WALLET_TRANSACTION_PATH = "/v1/wallet/transa
 assert(walletTransactions.includes("walletTransactionDetailPath"), "Wallet detail must use a validated public transaction path");
 assert(!walletData.includes("/v1/wallet/accounts/${encodeURIComponent(accountId)}/transactions"), "Wallet history must not use the legacy account transaction route");
 assert(walletTransactions.includes("walletTransactionHistoryRequestIsCurrent"), "Wallet history must be isolated by scope, filters, cursor and generation");
+assert(walletTransactions.includes("createWalletTransactionDetailRequestIdentity") && walletTransactions.includes("walletTransactionDetailRefreshAllowed"), "Wallet detail refresh must bind current account, filter and listed public transaction");
 assert(walletTransactions.includes("throwIfWalletTransactionRequestAborted(signal)"), "Wallet history and detail must reject responses after caller cancellation");
 assert(walletData.includes("walletTransactionDetailRequestIsCurrent"), "Wallet detail must remain scope, asset, transaction and generation isolated");
 assert(walletData.includes("walletRequestIsCurrent"), "Wallet async responses must remain scope and account isolated");
@@ -59,6 +60,7 @@ assert(app.includes("Internal transfer"), "Wallet UI must expose internal transf
 assert(app.includes("Customer Wallet history"), "Wallet UI must expose public customer Wallet history");
 assert(app.includes("Transaction detail unavailable for this session"), "Wallet detail errors must remain safely normalized");
 assert(app.includes("Selected transaction"), "Wallet UI must expose the validated selected transaction detail");
+assert(app.includes("refreshSelectedWalletTransaction") && app.includes("no automatic retries"), "Wallet selected detail refresh must remain explicit and manual only");
 assert(app.includes("walletHistoryAbortController.current?.abort()") && app.includes("walletTransactionDetailAbortController.current?.abort()"), "Wallet transaction requests must actively cancel on invalidation or unmount");
 assert(app.includes("Wallet transaction type filter") && app.includes("Wallet transaction status filter"), "Wallet history must expose closed Type and Status filter controls");
 assert(walletTransactions.includes("walletTransactionFiltersForSelectedAsset") && walletTransactions.includes("limit: WALLET_TRANSACTION_PAGE_SIZE"), "Wallet history filters must retain selected-asset and fixed-limit boundaries");

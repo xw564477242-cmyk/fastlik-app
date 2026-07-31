@@ -5,6 +5,7 @@ import {
   WALLET_TRANSACTION_STATUSES,
   WALLET_TRANSACTION_TYPES,
   advanceWalletTransactionHistory,
+  createWalletTransactionDetailRequestIdentity,
   createWalletTransactionHistoryRequestIdentity,
   normalizeWalletTransactionFilters,
   normalizeWalletTransactionFilterSelection,
@@ -15,6 +16,8 @@ import {
   walletTransactionFilterRequestAllowed,
   walletTransactionFiltersForSelectedAsset,
   walletTransactionHistoryRequestIsCurrent,
+  walletTransactionDetailRefreshAllowed,
+  walletTransactionDetailRequestIsCurrent,
   walletTransactionPath,
   walletTransactionRequestWasAborted,
   type WalletTransactionRecord,
@@ -498,4 +501,55 @@ test("selected detail remains exact, public and immutable", () => {
       ),
     /immutable/,
   );
+});
+
+test("binds detail refresh to generation, scope, account, filter and exact listed transaction", () => {
+  const detailFilters = walletTransactionFiltersForSelectedAsset(
+    { type: "TRANSFER", status: "COMPLETED" },
+    "USD",
+  );
+  const history = advanceWalletTransactionHistory(
+    null,
+    parseWalletTransactionPageRaw(
+      JSON.stringify({ items: [transaction("transaction-refresh", 59)], nextCursor: null }),
+      detailFilters,
+    ),
+    detailFilters,
+    null,
+  );
+  const selected = history.items[0];
+  const request = createWalletTransactionDetailRequestIdentity(
+    7,
+    "scope-a",
+    "account-usd",
+    detailFilters,
+    selected,
+  );
+  assert.equal(walletTransactionDetailRefreshAllowed(selected, history, detailFilters), true);
+  assert.equal(
+    walletTransactionDetailRequestIsCurrent(
+      request,
+      7,
+      "scope-a",
+      "account-usd",
+      detailFilters,
+      history,
+      selected,
+    ),
+    true,
+  );
+  const staleVersion = { ...selected, status: "FAILED" as const };
+  for (const current of [
+    [8, "scope-a", "account-usd", detailFilters, history, selected],
+    [7, "scope-b", "account-usd", detailFilters, history, selected],
+    [7, "scope-a", "account-eur", detailFilters, history, selected],
+    [7, "scope-a", "account-usd", { ...detailFilters, status: "FAILED" }, history, selected],
+    [7, "scope-a", "account-usd", detailFilters, history, staleVersion],
+    [7, "scope-a", "account-usd", detailFilters, null, selected],
+  ] as const)
+    assert.equal(
+      walletTransactionDetailRequestIsCurrent(request, ...current),
+      false,
+    );
+  assert.equal(walletTransactionDetailRefreshAllowed(staleVersion, history, detailFilters), false);
 });
