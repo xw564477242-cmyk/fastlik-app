@@ -7,6 +7,7 @@ const app = readFileSync(join(root, "src/App.tsx"), "utf8");
 const cardBalance = readFileSync(join(root, "src/cardBalance.ts"), "utf8");
 const cardLimits = readFileSync(join(root, "src/cardLimits.ts"), "utf8");
 const walletData = readFileSync(join(root, "src/walletData.ts"), "utf8");
+const walletOperations = readFileSync(join(root, "src/walletOperations.ts"), "utf8");
 const index = readFileSync(join(root, "index.html"), "utf8");
 const vite = readFileSync(join(root, "vite.config.ts"), "utf8");
 const runtimeTemplate = readFileSync(join(root, "runtime-config.template.js"), "utf8");
@@ -59,6 +60,12 @@ assert(apiClient.includes("const idempotencyKey=crypto.randomUUID()"), "Each tra
 assert(apiClient.includes("walletTransferStatus:async"), "Wallet must consume the existing safe operation status endpoint");
 assert(apiClient.includes("walletTransactionPath(selectedAsset,cursor)"), "Wallet must consume bounded public customer Wallet history");
 assert(apiClient.includes("walletTransactionDetail:async"), "Wallet must consume the public selected transaction detail endpoint");
+assert(apiClient.includes("walletOperations:async") && apiClient.includes("parseWalletOperationPage(await request<unknown>(walletOperationActivityPath(cursor)))"), "Wallet must consume typed all-account operation activity");
+assert(walletOperations.includes("/v1/wallet/operations?"), "Wallet activity must use the public operation history contract");
+assert(walletOperations.includes("new URLSearchParams({ limit:"), "Wallet activity requests must remain bounded");
+assert(!walletOperations.includes("new URLSearchParams({ assetCode"), "Wallet activity must not invent an asset filter");
+assert(walletOperations.includes("parseWalletOperationPage"), "Wallet activity must reconstruct the public response allowlist");
+assert(walletOperations.includes("walletOperationActivityRequestIsCurrent"), "Wallet activity must be isolated by session scope, cursor and request generation");
 assert(walletData.includes("walletTransactionDetailPath"), "Wallet detail must use a validated public transaction path");
 assert(walletData.includes("parseWalletTransactionDetail"), "Wallet detail must be reconstructed from the public transaction allowlist");
 assert(walletData.includes("walletRequestIsCurrent"), "Wallet responses must be isolated by scope, account and request generation");
@@ -75,6 +82,8 @@ assert(app.includes("No unvalidated or cross-card limits displayed"), "Card limi
 assert(app.includes("Card limits · read only"), "Card limits UI must remain explicitly read only");
 assert(app.includes("Transaction detail unavailable for this session"), "Wallet detail errors must use one safe public message");
 assert(app.includes("Selected transaction"), "Wallet UI must expose the validated selected transaction detail");
+assert(app.includes("All-account Wallet activity · read only"), "Wallet activity UI must remain explicitly read only");
+assert(app.includes("No unvalidated or cross-session activity displayed"), "Wallet activity UI must fail closed for stale or invalid responses");
 
 const excluded = new Set([".git", "node_modules", "dist", "docs"]);
 const secretPatterns = [
