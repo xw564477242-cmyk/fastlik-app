@@ -1,11 +1,13 @@
 import {cardListPath,parseCardPage,parseCardRecord} from './cardList'
 import {cardTransactionPath,parseCardTransactionPage} from './cardTransactions'
+import {parseWalletAccounts,parseWalletBalance,parseWalletTransactionPage,walletTransactionPath} from './walletData'
+import type {WalletAccountRecord,WalletBalanceRecord,WalletTransactionPage} from './walletData'
+
+export type {WalletAccountRecord,WalletBalanceRecord,WalletTransactionPage} from './walletData'
 
 export type FastLinkEnvironment='LOCAL'|'SANDBOX'|'TEST'|'UAT'|'PRODUCTION'
 export type WalletSession={actorId:string;tenantId:string;customerId:string;environment:FastLinkEnvironment;expiresAt?:string}
 export type WalletCredentials={tenantId:string;email:string;password:string}
-export type WalletAccountRecord={id:string;accountCode:string;name:string;assetCode:string;status:string;currentBalance:string;postedBalance:string;pendingBalance:string;availableBalance:string;updatedAt:string}
-export type WalletTransactionPage={items:Array<{id:string;type:string;status:string;assetCode:string;amount:string;createdAt:string;referenceType?:string}>;pagination:{total:number;limit:number;offset:number;hasMore:boolean}}
 export type InternalTransferInput={sourceAccountId:string;destinationAccountId:string;assetCode:string;amount:string}
 
 const buildApiUrl=(import.meta.env.VITE_FASTLINK_API_URL as string|undefined)?.trim()
@@ -61,10 +63,10 @@ export const walletApi={
  refresh:()=>request<WalletSession>('/v1/auth/refresh','POST'),
  logout:()=>request<void>('/v1/auth/logout','POST'),
  session:()=>request<WalletSession>('/v1/session'),
- walletAccounts:()=>request<WalletAccountRecord[]>('/v1/wallet/accounts'),
- walletBalance:(accountId:string)=>request<Record<string,unknown>>(`/v1/wallet/accounts/${encodeURIComponent(accountId)}/balance`),
- walletTransactions:(accountId:string)=>request<WalletTransactionPage>(`/v1/wallet/accounts/${encodeURIComponent(accountId)}/transactions?limit=100`),
- internalTransfer:(input:InternalTransferInput)=>request<Record<string,unknown>>('/v1/wallet/transfers','POST',input,crypto.randomUUID()),
+ walletAccounts:async():Promise<WalletAccountRecord[]>=>parseWalletAccounts(await request<unknown>('/v1/wallet/accounts')),
+ walletBalance:async(accountId:string):Promise<WalletBalanceRecord>=>{const balance=parseWalletBalance(await request<unknown>(`/v1/wallet/accounts/${encodeURIComponent(accountId)}/balance`));if(balance.accountId!==accountId)throw new Error('Wallet balance account does not match the requested account');return balance},
+ walletTransactions:async(accountId:string,offset=0):Promise<WalletTransactionPage>=>parseWalletTransactionPage(await request<unknown>(walletTransactionPath(accountId,offset)),offset),
+ internalTransfer:async(input:InternalTransferInput):Promise<void>=>{const idempotencyKey=crypto.randomUUID();await request<unknown>('/v1/wallet/transfers','POST',input,idempotencyKey)},
  cards:async(cursor?:string)=>parseCardPage(await request<unknown>(cardListPath(cursor))),
  card:async(id:string)=>parseCardRecord(await request<unknown>(`/v1/cards/${encodeURIComponent(id)}`)),
  balance:(id:string)=>request<Record<string,unknown>>(`/v1/cards/${encodeURIComponent(id)}/balance`),
