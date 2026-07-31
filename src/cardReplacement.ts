@@ -9,10 +9,30 @@ export type CardReplacementDecision = {
   reason: string | null;
 };
 
+export type CardReplacementVersion = {
+  id: string;
+  type: CardRecord["type"];
+  status: CardRecord["status"];
+  last4: string | null;
+  expiryMonth: number | null;
+  expiryYear: number | null;
+  currency: string;
+  alias: string | null;
+  hasAvailableBalanceMinor: boolean;
+  availableBalanceMinor: string | undefined;
+  createdAt: string;
+  freeze: boolean;
+  unfreeze: boolean;
+  replace: boolean;
+  renew: boolean;
+  updateLimits: boolean;
+};
+
 export type CardReplacementRequestIdentity = {
   requestId: number;
   scopeKey: string | null;
-  oldCardId: string;
+  reason: CardReplacementReason;
+  oldCardVersion: CardReplacementVersion;
 };
 
 export const CARD_REPLACEMENT_REASONS = ["LOST", "STOLEN", "DAMAGED", "OTHER"] as const;
@@ -123,6 +143,66 @@ export function cardReplacementPath(oldCardId: string): string {
   return `/v1/cards/${encodeURIComponent(opaqueCardId(oldCardId, "old Card ID"))}/replace`;
 }
 
+export function captureCardReplacementVersion(card: CardRecord): CardReplacementVersion {
+  return {
+    id: card.id,
+    type: card.type,
+    status: card.status,
+    last4: card.last4,
+    expiryMonth: card.expiryMonth,
+    expiryYear: card.expiryYear,
+    currency: card.currency,
+    alias: card.alias,
+    hasAvailableBalanceMinor: Object.prototype.hasOwnProperty.call(card, "availableBalanceMinor"),
+    availableBalanceMinor: card.availableBalanceMinor,
+    createdAt: card.createdAt,
+    freeze: card.capabilities.freeze,
+    unfreeze: card.capabilities.unfreeze,
+    replace: card.capabilities.replace,
+    renew: card.capabilities.renew,
+    updateLimits: card.capabilities.updateLimits,
+  };
+}
+
+export function cardReplacementVersionMatches(
+  expected: CardReplacementVersion,
+  current: CardRecord | null,
+): boolean {
+  if (current === null) return false;
+  const actual = captureCardReplacementVersion(current);
+  return expected.id === actual.id &&
+    expected.type === actual.type &&
+    expected.status === actual.status &&
+    expected.last4 === actual.last4 &&
+    expected.expiryMonth === actual.expiryMonth &&
+    expected.expiryYear === actual.expiryYear &&
+    expected.currency === actual.currency &&
+    expected.alias === actual.alias &&
+    expected.hasAvailableBalanceMinor === actual.hasAvailableBalanceMinor &&
+    expected.availableBalanceMinor === actual.availableBalanceMinor &&
+    expected.createdAt === actual.createdAt &&
+    expected.freeze === actual.freeze &&
+    expected.unfreeze === actual.unfreeze &&
+    expected.replace === actual.replace &&
+    expected.renew === actual.renew &&
+    expected.updateLimits === actual.updateLimits;
+}
+
+export function replaceCardInCollection(
+  current: CardRecord[],
+  oldCardId: string,
+  replacement: CardRecord,
+): CardRecord[] {
+  const oldId = opaqueCardId(oldCardId, "old Card ID");
+  if (replacement.id === oldId)
+    throw new Error("Card replacement did not return a distinct Card identity");
+  if (current.some((card) => card.id === replacement.id))
+    throw new Error("Card replacement identity collides with an existing Card");
+  if (current.filter((card) => card.id === oldId).length !== 1)
+    throw new Error("Selected old Card is unavailable or duplicated");
+  return current.map((card) => card.id === oldId ? replacement : card);
+}
+
 export function parseCardReplacementResponse(value: unknown, oldCardId: string): CardRecord {
   const expectedOldCardId = opaqueCardId(oldCardId, "old Card ID");
   const response = ordinaryJsonObject(value, "response");
@@ -189,9 +269,11 @@ export function cardReplacementRequestIsCurrent(
   request: CardReplacementRequestIdentity,
   currentRequestId: number,
   currentScopeKey: string | null,
-  currentOldCardId: string | null,
+  currentReason: CardReplacementReason,
+  currentOldCard: CardRecord | null,
 ): boolean {
   return request.requestId === currentRequestId &&
     request.scopeKey === currentScopeKey &&
-    request.oldCardId === currentOldCardId;
+    request.reason === currentReason &&
+    cardReplacementVersionMatches(request.oldCardVersion, currentOldCard);
 }

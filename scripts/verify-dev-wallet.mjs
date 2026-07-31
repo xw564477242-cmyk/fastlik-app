@@ -79,6 +79,9 @@ assert(cardReplacement.includes('Object.getPrototypeOf(value) !== Object.prototy
 assert(cardReplacement.includes("Object.getOwnPropertyDescriptor"), "Card replacement response must read only own data descriptors");
 assert(cardReplacement.includes("Card replacement did not return a distinct Card identity"), "Card replacement must require a new Card identity");
 assert(cardReplacement.includes("cardReplacementRequestIsCurrent"), "Card replacement must bind scope, selected old Card and request generation");
+assert(cardReplacement.includes("hasAvailableBalanceMinor") && cardReplacement.includes('hasOwnProperty.call(card, "availableBalanceMinor")'), "Card replacement must version optional balance presence and value");
+assert(cardReplacement.includes("request.reason === currentReason") && cardReplacement.includes("cardReplacementVersionMatches(request.oldCardVersion, currentOldCard)"), "Card replacement must bind reason and every selected old Card version field");
+assert(cardReplacement.includes("replaceCardInCollection") && cardReplacement.includes("collides with an existing Card"), "Card replacement must atomically replace the old Card and reject identity collisions");
 assert(walletOperations.includes("/v1/wallet/operations?"), "Wallet activity must use the public operation history contract");
 assert(walletOperations.includes("new URLSearchParams({ limit:"), "Wallet activity requests must remain bounded");
 assert(!walletOperations.includes("new URLSearchParams({ assetCode"), "Wallet activity must not invent an asset filter");
@@ -114,8 +117,10 @@ assert(app.includes("Automatic retries are disabled"), "Virtual Card UI must sta
 assert(app.includes("No Provider or internal error details displayed"), "Virtual Card errors must remain provider-neutral");
 assert(app.includes("replacementDecision?.allowed&&<form"), "Card replacement UI must be hidden unless capability, environment, scope and selection allow it");
 assert(app.includes("if(!session||!selectedCard||cardReplacementInFlight.current||virtualCardCreateInFlight.current||cardRenewalInFlight.current)return"), "Card replacement must synchronously block duplicate or conflicting submissions");
+assert(app.includes("reason:input.reason,oldCardVersion:captureCardReplacementVersion(oldCard)") && app.includes("cardReplacementReasonRef.current,selectedCardRef.current"), "Card replacement completion must use reason and selected Card version refs");
+assert(app.includes("replaceCardInCollection(knownCards,oldCard.id,replacement)") && app.includes("card.id!==oldCard.id&&card.id!==replacement.id"), "Card replacement UI must commit one collision-checked atomic replacement");
 assert(app.includes("const idempotencyKey=crypto.randomUUID();try{const replacement=await walletApi.replaceCard"), "Each Card replacement submission must generate and reuse exactly one idempotency key");
-assert(app.includes("One user submission, one idempotency key. Automatic retries are disabled."), "Card replacement UI must state the no-retry boundary");
+assert(app.includes("One user submission, one canonical UUIDv4 idempotency key. Automatic retries are disabled."), "Card replacement UI must state the canonical UUIDv4 and no-retry boundary");
 assert(app.includes("Card replacement unavailable for this session · Trace"), "Card replacement errors must remain Provider and internal-detail neutral");
 assert(apiClient.includes("renewCard:async") && apiClient.includes("cardRenewalDecision(card,sessionEnvironment,walletRuntime.environment"), "Card renewal must fail closed against capability, selection, session and runtime environment");
 assert(apiClient.includes("request<unknown>(cardRenewalPath(card.id),'POST',undefined,validateCardRenewalIdempotencyKey(idempotencyKey))"), "Card renewal must make one typed request with the caller-owned idempotency key");
