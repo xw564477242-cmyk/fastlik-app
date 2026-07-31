@@ -8,6 +8,7 @@ const cardBalance = readFileSync(join(root, "src/cardBalance.ts"), "utf8");
 const cardLimits = readFileSync(join(root, "src/cardLimits.ts"), "utf8");
 const walletData = readFileSync(join(root, "src/walletData.ts"), "utf8");
 const walletOperations = readFileSync(join(root, "src/walletOperations.ts"), "utf8");
+const virtualCardCreate = readFileSync(join(root, "src/virtualCardCreate.ts"), "utf8");
 const index = readFileSync(join(root, "index.html"), "utf8");
 const vite = readFileSync(join(root, "vite.config.ts"), "utf8");
 const runtimeTemplate = readFileSync(join(root, "runtime-config.template.js"), "utf8");
@@ -62,6 +63,12 @@ assert(apiClient.includes("walletTransactionPath(selectedAsset,cursor)"), "Walle
 assert(apiClient.includes("walletTransactionDetail:async"), "Wallet must consume the public selected transaction detail endpoint");
 assert(apiClient.includes("walletOperations:async") && apiClient.includes("parseWalletOperationPage(await request<unknown>(walletOperationActivityPath(cursor)))"), "Wallet must consume typed all-account operation activity");
 assert(apiClient.includes("walletOperationDetail:async") && apiClient.includes("parseWalletOperationDetail(await request<unknown>(walletOperationDetailPath(selected.id)),selected)"), "Wallet must consume typed selected operation detail");
+assert(apiClient.includes("createVirtualCard:async") && apiClient.includes("virtualCardCreateDecision(sessionEnvironment,walletRuntime.environment)"), "Virtual Card creation must fail closed against both session and runtime environment");
+assert(apiClient.includes("request<unknown>(virtualCardCreatePath(),'POST',normalized,validateVirtualCardIdempotencyKey(idempotencyKey))"), "Virtual Card creation must make one typed request with the caller-owned idempotency key");
+assert(virtualCardCreate.includes('sessionEnvironment !== "SANDBOX" && sessionEnvironment !== "TEST"'), "Virtual Card creation must be limited to SANDBOX and TEST");
+assert(virtualCardCreate.includes("parseVirtualCardCreateInput"), "Virtual Card request must use an exact public input parser");
+assert(virtualCardCreate.includes("parseVirtualCardCreateResponse"), "Virtual Card response must use an exact public Card parser");
+assert(virtualCardCreate.includes("virtualCardCreateRequestIsCurrent"), "Virtual Card creation must be isolated by session scope and generation");
 assert(walletOperations.includes("/v1/wallet/operations?"), "Wallet activity must use the public operation history contract");
 assert(walletOperations.includes("new URLSearchParams({ limit:"), "Wallet activity requests must remain bounded");
 assert(!walletOperations.includes("new URLSearchParams({ assetCode"), "Wallet activity must not invent an asset filter");
@@ -91,6 +98,10 @@ assert(app.includes("No unvalidated or cross-session activity displayed"), "Wall
 assert(app.includes("Selected operation · read only"), "Wallet operation detail UI must remain explicitly read only");
 assert(app.includes("Wallet operation detail unavailable for this session"), "Wallet operation detail errors must use one safe public message");
 assert(app.includes("clearWalletOperationDetail();const request={requestId:++walletOperationRequestSequence.current"), "Wallet pagination must synchronously clear selected operation detail");
+assert(app.includes("virtualCardDecision.allowed&&<form"), "Virtual Card creation UI must be hidden unless the environment decision allows it");
+assert(app.includes("const idempotencyKey=crypto.randomUUID();try{const created=await walletApi.createVirtualCard(input,idempotencyKey"), "Each Virtual Card submission must generate and reuse exactly one idempotency key");
+assert(app.includes("Automatic retries are disabled"), "Virtual Card UI must state the no-retry boundary");
+assert(app.includes("No Provider or internal error details displayed"), "Virtual Card errors must remain provider-neutral");
 
 const excluded = new Set([".git", "node_modules", "dist", "docs"]);
 const secretPatterns = [
