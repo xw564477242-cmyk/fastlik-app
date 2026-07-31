@@ -2,11 +2,14 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import {
   CARD_REPLACEMENT_REASONS,
+  captureCardReplacementVersion,
   cardReplacementDecision,
   cardReplacementPath,
   cardReplacementRequestIsCurrent,
+  cardReplacementVersionMatches,
   parseCardReplacementInput,
   parseCardReplacementResponse,
+  replaceCardInCollection,
   validateCardReplacementIdempotencyKey,
 } from "../src/cardReplacement.ts";
 import type { CardRecord } from "../src/cardList.ts";
@@ -107,6 +110,23 @@ test("reconstructs only the public Card allowlist and requires a distinct replac
   assert.equal(parseCardReplacementResponse({ ...rawReplacement(), id: "card.new:1" }, "card.old:1").id, "card.new:1");
 });
 
+test("atomically removes the selected old Card, inserts the replacement, and rejects ID collisions", () => {
+  const oldCard = selectedCard();
+  const otherCard = selectedCard({ id: "card_other-1", last4: "1111" });
+  const replacement = parseCardReplacementResponse(rawReplacement(), oldCard.id);
+  const current = [oldCard, otherCard];
+  const next = replaceCardInCollection(current, oldCard.id, replacement);
+  assert.deepEqual(next.map((card) => card.id), [replacement.id, otherCard.id]);
+  assert.equal(next[0], replacement);
+  assert.deepEqual(current.map((card) => card.id), [oldCard.id, otherCard.id]);
+  assert.throws(
+    () => replaceCardInCollection(current, oldCard.id, selectedCard({ id: otherCard.id })),
+    /collides/,
+  );
+  assert.throws(() => replaceCardInCollection([otherCard], oldCard.id, replacement), /unavailable or duplicated/);
+  assert.throws(() => replaceCardInCollection([oldCard, oldCard], oldCard.id, replacement), /unavailable or duplicated/);
+});
+
 test("requires ordinary response objects and own data fields without executing getters", () => {
   assert.throws(() => parseCardReplacementResponse(Object.create(rawReplacement()), "card_old-1"), /response/);
   assert.throws(
@@ -192,14 +212,50 @@ test("validates all public Card fields and canonical signed-64 optional balance"
   assert.throws(() => parseCardReplacementResponse({ ...rawReplacement(), id: "bad/id" }, "card_old-1"), /new Card ID/);
 });
 
-test("rejects success, error and finally writes after actor, tenant, customer, environment, generation or selection changes", () => {
+test("rejects stale success, error and finally after reason or any selected old Card version field changes", () => {
   const scope = '["actor","tenant","customer","TEST"]';
-  const request = { requestId: 7, scopeKey: scope, oldCardId: "card_old-1" };
-  assert.equal(cardReplacementRequestIsCurrent(request, 7, scope, "card_old-1"), true);
-  assert.equal(cardReplacementRequestIsCurrent(request, 8, scope, "card_old-1"), false);
-  assert.equal(cardReplacementRequestIsCurrent(request, 7, '["other","tenant","customer","TEST"]', "card_old-1"), false);
-  assert.equal(cardReplacementRequestIsCurrent(request, 7, '["actor","other","customer","TEST"]', "card_old-1"), false);
-  assert.equal(cardReplacementRequestIsCurrent(request, 7, '["actor","tenant","other","TEST"]', "card_old-1"), false);
-  assert.equal(cardReplacementRequestIsCurrent(request, 7, '["actor","tenant","customer","SANDBOX"]', "card_old-1"), false);
-  assert.equal(cardReplacementRequestIsCurrent(request, 7, scope, "card_other"), false);
+  const oldCard = selectedCard({ availableBalanceMinor: "0" });
+  const request = {
+    requestId: 7,
+    scopeKey: scope,
+    reason: "STOLEN" as const,
+    oldCardVersion: captureCardReplacementVersion(oldCard),
+  };
+  assert.equal(cardReplacementRequestIsCurrent(request, 7, scope, "STOLEN", oldCard), true);
+  assert.equal(cardReplacementRequestIsCurrent(request, 8, scope, "STOLEN", oldCard), false);
+  assert.equal(cardReplacementRequestIsCurrent(request, 7, scope, "LOST", oldCard), false);
+  assert.equal(cardReplacementRequestIsCurrent(request, 7, '["other","tenant","customer","TEST"]', "STOLEN", oldCard), false);
+  assert.equal(cardReplacementRequestIsCurrent(request, 7, '["actor","other","customer","TEST"]', "STOLEN", oldCard), false);
+  assert.equal(cardReplacementRequestIsCurrent(request, 7, '["actor","tenant","other","TEST"]', "STOLEN", oldCard), false);
+  assert.equal(cardReplacementRequestIsCurrent(request, 7, '["actor","tenant","customer","SANDBOX"]', "STOLEN", oldCard), false);
+  assert.equal(cardReplacementRequestIsCurrent(request, 7, scope, "STOLEN", null), false);
+
+  const changedCards: CardRecord[] = [
+    selectedCard({ ...oldCard, id: "card_other" }),
+    selectedCard({ ...oldCard, type: "PHYSICAL" }),
+    selectedCard({ ...oldCard, status: "FROZEN" }),
+    selectedCard({ ...oldCard, last4: "9999" }),
+    selectedCard({ ...oldCard, expiryMonth: 11 }),
+    selectedCard({ ...oldCard, expiryYear: 2031 }),
+    selectedCard({ ...oldCard, currency: "EUR" }),
+    selectedCard({ ...oldCard, alias: "Changed" }),
+    selectedCard({ ...oldCard, availableBalanceMinor: "1" }),
+    selectedCard({ ...oldCard, createdAt: "2026-07-31T00:00:01.000Z" }),
+    selectedCard({ ...oldCard, capabilities: { ...oldCard.capabilities, freeze: false } }),
+    selectedCard({ ...oldCard, capabilities: { ...oldCard.capabilities, unfreeze: true } }),
+    selectedCard({ ...oldCard, capabilities: { ...oldCard.capabilities, replace: false } }),
+    selectedCard({ ...oldCard, capabilities: { ...oldCard.capabilities, renew: false } }),
+    selectedCard({ ...oldCard, capabilities: { ...oldCard.capabilities, updateLimits: false } }),
+  ];
+  for (const changed of changedCards) {
+    assert.equal(cardReplacementVersionMatches(request.oldCardVersion, changed), false);
+    assert.equal(cardReplacementRequestIsCurrent(request, 7, scope, "STOLEN", changed), false);
+  }
+
+  const missingBalance = selectedCard();
+  assert.equal(cardReplacementRequestIsCurrent(request, 7, scope, "STOLEN", missingBalance), false);
+  const presentUndefined = selectedCard();
+  Object.defineProperty(presentUndefined, "availableBalanceMinor", { value: undefined, enumerable: true });
+  const absentVersion = captureCardReplacementVersion(selectedCard());
+  assert.equal(cardReplacementVersionMatches(absentVersion, presentUndefined), false);
 });
