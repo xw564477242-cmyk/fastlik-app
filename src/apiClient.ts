@@ -11,6 +11,8 @@ import type {VirtualCardCreateInput} from './virtualCardCreate'
 import {cardReplacementDecision,cardReplacementPath,parseCardReplacementInput,parseCardReplacementResponse,validateCardReplacementIdempotencyKey} from './cardReplacement'
 import type {CardReplacementInput} from './cardReplacement'
 import {cardRenewalDecision,cardRenewalPath,parseCardRenewalResponse,validateCardRenewalIdempotencyKey} from './cardRenewal'
+import {parseWalletBalanceSummary,WALLET_BALANCE_SUMMARY_PATH,walletBalanceSummaryReadAllowed} from './walletBalanceSummary'
+import type {WalletBalanceSummary} from './walletBalanceSummary'
 
 export type {WalletAccountRecord,WalletBalanceRecord,WalletTransactionPage,WalletTransactionRecord,WalletTransferReceipt} from './walletData'
 export type {WalletOperationPage,WalletOperationRecord} from './walletOperations'
@@ -18,6 +20,7 @@ export type {CardBalanceRecord} from './cardBalance'
 export type {CardLimitsRecord} from './cardLimits'
 export type {VirtualCardCreateInput} from './virtualCardCreate'
 export type {CardReplacementInput,CardReplacementReason} from './cardReplacement'
+export type {WalletBalanceSummary} from './walletBalanceSummary'
 
 export type FastLinkEnvironment='LOCAL'|'SANDBOX'|'TEST'|'UAT'|'PRODUCTION'
 export type WalletSession={actorId:string;tenantId:string;customerId:string;environment:FastLinkEnvironment;expiresAt?:string}
@@ -78,6 +81,7 @@ export const walletApi={
  logout:()=>request<void>('/v1/auth/logout','POST'),
  session:()=>request<WalletSession>('/v1/session'),
  walletAccounts:async():Promise<WalletAccountRecord[]>=>parseWalletAccounts(await request<unknown>('/v1/wallet/accounts')),
+ walletBalanceSummary:async(sessionEnvironment:FastLinkEnvironment):Promise<WalletBalanceSummary>=>{if(!walletBalanceSummaryReadAllowed(sessionEnvironment,walletRuntime.environment))throw new Error('Wallet balance summary is available only in the matching SANDBOX or TEST session');return parseWalletBalanceSummary(await request<unknown>(WALLET_BALANCE_SUMMARY_PATH))},
  walletBalance:async(accountId:string):Promise<WalletBalanceRecord>=>{const balance=parseWalletBalance(await request<unknown>(`/v1/wallet/accounts/${encodeURIComponent(accountId)}/balance`));if(balance.accountId!==accountId)throw new Error('Wallet balance account does not match the requested account');return balance},
  walletTransactions:async(selectedAsset:string,cursor?:string):Promise<WalletTransactionPage>=>parseWalletTransactionPage(await request<unknown>(walletTransactionPath(selectedAsset,cursor)),selectedAsset),
  walletOperations:async(cursor?:string):Promise<WalletOperationPage>=>parseWalletOperationPage(await request<unknown>(walletOperationActivityPath(cursor))),
