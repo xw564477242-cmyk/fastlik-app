@@ -2,6 +2,7 @@ import type { WalletAccountRecord } from "./walletData";
 
 export const WALLET_BALANCE_SUMMARY_PATH = "/v1/wallet/balances";
 export const WALLET_BALANCE_SUMMARY_MAX_ITEMS = 50;
+export const WALLET_BALANCE_SUMMARY_MAX_JSON_BYTES = 32_768;
 
 export type WalletBalanceSummaryItem = Readonly<{
   assetCode: string;
@@ -30,45 +31,14 @@ function invalid(label: string): never {
   throw new Error(`Invalid Wallet balance summary ${label}`);
 }
 
-function assertOrdinaryDataGraph(value: unknown, label: string, seen = new Set<object>()): void {
-  if (value === null || typeof value !== "object") return;
-  if (seen.has(value)) invalid(label);
-  seen.add(value);
-  try {
-    const prototype = Object.getPrototypeOf(value);
-    if (Array.isArray(value)) {
-      if (prototype !== Array.prototype) invalid(label);
-    } else if (prototype !== Object.prototype) {
-      invalid(label);
-    }
-    const descriptors = Object.getOwnPropertyDescriptors(value);
-    for (const key of Reflect.ownKeys(descriptors)) {
-      if (typeof key !== "string") invalid(label);
-      const descriptor = descriptors[key];
-      if (!descriptor || !Object.prototype.hasOwnProperty.call(descriptor, "value")) invalid(label);
-      if (key !== "length") assertOrdinaryDataGraph(descriptor.value, label, seen);
-    }
-  } catch (error) {
-    if (error instanceof Error && error.message.startsWith("Invalid Wallet balance summary ")) throw error;
-    invalid(label);
-  }
-}
-
 function ordinaryOwnData(value: unknown, allowed: ReadonlySet<string>, label: string): OwnData {
-  assertOrdinaryDataGraph(value, label);
   if (!value || typeof value !== "object" || Array.isArray(value)) invalid(label);
-  try {
-    if (typeof structuredClone !== "function") invalid(label);
-    structuredClone(value);
-    const descriptors = Object.getOwnPropertyDescriptors(value);
-    if (Reflect.ownKeys(descriptors).some((key) => typeof key !== "string" || !allowed.has(key))) {
-      invalid(`${label} fields`);
-    }
-    return descriptors;
-  } catch (error) {
-    if (error instanceof Error && error.message.startsWith("Invalid Wallet balance summary ")) throw error;
-    invalid(label);
+  if (Object.getPrototypeOf(value) !== Object.prototype) invalid(label);
+  const descriptors = Object.getOwnPropertyDescriptors(value);
+  if (Reflect.ownKeys(descriptors).some((key) => typeof key !== "string" || !allowed.has(key))) {
+    invalid(`${label} fields`);
   }
+  return descriptors;
 }
 
 const valueOf = (source: OwnData, key: string): unknown => source[key]?.value;
@@ -112,7 +82,7 @@ function timestamp(value: unknown): string {
   return value;
 }
 
-export function parseWalletBalanceSummaryItem(value: unknown): WalletBalanceSummaryItem {
+function parseWalletBalanceSummaryItem(value: unknown): WalletBalanceSummaryItem {
   const source = ordinaryOwnData(value, itemFields, "item");
   const availableBalance = amount(valueOf(source, "availableBalance"), "availableBalance");
   const ledgerBalance = amount(valueOf(source, "ledgerBalance"), "ledgerBalance");
@@ -129,7 +99,19 @@ export function parseWalletBalanceSummaryItem(value: unknown): WalletBalanceSumm
   });
 }
 
-export function parseWalletBalanceSummary(value: unknown): WalletBalanceSummary {
+export function parseWalletBalanceSummary(rawJson: string): WalletBalanceSummary {
+  if (typeof rawJson !== "string" || rawJson.length > WALLET_BALANCE_SUMMARY_MAX_JSON_BYTES) {
+    invalid("raw JSON");
+  }
+  if (new TextEncoder().encode(rawJson).byteLength > WALLET_BALANCE_SUMMARY_MAX_JSON_BYTES) {
+    invalid("raw JSON size");
+  }
+  let value: unknown;
+  try {
+    value = JSON.parse(rawJson) as unknown;
+  } catch {
+    invalid("raw JSON");
+  }
   const source = ordinaryOwnData(value, responseFields, "response");
   const rawItems = valueOf(source, "items");
   if (!Array.isArray(rawItems)) invalid("items");

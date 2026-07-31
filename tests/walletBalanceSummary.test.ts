@@ -2,10 +2,10 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import {
   WALLET_BALANCE_SUMMARY_MAX_ITEMS,
+  WALLET_BALANCE_SUMMARY_MAX_JSON_BYTES,
   WALLET_BALANCE_SUMMARY_PATH,
   captureWalletAccountsVersion,
   parseWalletBalanceSummary,
-  parseWalletBalanceSummaryItem,
   walletBalanceSummaryReadAllowed,
   walletBalanceSummaryRequestIsCurrent,
 } from "../src/walletBalanceSummary.ts";
@@ -18,6 +18,9 @@ const rawItem = (assetCode = "USD"): Record<string, unknown> => ({
   pendingBalance: "20",
   updatedAt: "2026-07-31T08:00:00.000Z",
 });
+
+const parse = (value: unknown) => parseWalletBalanceSummary(JSON.stringify(value));
+const parseItem = (value: unknown) => parse({ items: [value] }).items[0];
 
 const account = (overrides: Partial<WalletAccountRecord> = {}): WalletAccountRecord => ({
   id: "account-1",
@@ -36,19 +39,20 @@ const account = (overrides: Partial<WalletAccountRecord> = {}): WalletAccountRec
 test("uses the existing bounded authenticated Wallet balance summary contract", () => {
   assert.equal(WALLET_BALANCE_SUMMARY_PATH, "/v1/wallet/balances");
   assert.equal(WALLET_BALANCE_SUMMARY_MAX_ITEMS, 50);
-  assert.deepEqual(parseWalletBalanceSummary({ items: [] }), { items: [] });
+  assert.equal(WALLET_BALANCE_SUMMARY_MAX_JSON_BYTES, 32_768);
+  const summary = parse({ items: [] });
+  assert.deepEqual(summary, { items: [] });
+  assert.equal(Object.isFrozen(summary), true);
+  assert.equal(Object.isFrozen(summary.items), true);
 });
 
 test("reconstructs exactly the five public summary fields and verifies ledger arithmetic", () => {
-  const item = parseWalletBalanceSummaryItem(rawItem());
+  const item = parseItem(rawItem());
   assert.deepEqual(Object.keys(item).sort(), [
     "assetCode", "availableBalance", "ledgerBalance", "pendingBalance", "updatedAt",
   ]);
-  assert.throws(
-    () => parseWalletBalanceSummaryItem({ ...rawItem(), ledgerBalance: "99" }),
-    /ledger equation/,
-  );
-  assert.equal(parseWalletBalanceSummaryItem({
+  assert.throws(() => parseItem({ ...rawItem(), ledgerBalance: "99" }), /ledger equation/);
+  assert.equal(parseItem({
     ...rawItem(), availableBalance: "-1.5", pendingBalance: "2.25", ledgerBalance: "0.75",
   }).ledgerBalance, "0.75");
 });
@@ -61,54 +65,65 @@ test("accepts only canonical bounded amount strings", () => {
     "1",
     "1.123456789012345678",
   ]) {
-    const pendingBalance = "0";
-    assert.equal(parseWalletBalanceSummaryItem({
-      ...rawItem(), availableBalance, pendingBalance, ledgerBalance: availableBalance,
+    assert.equal(parseItem({
+      ...rawItem(), availableBalance, pendingBalance: "0", ledgerBalance: availableBalance,
     }).availableBalance, availableBalance);
   }
   for (const availableBalance of ["-0", "00", "01", "+1", "1.0", "1.230", "1e3", "1.1234567890123456789", 1]) {
-    assert.throws(() => parseWalletBalanceSummaryItem({ ...rawItem(), availableBalance }), /availableBalance/);
+    assert.throws(() => parseItem({ ...rawItem(), availableBalance }), /availableBalance/);
   }
 });
 
-test("rejects inherited, accessor, Proxy and unknown payloads without getter execution", () => {
-  assert.throws(() => parseWalletBalanceSummaryItem({ ...rawItem(), providerBalance: "secret" }), /fields/);
-  assert.throws(() => parseWalletBalanceSummary({ items: [], tenantId: "private" }), /fields/);
+test("accepts only bounded raw JSON text and exact response fields", () => {
+  assert.throws(() => parseWalletBalanceSummary("not-json"), /raw JSON/);
+  assert.throws(() => parseWalletBalanceSummary(" ".repeat(WALLET_BALANCE_SUMMARY_MAX_JSON_BYTES + 1)), /raw JSON/);
+  assert.throws(
+    () => parseWalletBalanceSummary(`{"items":[],"padding":"${"€".repeat(11_000)}"}`),
+    /raw JSON size/,
+  );
+  assert.throws(() => parse({ items: [], tenantId: "private" }), /fields/);
+  assert.throws(() => parse({ items: [{ ...rawItem(), providerBalance: "secret" }] }), /fields/);
+});
 
-  const inherited = Object.create({ tenantId: "private" });
-  Object.assign(inherited, rawItem());
-  assert.throws(() => parseWalletBalanceSummaryItem(inherited), /item/);
+test("rejects inherited and accessor objects at the raw-text boundary without getter execution", () => {
+  const inherited = Object.create({ tenantId: "private" }) as Record<string, unknown>;
+  Object.assign(inherited, { items: [rawItem()] });
+  assert.throws(() => parseWalletBalanceSummary(inherited as unknown as string), /raw JSON/);
 
   let getterCalls = 0;
-  const accessor = rawItem();
-  Object.defineProperty(accessor, "providerBalance", {
+  const accessor = {};
+  Object.defineProperty(accessor, "items", {
     enumerable: true,
-    get() { getterCalls += 1; return "must-not-read"; },
+    get() { getterCalls += 1; return [rawItem()]; },
   });
-  assert.throws(() => parseWalletBalanceSummaryItem(accessor), /item/);
+  assert.throws(() => parseWalletBalanceSummary(accessor as unknown as string), /raw JSON/);
   assert.equal(getterCalls, 0);
+});
 
-  let proxyGets = 0;
-  const proxy = new Proxy(rawItem(), {
-    get(target, property, receiver) { proxyGets += 1; return Reflect.get(target, property, receiver); },
+test("rejects Proxy before reflection with all relevant traps remaining zero", () => {
+  const traps = { get: 0, getPrototypeOf: 0, ownKeys: 0, getOwnPropertyDescriptor: 0 };
+  const proxy = new Proxy({ items: [rawItem()] }, {
+    get() { traps.get += 1; throw new Error("get trap must not run"); },
+    getPrototypeOf() { traps.getPrototypeOf += 1; throw new Error("getPrototypeOf trap must not run"); },
+    ownKeys() { traps.ownKeys += 1; throw new Error("ownKeys trap must not run"); },
+    getOwnPropertyDescriptor() {
+      traps.getOwnPropertyDescriptor += 1;
+      throw new Error("getOwnPropertyDescriptor trap must not run");
+    },
   });
-  assert.throws(() => parseWalletBalanceSummaryItem(proxy), /item/);
-  assert.equal(proxyGets, 0);
+  assert.throws(() => parseWalletBalanceSummary(proxy as unknown as string), /raw JSON/);
+  assert.deepEqual(traps, { get: 0, getPrototypeOf: 0, ownKeys: 0, getOwnPropertyDescriptor: 0 });
 });
 
 test("rejects oversized, duplicate, non-monotonic and malformed asset summaries", () => {
   assert.throws(
-    () => parseWalletBalanceSummary({ items: Array.from({ length: 51 }, (_, index) => rawItem(`A${String(index).padStart(2, "0")}`)) }),
+    () => parse({ items: Array.from({ length: 51 }, (_, index) => rawItem(`A${String(index).padStart(2, "0")}`)) }),
     /item limit/,
   );
-  assert.throws(() => parseWalletBalanceSummary({ items: [rawItem("USD"), rawItem("USD")] }), /asset order/);
-  assert.throws(() => parseWalletBalanceSummary({ items: [rawItem("USD"), rawItem("EUR")] }), /asset order/);
-  assert.throws(() => parseWalletBalanceSummary({ items: [rawItem("usd")] }), /assetCode/);
-  const sparse = new Array(1);
-  assert.throws(() => parseWalletBalanceSummary({ items: sparse }), /items fields/);
-  const extended = [rawItem()];
-  Object.defineProperty(extended, "debug", { value: "private", enumerable: true });
-  assert.throws(() => parseWalletBalanceSummary({ items: extended }), /items fields/);
+  assert.throws(() => parse({ items: [rawItem("USD"), rawItem("USD")] }), /asset order/);
+  assert.throws(() => parse({ items: [rawItem("USD"), rawItem("EUR")] }), /asset order/);
+  assert.throws(() => parse({ items: [rawItem("usd")] }), /assetCode/);
+  assert.throws(() => parseWalletBalanceSummary('{"items":[null]}'), /item/);
 });
 
 test("accepts only canonical UTC millisecond timestamps", () => {
@@ -118,7 +133,7 @@ test("accepts only canonical UTC millisecond timestamps", () => {
     "2026-01-01T00:00:00Z",
     "2026-01-01T00:00:00.000+00:00",
     "2026-01-01 00:00:00.000Z",
-  ]) assert.throws(() => parseWalletBalanceSummaryItem({ ...rawItem(), updatedAt }), /updatedAt/);
+  ]) assert.throws(() => parseItem({ ...rawItem(), updatedAt }), /updatedAt/);
 });
 
 test("binds completion to session scope, selected account, every visible account field and generation", () => {
