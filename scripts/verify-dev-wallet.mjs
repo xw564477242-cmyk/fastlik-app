@@ -9,6 +9,7 @@ const cardLimits = readFileSync(join(root, "src/cardLimits.ts"), "utf8");
 const walletData = readFileSync(join(root, "src/walletData.ts"), "utf8");
 const walletOperations = readFileSync(join(root, "src/walletOperations.ts"), "utf8");
 const virtualCardCreate = readFileSync(join(root, "src/virtualCardCreate.ts"), "utf8");
+const cardReplacement = readFileSync(join(root, "src/cardReplacement.ts"), "utf8");
 const index = readFileSync(join(root, "index.html"), "utf8");
 const vite = readFileSync(join(root, "vite.config.ts"), "utf8");
 const runtimeTemplate = readFileSync(join(root, "runtime-config.template.js"), "utf8");
@@ -69,6 +70,14 @@ assert(virtualCardCreate.includes('sessionEnvironment !== "SANDBOX" && sessionEn
 assert(virtualCardCreate.includes("parseVirtualCardCreateInput"), "Virtual Card request must use an exact public input parser");
 assert(virtualCardCreate.includes("parseVirtualCardCreateResponse"), "Virtual Card response must use an exact public Card parser");
 assert(virtualCardCreate.includes("virtualCardCreateRequestIsCurrent"), "Virtual Card creation must be isolated by session scope and generation");
+assert(apiClient.includes("replaceCard:async") && apiClient.includes("cardReplacementDecision(card,sessionEnvironment,walletRuntime.environment"), "Card replacement must fail closed against capability, selection, session and runtime environment");
+assert(apiClient.includes("request<unknown>(cardReplacementPath(card.id),'POST',normalized,validateCardReplacementIdempotencyKey(idempotencyKey))"), "Card replacement must make one typed request with the caller-owned idempotency key");
+assert(cardReplacement.includes('sessionEnvironment !== "SANDBOX" && sessionEnvironment !== "TEST"'), "Card replacement must be limited to SANDBOX and TEST");
+assert(cardReplacement.includes("card.capabilities.replace"), "Card replacement must require the Backend replace capability");
+assert(cardReplacement.includes('Object.getPrototypeOf(value) !== Object.prototype'), "Card replacement response must accept only ordinary JSON objects");
+assert(cardReplacement.includes("Object.getOwnPropertyDescriptor"), "Card replacement response must read only own data descriptors");
+assert(cardReplacement.includes("Card replacement did not return a distinct Card identity"), "Card replacement must require a new Card identity");
+assert(cardReplacement.includes("cardReplacementRequestIsCurrent"), "Card replacement must bind scope, selected old Card and request generation");
 assert(walletOperations.includes("/v1/wallet/operations?"), "Wallet activity must use the public operation history contract");
 assert(walletOperations.includes("new URLSearchParams({ limit:"), "Wallet activity requests must remain bounded");
 assert(!walletOperations.includes("new URLSearchParams({ assetCode"), "Wallet activity must not invent an asset filter");
@@ -102,6 +111,11 @@ assert(app.includes("virtualCardDecision.allowed&&<form"), "Virtual Card creatio
 assert(app.includes("const idempotencyKey=crypto.randomUUID();try{const created=await walletApi.createVirtualCard(input,idempotencyKey"), "Each Virtual Card submission must generate and reuse exactly one idempotency key");
 assert(app.includes("Automatic retries are disabled"), "Virtual Card UI must state the no-retry boundary");
 assert(app.includes("No Provider or internal error details displayed"), "Virtual Card errors must remain provider-neutral");
+assert(app.includes("replacementDecision?.allowed&&<form"), "Card replacement UI must be hidden unless capability, environment, scope and selection allow it");
+assert(app.includes("if(!session||!selectedCard||cardReplacementInFlight.current||virtualCardCreateInFlight.current)return"), "Card replacement must synchronously block duplicate submissions");
+assert(app.includes("const idempotencyKey=crypto.randomUUID();try{const replacement=await walletApi.replaceCard"), "Each Card replacement submission must generate and reuse exactly one idempotency key");
+assert(app.includes("One user submission, one idempotency key. Automatic retries are disabled."), "Card replacement UI must state the no-retry boundary");
+assert(app.includes("Card replacement unavailable for this session · Trace"), "Card replacement errors must remain Provider and internal-detail neutral");
 
 const excluded = new Set([".git", "node_modules", "dist", "docs"]);
 const secretPatterns = [
