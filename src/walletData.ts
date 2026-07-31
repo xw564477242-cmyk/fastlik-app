@@ -1,4 +1,5 @@
 export const WALLET_TRANSACTION_PAGE_SIZE = 25;
+export const WALLET_TRANSFER_STATUS_REFRESH_LIMIT = 5;
 
 export type WalletAccountStatus = "ACTIVE" | "FROZEN" | "CLOSED";
 
@@ -47,6 +48,22 @@ export type WalletRequestIdentity = {
   accountId: string;
 };
 
+export type WalletTransferReceipt = {
+  id: string;
+  type: "INTERNAL_TRANSFER";
+  status: "PROCESSING" | "PENDING_SETTLEMENT" | "COMPLETED" | "FAILED";
+  assetCode: string;
+  amount: string;
+  direction: "OUTGOING" | "INCOMING" | "BETWEEN_OWN_ACCOUNTS";
+  createdAt: string;
+  completedAt: string | null;
+  updatedAt: string;
+};
+
+export type WalletTransferStatusRequestIdentity = WalletRequestIdentity & {
+  operationId: string;
+};
+
 const accountStatuses: WalletAccountStatus[] = ["ACTIVE", "FROZEN", "CLOSED"];
 const transactionTypes: WalletTransactionRecord["type"][] = [
   "DEPOSIT",
@@ -62,6 +79,17 @@ const transactionStatuses: WalletTransactionRecord["status"][] = [
   "FAILED",
   "REVERSED",
 ];
+const transferStatuses: WalletTransferReceipt["status"][] = [
+  "PROCESSING",
+  "PENDING_SETTLEMENT",
+  "COMPLETED",
+  "FAILED",
+];
+const transferDirections: WalletTransferReceipt["direction"][] = [
+  "OUTGOING",
+  "INCOMING",
+  "BETWEEN_OWN_ACCOUNTS",
+];
 
 const isObject = (value: unknown): value is Record<string, unknown> =>
   typeof value === "object" && value !== null && !Array.isArray(value);
@@ -75,6 +103,12 @@ const publicId = (value: unknown, name: string): string => {
 const publicText = (value: unknown, name: string, maximum = 120): string => {
   if (typeof value !== "string" || value.length < 1 || value.length > maximum)
     throw new Error(`Invalid Wallet ${name}`);
+  return value;
+};
+
+const transferOperationId = (value: unknown): string => {
+  if (typeof value !== "string" || !/^[A-Za-z0-9._:-]{2,128}$/.test(value))
+    throw new Error("Invalid Wallet transfer operation id");
   return value;
 };
 
@@ -94,6 +128,21 @@ const dateTime = (value: unknown, name: string): string => {
   if (typeof value !== "string" || Number.isNaN(Date.parse(value)))
     throw new Error(`Invalid Wallet ${name}`);
   return value;
+};
+
+const nullableDateTime = (value: unknown, name: string): string | null => {
+  if (value === null) return null;
+  return dateTime(value, name);
+};
+
+const canonicalDecimal = (value: string): string => {
+  const negative = value.startsWith("-");
+  const unsigned = negative ? value.slice(1) : value;
+  const [rawWhole, rawFraction = ""] = unsigned.split(".");
+  const whole = rawWhole.replace(/^0+(?=\d)/, "");
+  const fraction = rawFraction.replace(/0+$/, "");
+  const normalized = fraction ? `${whole}.${fraction}` : whole;
+  return negative && normalized !== "0" ? `-${normalized}` : normalized;
 };
 
 const accountStatus = (value: unknown): WalletAccountStatus => {
@@ -181,6 +230,43 @@ export function parseWalletTransactionPage(value: unknown, expectedOffset = 0): 
   };
 }
 
+export function parseWalletTransferReceipt(
+  value: unknown,
+  expected?: { operationId?: string; assetCode?: string; amount?: string },
+): WalletTransferReceipt {
+  if (!isObject(value)) throw new Error("Invalid Wallet transfer receipt");
+  if (value.type !== "INTERNAL_TRANSFER") throw new Error("Invalid Wallet transfer operation type");
+  if (!transferStatuses.includes(value.status as WalletTransferReceipt["status"]))
+    throw new Error("Invalid Wallet transfer status");
+  if (!transferDirections.includes(value.direction as WalletTransferReceipt["direction"]))
+    throw new Error("Invalid Wallet transfer direction");
+  const receipt: WalletTransferReceipt = {
+    id: transferOperationId(value.id),
+    type: "INTERNAL_TRANSFER",
+    status: value.status as WalletTransferReceipt["status"],
+    assetCode: assetCode(value.assetCode),
+    amount: decimal(value.amount, "transfer amount"),
+    direction: value.direction as WalletTransferReceipt["direction"],
+    createdAt: dateTime(value.createdAt, "transfer createdAt"),
+    completedAt: nullableDateTime(value.completedAt, "transfer completedAt"),
+    updatedAt: dateTime(value.updatedAt, "transfer updatedAt"),
+  };
+  if (expected?.operationId !== undefined && receipt.id !== expected.operationId)
+    throw new Error("Wallet transfer operation does not match the requested operation");
+  if (expected?.assetCode !== undefined && receipt.assetCode !== expected.assetCode)
+    throw new Error("Wallet transfer asset does not match the request");
+  if (
+    expected?.amount !== undefined &&
+    canonicalDecimal(decimal(expected.amount, "requested transfer amount")) !== canonicalDecimal(receipt.amount)
+  )
+    throw new Error("Wallet transfer amount does not match the request");
+  return receipt;
+}
+
+export function walletOperationPath(operationId: string): string {
+  return `/v1/wallet/operations/${encodeURIComponent(transferOperationId(operationId))}`;
+}
+
 export function walletTransactionPath(accountId: string, offset = 0): string {
   if (!Number.isInteger(offset) || offset < 0) throw new Error("Invalid Wallet transaction offset");
   const query = new URLSearchParams({
@@ -209,5 +295,18 @@ export function walletRequestIsCurrent(
     request.requestId === currentRequestId &&
     request.scopeKey === currentScopeKey &&
     request.accountId === currentAccountId
+  );
+}
+
+export function walletTransferStatusRequestIsCurrent(
+  request: WalletTransferStatusRequestIdentity,
+  currentRequestId: number,
+  currentScopeKey: string | null,
+  currentAccountId: string | null,
+  currentOperationId: string | null,
+): boolean {
+  return (
+    walletRequestIsCurrent(request, currentRequestId, currentScopeKey, currentAccountId) &&
+    request.operationId === currentOperationId
   );
 }
