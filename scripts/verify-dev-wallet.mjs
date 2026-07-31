@@ -46,7 +46,11 @@ assert(apiClient.includes("internalTransfer:async") && apiClient.includes("Promi
 assert(apiClient.includes("parseWalletTransferReceipt(await request<unknown>"), "Transfer and status responses must pass through the public allowlist parser");
 assert(apiClient.includes("const idempotencyKey=crypto.randomUUID()"), "Each transfer invocation must retain one generated idempotency key");
 assert(apiClient.includes("walletTransferStatus:async"), "Wallet must consume the existing safe operation status endpoint");
+assert(apiClient.includes("walletTransactionPath(selectedAsset,cursor)"), "Wallet must consume bounded public customer Wallet history");
 assert(walletData.includes("walletRequestIsCurrent"), "Wallet responses must be isolated by scope, account and request generation");
+assert(walletData.includes("walletHistoryRequestIsCurrent"), "Wallet history must be isolated by scope, selected asset, cursor and request generation");
+assert(walletData.includes("/v1/wallet/transactions?"), "Wallet history must use the public customer contract");
+assert(!walletData.includes("/v1/wallet/accounts/${encodeURIComponent(accountId)}/transactions"), "Legacy account history must remain removed");
 assert(walletData.includes("walletTransferStatusRequestIsCurrent"), "Transfer status must be isolated by scope, source account, operation and request generation");
 assert(walletData.includes("WALLET_TRANSFER_STATUS_REFRESH_LIMIT = 5"), "Transfer status refresh must remain bounded");
 assert(app.includes("No unvalidated or cross-account response displayed"), "Wallet UI must fail closed for stale or invalid responses");

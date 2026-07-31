@@ -21,13 +21,17 @@ assert(apiClient.includes("credentials:'include'"), "Wallet must retain HttpOnly
 assert(apiClient.includes("fastlink_csrf"), "Wallet must retain the CSRF cookie/header contract");
 assert(apiClient.includes("'/v1/wallet/accounts'"), "Wallet must read persisted wallet accounts");
 assert(apiClient.includes("'/v1/wallet/transfers'"), "Wallet must use the authenticated internal-transfer contract");
-assert(apiClient.includes("walletTransactionPath(accountId,offset)"), "Wallet must use the bounded account transaction path");
+assert(apiClient.includes("walletTransactionPath(selectedAsset,cursor)"), "Wallet must use the bounded public customer history path");
 assert(walletData.includes("WALLET_TRANSACTION_PAGE_SIZE = 25"), "Wallet transaction pages must remain consumer-bounded");
+assert(walletData.includes("/v1/wallet/transactions?"), "Wallet history must use the public customer transaction contract");
+assert(!walletData.includes("/v1/wallet/accounts/${encodeURIComponent(accountId)}/transactions"), "Wallet history must not use the legacy account transaction route");
+assert(walletData.includes("walletHistoryRequestIsCurrent"), "Wallet history must be isolated by scope, asset, cursor and generation");
 assert(walletData.includes("walletRequestIsCurrent"), "Wallet async responses must remain scope and account isolated");
 assert(walletData.includes("walletOperationPath"), "Wallet transfer status must use the existing safe operation endpoint");
 assert(walletData.includes("WALLET_TRANSFER_STATUS_REFRESH_LIMIT = 5"), "Wallet transfer status refresh must remain bounded");
 assert(app.includes("Real wallet balances"), "Wallet UI must expose Backend wallet balances");
 assert(app.includes("Internal transfer"), "Wallet UI must expose internal transfers");
+assert(app.includes("Customer Wallet history"), "Wallet UI must expose public customer Wallet history");
 assert(app.includes("Card transactions"), "Wallet UI must expose card transaction history");
 assert(!app.includes("mock") && !app.includes("Mock"), "Wallet UI must not contain a Mock fallback");
 assert(worker.includes('url.pathname === "/runtime-config.js"'), "Worker must provide runtime config");
