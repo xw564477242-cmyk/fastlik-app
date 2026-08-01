@@ -1,4 +1,6 @@
 export const CARD_TRANSACTION_PAGE_SIZE = 25;
+// Matches the Backend's bounded opaque public cursor contract.
+export const CARD_TRANSACTION_CURSOR_MAX_BYTES = 16_384;
 
 export const CARD_TRANSACTION_STATUSES = [
   "AUTHORIZED",
@@ -10,6 +12,12 @@ export const CARD_TRANSACTION_STATUSES = [
 ] as const;
 
 export type CardTransactionStatus = (typeof CARD_TRANSACTION_STATUSES)[number];
+export const CARD_TRANSACTION_FILTERS = ["ALL", ...CARD_TRANSACTION_STATUSES] as const;
+export type CardTransactionFilter = (typeof CARD_TRANSACTION_FILTERS)[number];
+export type CardTransactionQuery = Readonly<{
+  filter: CardTransactionFilter;
+  cursor?: string;
+}>;
 export type CardTransactionLifecycleType =
   | "AUTHORIZATION"
   | "CLEARING"
@@ -107,6 +115,24 @@ const timestamp = (source: OwnData, key: string): string => {
   return value;
 };
 
+export function parseCardTransactionFilter(value: unknown): CardTransactionFilter {
+  if (
+    typeof value !== "string" ||
+    !(CARD_TRANSACTION_FILTERS as readonly string[]).includes(value)
+  ) throw new Error("Invalid Card transaction status filter");
+  return value as CardTransactionFilter;
+}
+
+const cursor = (value: unknown): string => {
+  if (
+    typeof value !== "string" ||
+    value.length === 0 ||
+    new TextEncoder().encode(value).byteLength > CARD_TRANSACTION_CURSOR_MAX_BYTES ||
+    !/^[A-Za-z0-9][A-Za-z0-9._:-]*$/.test(value)
+  ) throw new Error("Invalid card transaction cursor");
+  return value;
+};
+
 export function cardTransactionLifecycleType(status: CardTransactionStatus): CardTransactionLifecycleType {
   switch (status) {
     case "AUTHORIZED": return "AUTHORIZATION";
@@ -146,27 +172,38 @@ export function parseCardTransaction(value: unknown): CardTransactionRecord {
   });
 }
 
-export function parseCardTransactionPage(value: unknown): CardTransactionPage {
+export function parseCardTransactionPage(
+  value: unknown,
+  expectedFilter: CardTransactionFilter = "ALL",
+): CardTransactionPage {
+  const filter = parseCardTransactionFilter(expectedFilter);
   const source = ownData(value, "Invalid card transaction page");
   const rawTransactions = ownValue(source, "transactions");
   if (!Array.isArray(rawTransactions)) throw new Error("Invalid card transaction page");
   if (rawTransactions.length > CARD_TRANSACTION_PAGE_SIZE)
     throw new Error("Card transaction page exceeds the consumer limit");
   const rawCursor = ownValue(source, "nextCursor");
-  if (
-    rawCursor !== null &&
-    (typeof rawCursor !== "string" || rawCursor.length === 0 || new TextEncoder().encode(rawCursor).byteLength > 2048)
-  ) throw new Error("Invalid card transaction cursor");
+  const nextCursor = rawCursor === null ? null : cursor(rawCursor);
+  const transactions = rawTransactions.map(parseCardTransaction);
+  if (new Set(transactions.map((transaction) => transaction.id)).size !== transactions.length)
+    throw new Error("Duplicate card transaction ids");
+  if (filter !== "ALL" && transactions.some((transaction) => transaction.status !== filter))
+    throw new Error("Card transaction page does not match the active status filter");
   return Object.freeze({
-    transactions: Object.freeze(rawTransactions.map(parseCardTransaction)),
-    nextCursor: rawCursor as string | null,
+    transactions: Object.freeze(transactions),
+    nextCursor,
   });
 }
 
-export function cardTransactionPath(cardId: string, cursor?: string): string {
-  const query = new URLSearchParams({ limit: String(CARD_TRANSACTION_PAGE_SIZE) });
-  if (cursor) query.set("cursor", cursor);
-  return `/v1/cards/${encodeURIComponent(cardId)}/transactions?${query.toString()}`;
+export function cardTransactionPath(cardId: string, query: CardTransactionQuery): string {
+  if (!/^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$/.test(cardId))
+    throw new Error("Invalid Card transaction Card ID");
+  const filter = parseCardTransactionFilter(query.filter);
+  const nextCursor = query.cursor === undefined ? undefined : cursor(query.cursor);
+  const params = new URLSearchParams({ limit: String(CARD_TRANSACTION_PAGE_SIZE) });
+  if (filter !== "ALL") params.set("status", filter);
+  if (nextCursor) params.set("cursor", nextCursor);
+  return `/v1/cards/${encodeURIComponent(cardId)}/transactions?${params.toString()}`;
 }
 
 export function mergeCardTransactionPages(
