@@ -1,0 +1,1 @@
+export const API_REQUEST_DEADLINE_MS = 20_000;

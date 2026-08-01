@@ -20,10 +20,10 @@ export type CardDetailRefreshSnapshot = Readonly<{
 }>;
 
 export type CardDetailRefreshReaders = Readonly<{
-  card: (cardId: string) => Promise<unknown>;
-  balance: (cardId: string) => Promise<unknown>;
-  limits: (cardId: string) => Promise<unknown>;
-  transactions: (cardId: string) => Promise<unknown>;
+  card: (cardId: string, signal?: AbortSignal) => Promise<unknown>;
+  balance: (cardId: string, signal?: AbortSignal) => Promise<unknown>;
+  limits: (cardId: string, signal?: AbortSignal) => Promise<unknown>;
+  transactions: (cardId: string, signal?: AbortSignal) => Promise<unknown>;
 }>;
 
 const CARD_ID = /^[A-Za-z0-9._:-]{2,128}$/;
@@ -63,6 +63,15 @@ export function cardDetailRefreshCanRetainSnapshot(
   return completeSnapshotCardId !== null && completeSnapshotCardId === selectedCardId;
 }
 
+export function cardDetailRefreshRequestWasAborted(value: unknown): boolean {
+  return value instanceof DOMException && value.name === "AbortError";
+}
+
+function throwIfCardDetailRefreshRequestWasAborted(signal: AbortSignal | undefined): void {
+  if (signal?.aborted)
+    throw new DOMException("Card detail refresh cancelled", "AbortError");
+}
+
 /**
  * Reads one complete Card screen snapshot. Nothing is returned until all four
  * public responses have passed their existing allowlist parsers.
@@ -70,15 +79,18 @@ export function cardDetailRefreshCanRetainSnapshot(
 export async function readCardDetailRefresh(
   readers: CardDetailRefreshReaders,
   selectedCardId: string,
+  signal?: AbortSignal,
 ): Promise<CardDetailRefreshSnapshot> {
   if (!CARD_ID.test(selectedCardId)) throw new Error("Invalid Card detail refresh Card ID");
+  throwIfCardDetailRefreshRequestWasAborted(signal);
 
   const [rawCard, rawBalance, rawLimits, rawTransactions] = await Promise.all([
-    readers.card(selectedCardId),
-    readers.balance(selectedCardId),
-    readers.limits(selectedCardId),
-    readers.transactions(selectedCardId),
+    readers.card(selectedCardId, signal),
+    readers.balance(selectedCardId, signal),
+    readers.limits(selectedCardId, signal),
+    readers.transactions(selectedCardId, signal),
   ]);
+  throwIfCardDetailRefreshRequestWasAborted(signal);
 
   const card = parseCardRecord(rawCard);
   if (card.id !== selectedCardId)

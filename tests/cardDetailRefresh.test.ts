@@ -3,6 +3,7 @@ import test from "node:test";
 import {
   cardDetailRefreshCanRetainSnapshot,
   cardDetailRefreshRequestIsCurrent,
+  cardDetailRefreshRequestWasAborted,
   createCardDetailRefreshRequestIdentity,
   readCardDetailRefresh,
 } from "../src/cardDetailRefresh.ts";
@@ -103,6 +104,40 @@ test("builds one exact allowlisted Card screen snapshot after all four reads", a
   ]);
   assert.deepEqual(Object.keys(snapshot.transactions).sort(), ["nextCursor", "transactions"]);
   assert.equal("authorizationCode" in snapshot.transactions.transactions[0], false);
+});
+
+test("passes one shared cancellation signal to all four Card detail reads", async () => {
+  const controller = new AbortController();
+  const signals: AbortSignal[] = [];
+  const recordSignal = (signal: AbortSignal | undefined) => {
+    assert.ok(signal);
+    signals.push(signal);
+  };
+
+  await readCardDetailRefresh({
+    card: async (_id, signal) => { recordSignal(signal); return rawCard(); },
+    balance: async (_id, signal) => { recordSignal(signal); return rawBalance(); },
+    limits: async (_id, signal) => { recordSignal(signal); return rawLimits(); },
+    transactions: async (_id, signal) => { recordSignal(signal); return rawTransactions(); },
+  }, selectedCardId, controller.signal);
+
+  assert.equal(signals.length, 4);
+  assert.ok(signals.every(signal => signal === controller.signal));
+});
+
+test("rejects without parsing when the shared Card detail request is aborted", async () => {
+  const controller = new AbortController();
+  controller.abort();
+  let calls = 0;
+
+  await assert.rejects(() => readCardDetailRefresh({
+    card: async () => { calls += 1; return rawCard(); },
+    balance: async () => { calls += 1; return rawBalance(); },
+    limits: async () => { calls += 1; return rawLimits(); },
+    transactions: async () => { calls += 1; return rawTransactions(); },
+  }, selectedCardId, controller.signal), cardDetailRefreshRequestWasAborted);
+
+  assert.equal(calls, 0);
 });
 
 test("fails the whole refresh when any component rejects or crosses the selected Card", async () => {

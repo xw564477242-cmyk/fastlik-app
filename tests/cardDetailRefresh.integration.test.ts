@@ -3,10 +3,12 @@ import test from "node:test";
 import {
   cardDetailRefreshCanRetainSnapshot,
   cardDetailRefreshRequestIsCurrent,
+  cardDetailRefreshRequestWasAborted,
   createCardDetailRefreshRequestIdentity,
   readCardDetailRefresh,
   type CardDetailRefreshSnapshot,
 } from "../src/cardDetailRefresh.ts";
+import { API_REQUEST_DEADLINE_MS } from "../src/requestPolicy.ts";
 
 const environment = process.env.FASTLINK_TEST_ENVIRONMENT;
 const mounted = environment === "SANDBOX" || environment === "TEST" ? test : test.skip;
@@ -67,47 +69,106 @@ mounted(`one mounted manual refresh reads all four resources once (${environment
   assert.equal(snapshot.transactions.transactions.length, 1);
 });
 
-mounted("scope, Card, generation and unmount changes make late success error and finally write zero", async () => {
-  type Context = { mounted: boolean; generation: number; scope: string | null; selectedCardId: string | null };
-  const invalidations: Array<(context: Context) => void> = [
-    context => { context.scope = "scope-b"; },
-    context => { context.selectedCardId = "card:mounted.other"; },
-    context => { context.generation += 1; },
-    context => { context.mounted = false; },
-  ];
+type RefreshContext = {
+  mounted: boolean;
+  generation: number;
+  scope: string | null;
+  selectedCardId: string | null;
+  activeController: AbortController | null;
+};
+
+const pendingReaders = (signals: AbortSignal[]) => {
+  const pending = async (_id: string, signal?: AbortSignal) => {
+    assert.ok(signal);
+    signals.push(signal);
+    return new Promise<never>((_resolve, reject) => {
+      signal.addEventListener(
+        "abort",
+        () => reject(new DOMException("cancelled", "AbortError")),
+        { once: true },
+      );
+    });
+  };
+  return { card: pending, balance: pending, limits: pending, transactions: pending };
+};
+
+const runCancelledRefresh = async (
+  invalidate: (context: RefreshContext) => void,
+) => {
   const writes = { success: 0, error: 0, finally: 0 };
+  const controller = new AbortController();
+  const signals: AbortSignal[] = [];
+  const context: RefreshContext = {
+    mounted: true,
+    generation: 1,
+    scope: "scope-a",
+    selectedCardId: cardId,
+    activeController: controller,
+  };
+  const request = createCardDetailRefreshRequestIdentity(1, "scope-a", cardId);
+  const isCurrent = () => context.activeController === controller && cardDetailRefreshRequestIsCurrent(
+    request, context.generation, context.scope, context.selectedCardId, context.mounted,
+  );
+  const operation = readCardDetailRefresh(
+    pendingReaders(signals),
+    cardId,
+    controller.signal,
+  ).then(
+    () => { if (isCurrent()) writes.success += 1; },
+    value => { if (isCurrent() && !cardDetailRefreshRequestWasAborted(value)) writes.error += 1; },
+  ).finally(() => { if (isCurrent()) writes.finally += 1; });
 
-  for (const [index, invalidate] of invalidations.entries()) {
-    const requestGeneration = index + 1;
-    const context: Context = {
-      mounted: true,
-      generation: requestGeneration,
-      scope: "scope-a",
-      selectedCardId: cardId,
-    };
-    const request = createCardDetailRefreshRequestIdentity(requestGeneration, "scope-a", cardId);
-    const isCurrent = () => cardDetailRefreshRequestIsCurrent(
-      request, context.generation, context.scope, context.selectedCardId, context.mounted,
-    );
-    let resolve!: (value: unknown) => void;
-    let reject!: (reason: unknown) => void;
-    const operation = readCardDetailRefresh({
-      card: async () => new Promise((next, fail) => { resolve = next; reject = fail; }),
-      balance: async () => balance(),
-      limits: async () => limits(),
-      transactions: async () => transactions(),
-    }, cardId).then(
-      () => { if (isCurrent()) writes.success += 1; },
-      () => { if (isCurrent()) writes.error += 1; },
-    ).finally(() => { if (isCurrent()) writes.finally += 1; });
-    await Promise.resolve();
-    invalidate(context);
-    if (index % 2 === 0) resolve(card());
-    else reject(new Error("late private provider failure"));
-    await operation;
-  }
+  await Promise.resolve();
+  invalidate(context);
+  await operation;
 
+  assert.equal(signals.length, 4);
+  assert.ok(signals.every(signal => signal === controller.signal && signal.aborted));
   assert.deepEqual(writes, { success: 0, error: 0, finally: 0 });
+};
+
+mounted("repeated refresh aborts the old four-read domain and only the replacement can commit", async () => {
+  await runCancelledRefresh(context => {
+    context.activeController?.abort();
+    context.activeController = new AbortController();
+    context.generation += 1;
+  });
+
+  const replacement = await readCardDetailRefresh({
+    card: async () => card(),
+    balance: async () => balance(),
+    limits: async () => limits(),
+    transactions: async () => transactions(),
+  }, cardId, new AbortController().signal);
+  assert.equal(replacement.card.id, cardId);
+});
+
+mounted("Card switch, session change, logout and unmount abort all old reads with zero writes", async () => {
+  const invalidations: Array<(context: RefreshContext) => void> = [
+    context => {
+      context.activeController?.abort();
+      context.activeController = null;
+      context.selectedCardId = "card:mounted.other";
+    },
+    context => {
+      context.activeController?.abort();
+      context.activeController = null;
+      context.scope = "scope-b";
+    },
+    context => {
+      context.activeController?.abort();
+      context.activeController = null;
+      context.scope = null;
+      context.selectedCardId = null;
+    },
+    context => {
+      context.activeController?.abort();
+      context.activeController = null;
+      context.mounted = false;
+    },
+  ];
+
+  for (const invalidate of invalidations) await runCancelledRefresh(invalidate);
 });
 
 mounted("one failed component preserves the prior complete snapshot and exposes only a generic error", async () => {
@@ -135,6 +196,33 @@ mounted("one failed component preserves the prior complete snapshot and exposes 
   assert.equal(displayed, prior, "no detail, balance, limits or transaction subset may commit");
   assert.equal(publicError, "Card refresh unavailable for this session");
   assert.equal(publicError.includes("providerSecret"), false);
+});
+
+mounted("the existing 20-second deadline fails atomically and preserves the prior snapshot", async () => {
+  assert.equal(API_REQUEST_DEADLINE_MS, 20_000);
+  const prior = await readCardDetailRefresh({
+    card: async () => card(),
+    balance: async () => balance(),
+    limits: async () => limits(),
+    transactions: async () => transactions(),
+  }, cardId);
+  let displayed: CardDetailRefreshSnapshot = prior;
+  let publicError = "";
+
+  try {
+    displayed = await readCardDetailRefresh({
+      card: async () => card(),
+      balance: async () => { throw new Error("API timeout · private trace must not leak"); },
+      limits: async () => limits(),
+      transactions: async () => transactions(),
+    }, cardId);
+  } catch {
+    publicError = "Card refresh unavailable for this session";
+  }
+
+  assert.equal(displayed, prior);
+  assert.equal(publicError, "Card refresh unavailable for this session");
+  assert.equal(publicError.includes("trace"), false);
 });
 
 mounted("a different Card can never inherit the prior Card complete snapshot", async () => {

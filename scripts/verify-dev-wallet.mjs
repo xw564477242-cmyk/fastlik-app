@@ -4,6 +4,7 @@ import { join, relative } from "node:path";
 const root = process.cwd();
 const apiClient = readFileSync(join(root, "src/apiClient.ts"), "utf8");
 const app = readFileSync(join(root, "src/App.tsx"), "utf8");
+const cardDetailRefresh = readFileSync(join(root, "src/cardDetailRefresh.ts"), "utf8");
 const cardBalance = readFileSync(join(root, "src/cardBalance.ts"), "utf8");
 const cardLimits = readFileSync(join(root, "src/cardLimits.ts"), "utf8");
 const cardLimitsUpdate = readFileSync(join(root, "src/cardLimitsUpdate.ts"), "utf8");
@@ -52,12 +53,12 @@ assert(apiClient.includes("VITE_FASTLINK_API_URL"), "Wallet API must require an 
 assert(apiClient.includes("VITE_FASTLINK_ENVIRONMENT"), "Wallet must require an explicit environment");
 assert(apiClient.includes("VITE_FASTLINK_BUILD_SHA"), "Wallet must expose the build SHA");
 assert(apiClient.includes("readWalletTransferAccounts(walletTransferTransport,session,walletRuntime.environment)"), "Wallet account responses must use the bounded session-gated transfer consumer");
-assert(apiClient.includes("parseCardBalance(await request<unknown>(cardBalancePath(id)),id)"), "Card balance must be reconstructed from the public typed contract");
+assert(apiClient.includes("parseCardBalance(await request<unknown>(cardBalancePath(id),'GET',undefined,undefined,'json',signal),id)"), "Card balance must be reconstructed from the public typed contract with active cancellation");
 assert(!apiClient.includes("balance:(id:string)=>request<Record<string,unknown>>"), "Card balance must not expose a raw response record");
 assert(cardBalance.includes("CardBalanceRecord"), "Card balance must expose a strict typed record");
 assert(cardBalance.includes("parseCardBalance"), "Card balance must use a public allowlist parser");
 assert(cardBalance.includes("cardBalanceRequestIsCurrent"), "Card balance must be isolated by scope, selected card and generation");
-assert(apiClient.includes("parseCardLimits(await request<unknown>(cardLimitsPath(id)),id)"), "Card limits must be reconstructed from the public typed contract");
+assert(apiClient.includes("parseCardLimits(await request<unknown>(cardLimitsPath(id),'GET',undefined,undefined,'json',signal),id)"), "Card limits must be reconstructed from the public typed contract with active cancellation");
 assert(cardLimits.includes("CardLimitsRecord"), "Card limits must expose a strict typed record");
 assert(cardLimits.includes("parseCardLimits"), "Card limits must use a public allowlist parser");
 assert(cardLimits.includes("cardLimitsRequestIsCurrent"), "Card limits must be isolated by scope, selected card and generation");
@@ -147,6 +148,25 @@ assert(app.includes("walletHistoryAbortController.current?.abort()") && app.incl
 assert(app.includes("walletRequestMounted.current=false") && app.includes("walletHistoryRequestSequence.current+=1;walletTransactionDetailRequestSequence.current+=1"), "Wallet unmount must invalidate and cancel every Wallet transaction request");
 assert(app.includes("walletApi.walletTransactions(activeSession,filters,null,historyController.signal)") && app.includes("walletApi.walletTransactions(session,filters,previous,historyController.signal)"), "Wallet list and next-page requests must carry their active cancellation signal");
 assert(app.includes("walletApi.walletTransactionDetail(activeSession,transaction,detailController.signal)"), "Wallet detail requests must carry their active cancellation signal");
+assert(
+  apiClient.includes("card:async(id:string,signal?:AbortSignal)") &&
+    apiClient.includes("balance:async(id:string,signal?:AbortSignal)") &&
+    apiClient.includes("limits:async(id:string,signal?:AbortSignal)") &&
+    apiClient.includes("transactions:async(id:string,cursor?:string,signal?:AbortSignal)"),
+  "Every Card detail GET must accept an active AbortSignal",
+);
+assert(
+  cardDetailRefresh.includes("readers.card(selectedCardId, signal)") &&
+    cardDetailRefresh.includes("readers.balance(selectedCardId, signal)") &&
+    cardDetailRefresh.includes("readers.limits(selectedCardId, signal)") &&
+    cardDetailRefresh.includes("readers.transactions(selectedCardId, signal)"),
+  "One shared active AbortSignal must reach all four atomic Card detail readers",
+);
+assert(
+  app.includes("cardDetailAbortController.current===detailController") &&
+    app.includes("},card.id,detailController.signal)"),
+  "Card detail completion must remain bound to the active cancellation domain",
+);
 assert(app.includes("refreshSelectedWalletTransaction") && app.includes("Manual only · one GET per click · no automatic retries."), "Wallet selected transaction detail must expose an explicit one-GET manual refresh with no retries");
 assert(app.includes("resetWalletTransactionDetailRequest();const request=createWalletTransactionDetailRequestIdentity") && app.includes("walletTransactionDetailAbortController.current===detailController"), "Each detail refresh must cancel its predecessor before creating one newly bound request");
 assert(app.includes("selectedWalletTransactionRef.current") && app.includes("walletTransactionDetailRequestIsCurrent(request,walletTransactionDetailRequestSequence.current,walletScope.current,currentAccount.id,currentFilters,walletTransactionsRef.current,selectedWalletTransactionRef.current)"), "Wallet detail refresh must reject stale session, account, filter, selection and generation completions");
