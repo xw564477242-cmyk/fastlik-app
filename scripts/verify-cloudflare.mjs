@@ -92,6 +92,8 @@ assert(walletExperience.includes("卡片详情") && walletExperience.includes("�
 assert(walletExperience.includes("CNY · USD · SGD · VND") && walletExperience.includes("USDT · USDC · ETH"), "Home asset entries must separate fiat and digital assets");
 assert(walletExperience.includes("虚拟卡") && walletExperience.includes("实体卡"), "Card assets must separate virtual and physical cards");
 assert(walletExperience.includes("fiatAmount") && walletExperience.includes("cardAmount") && walletExperience.includes("查看资产明细"), "Home asset cards must show category amounts and defer breakdowns to detail pages");
+assert(walletExperience.includes("总法币资产") && walletExperience.includes("结算单位") && walletExperience.includes("第三方汇率汇总待接入"), "Fiat detail must reserve a Backend-priced settlement total");
+assert(walletExperience.includes("法币资产账本") && walletExperience.includes("资金进出明细") && walletExperience.includes("onConvert"), "Fiat detail must expose account conversion links and the real ledger");
 assert(walletExperience.includes("不会生成演示数据") && walletExperience.includes("待开发"), "Unavailable flows must be explicit and must not create substitute data");
 assert(app.includes("Internal transfer"), "Wallet UI must expose internal transfers");
 assert(app.includes("Customer Wallet history"), "Wallet UI must expose public customer Wallet history");
