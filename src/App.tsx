@@ -1,7 +1,7 @@
 import {FormEvent,useEffect,useRef,useState} from 'react'
 import {ArrowRightLeft,CreditCard,Landmark,LogOut,RefreshCw,ShieldCheck,Snowflake,WalletCards} from 'lucide-react'
 import {CardBalanceRecord,CardLimitsRecord,CardReplacementInput,CardReplacementReason,WalletAccountRecord,WalletBalanceRecord,WalletBalanceSummary,walletApi,walletRuntime,WalletApiError,WalletCredentials,WalletOperationPage,WalletOperationRecord,WalletSession,WalletTransactionPage,WalletTransactionRecord,WalletTransferReceipt} from './apiClient'
-import {cardDetailRefreshCanRetainSnapshot,cardDetailRefreshRequestIsCurrent,createCardDetailRefreshRequestIdentity,readCardDetailRefresh} from './cardDetailRefresh'
+import {cardDetailRefreshCanRetainSnapshot,cardDetailRefreshRequestIsCurrent,cardDetailRefreshRequestWasAborted,createCardDetailRefreshRequestIdentity,readCardDetailRefresh} from './cardDetailRefresh'
 import {CARD_LIMIT_UPDATE_FIELDS,CARD_LIMIT_UPDATE_MAX_MINOR,beginCardLimitsUpdate,cardLimitsUpdateDecision,cardLimitsUpdateDraft,cardLimitsUpdateInputFromDraft,cardLimitsUpdateRequestIsCurrent,createCardLimitsUpdateRequestIdentity,settleCardLimitsUpdate,type CardLimitUpdateField,type CardLimitsUpdateDraft} from './cardLimitsUpdate'
 import {beginCardStatusAction,cardStatusDecision,cardStatusRequestIsCurrent,createCardStatusRequestIdentity,settleCardStatusAction} from './cardStatusAction'
 import {CardRecord,cardRequestIsCurrent,mergeCardPages} from './cardList'
@@ -90,6 +90,7 @@ export default function App(){
  const cardScope=useRef<string|null>(null)
  const cardDetailRequestSequence=useRef(0)
  const cardDetailTarget=useRef<string|null>(null)
+ const cardDetailAbortController=useRef<AbortController|null>(null)
  const cardSnapshotTarget=useRef<string|null>(null)
  const cardBalanceRequestSequence=useRef(0)
  const cardBalanceTarget=useRef<string|null>(null)
@@ -166,9 +167,10 @@ export default function App(){
  const describeWalletHistory=()=>`Wallet transaction history unavailable for this session`
  const abortWalletHistoryRequest=()=>{walletHistoryAbortController.current?.abort();walletHistoryAbortController.current=null}
  const abortWalletTransactionDetailRequest=()=>{walletTransactionDetailAbortController.current?.abort();walletTransactionDetailAbortController.current=null}
+ const abortCardDetailRequest=()=>{cardDetailAbortController.current?.abort();cardDetailAbortController.current=null}
  const resetWalletTransactionFilters=()=>{walletTransactionTypeFilterTarget.current='ALL';walletTransactionStatusFilterTarget.current='ALL';setWalletTransactionTypeFilter('ALL');setWalletTransactionStatusFilter('ALL')}
  const clearCardStatusAction=()=>{const wasActive=cardStatusInFlight.current;cardActionRequestSequence.current+=1;cardActionTarget.current=null;cardStatusSubmitGate.current.activeRequestId=null;cardStatusInFlight.current=false;if(wasActive)setBusy(false)}
- const invalidateCardDetail=()=>{cardDetailRequestSequence.current+=1;cardDetailTarget.current=null;cardSnapshotTarget.current=null;cardBalanceRequestSequence.current+=1;cardBalanceTarget.current=null;cardLimitsRequestSequence.current+=1;cardLimitsTarget.current=null;cardLimitsUpdateRequestSequence.current+=1;cardLimitsUpdateSubmitGate.current.activeRequestId=null;cardLimitsUpdateInFlight.current=false;clearCardStatusAction();cardTransactionRequestSequence.current+=1;cardTransactionTarget.current=null}
+ const invalidateCardDetail=()=>{abortCardDetailRequest();cardDetailRequestSequence.current+=1;cardDetailTarget.current=null;cardSnapshotTarget.current=null;cardBalanceRequestSequence.current+=1;cardBalanceTarget.current=null;cardLimitsRequestSequence.current+=1;cardLimitsTarget.current=null;cardLimitsUpdateRequestSequence.current+=1;cardLimitsUpdateSubmitGate.current.activeRequestId=null;cardLimitsUpdateInFlight.current=false;clearCardStatusAction();cardTransactionRequestSequence.current+=1;cardTransactionTarget.current=null}
  const clearCardBalance=()=>{cardBalanceRequestSequence.current+=1;cardBalanceTarget.current=null;setCardBalance(null);setCardBalanceLoading(false);setCardBalanceError('')}
  const clearCardLimitsUpdate=()=>{cardLimitsUpdateRequestSequence.current+=1;cardLimitsUpdateSubmitGate.current.activeRequestId=null;cardLimitsUpdateInFlight.current=false;setCardLimitsUpdating(false);setCardLimitsUpdateError('')}
  const replaceCardLimits=(limits:CardLimitsRecord|null)=>{cardLimitsRef.current=limits;setCardLimits(limits);const draft:CardLimitsUpdateDraft=limits?cardLimitsUpdateDraft(limits):{singleTransactionMinor:'',dailySpendMinor:'',monthlySpendMinor:'',dailyAtmMinor:''};cardLimitsUpdateDraftRef.current=draft;setCardLimitsUpdateDraftState(draft)}
@@ -197,6 +199,7 @@ export default function App(){
  const loadWalletTransactionHistory=async(account:WalletAccountRecord,expectedScope:string,activeSession:WalletSession,selection:WalletTransactionFilterSelection={type:walletTransactionTypeFilterTarget.current,status:walletTransactionStatusFilterTarget.current})=>{let filters;try{filters=walletTransactionFiltersForSelectedAsset(selection,account.assetCode)}catch{clearWalletTransactions();setWalletHistoryError(describeWalletHistory());return}const ownsAccount=accountsRef.current.some(row=>row.id===account.id&&row.assetCode===account.assetCode);if(!walletRequestMounted.current||!ownsAccount||walletTransferSessionScope(activeSession,walletRuntime.environment)!==expectedScope||walletScope.current!==expectedScope||selectedAccountRef.current?.id!==account.id||selectedAccountRef.current.assetCode!==account.assetCode){clearWalletTransactions();if(walletRequestMounted.current)setWalletHistoryError(describeWalletHistory());return}clearWalletTransactions();const filterKey=walletTransactionFilterKey(filters);const historyRequest=createWalletTransactionHistoryRequestIdentity(++walletHistoryRequestSequence.current,expectedScope,filters,null);const historyController=new AbortController();walletHistoryAbortController.current=historyController;walletHistoryAssetTarget.current=account.assetCode;walletHistoryFilterTarget.current=filterKey;walletHistoryCursorTarget.current=null;walletHistoryInFlight.current=true;const isCurrent=()=>walletRequestMounted.current&&walletHistoryAbortController.current===historyController&&walletTransferSessionScope(activeSession,walletRuntime.environment)===expectedScope&&walletTransactionHistoryRequestIsCurrent(historyRequest,walletHistoryRequestSequence.current,walletScope.current,walletHistoryFilterTarget.current,walletHistoryCursorTarget.current)&&accountsRef.current.some(row=>row.id===account.id&&row.assetCode===account.assetCode)&&selectedAccountRef.current?.id===account.id&&selectedAccountRef.current.assetCode===account.assetCode;setWalletHistoryLoading(true);setWalletTransactionLoadingMore(false);setWalletHistoryError('');try{const history=await walletApi.walletTransactions(activeSession,filters,null,historyController.signal);if(!isCurrent())return;replaceWalletTransactions(history);walletHistoryCursorTarget.current=history.nextCursor}catch(value){if(isCurrent()&&!walletTransactionRequestWasAborted(value)){replaceWalletTransactions(null);setWalletHistoryError(describeWalletHistory())}}finally{if(isCurrent()){walletHistoryAbortController.current=null;walletHistoryInFlight.current=false;setWalletHistoryLoading(false)}}}
  const loadWallet=async(account:WalletAccountRecord,expectedScope:string|null,activeSession:WalletSession)=>{replaceSelectedAccount(account);setAccountBalance(null);const request={requestId:++walletAccountRequestSequence.current,scopeKey:expectedScope,accountId:account.id};walletAccountTarget.current=account.id;const isCurrent=()=>walletRequestMounted.current&&walletRequestIsCurrent(request,walletAccountRequestSequence.current,walletScope.current,walletAccountTarget.current);setWalletLoading(true);setWalletError('');const historyPromise=expectedScope?loadWalletTransactionHistory(account,expectedScope,activeSession):Promise.resolve();const[balanceResult]=await Promise.all([walletApi.walletBalance(account.id).then(balance=>({balance,error:null})).catch(error=>({balance:null,error})),historyPromise]);if(isCurrent()){if(balanceResult.balance)setAccountBalance(balanceResult.balance);else{setAccountBalance(null);setWalletError(describe(balanceResult.error))}setWalletLoading(false)}}
  const loadCard=async(card:CardRecord,expectedScope=cardScope.current,callbacks?:{onError?:(value:unknown)=>void;onSettled?:()=>void})=>{
+  abortCardDetailRequest()
   cardActionRequestSequence.current+=1
   cardActionTarget.current=null
   clearCardLimitsUpdate()
@@ -222,7 +225,9 @@ export default function App(){
   cardLimitsTarget.current=card.id
   cardTransactionRequestSequence.current+=1
   cardTransactionTarget.current=card.id
-  const isCurrent=()=>cardDetailRefreshRequestIsCurrent(request,cardDetailRequestSequence.current,cardScope.current,selectedCardRef.current?.id??null,walletRequestMounted.current)&&cardDetailTarget.current===card.id&&cardBalanceTarget.current===card.id&&cardLimitsTarget.current===card.id&&cardTransactionTarget.current===card.id
+  const detailController=new AbortController()
+  cardDetailAbortController.current=detailController
+  const isCurrent=()=>cardDetailAbortController.current===detailController&&cardDetailRefreshRequestIsCurrent(request,cardDetailRequestSequence.current,cardScope.current,selectedCardRef.current?.id??null,walletRequestMounted.current)&&cardDetailTarget.current===card.id&&cardBalanceTarget.current===card.id&&cardLimitsTarget.current===card.id&&cardTransactionTarget.current===card.id
   setCardBalanceLoading(true)
   setCardBalanceError('')
   setCardLimitsLoading(true)
@@ -230,11 +235,11 @@ export default function App(){
   setCardTransactionError('')
   try{
    const snapshot=await readCardDetailRefresh({
-    card:walletApi.card,
-    balance:walletApi.balance,
-    limits:walletApi.limits,
-    transactions:id=>walletApi.transactions(id),
-   },card.id)
+    card:(id,signal)=>walletApi.card(id,signal),
+    balance:(id,signal)=>walletApi.balance(id,signal),
+    limits:(id,signal)=>walletApi.limits(id,signal),
+    transactions:(id,signal)=>walletApi.transactions(id,undefined,signal),
+   },card.id,detailController.signal)
    if(!isCurrent())return
    setSelectedCard(snapshot.card)
    setCards(current=>current.map(row=>row.id===snapshot.card.id?snapshot.card:row))
@@ -243,13 +248,16 @@ export default function App(){
    setCardTransactions(snapshot.transactions.transactions)
    setCardTransactionNextCursor(snapshot.transactions.nextCursor)
    cardSnapshotTarget.current=card.id
-  }catch{
+  }catch(value){
    if(!isCurrent())return
+   if(cardDetailRefreshRequestWasAborted(value))return
+   detailController.abort()
    const publicError=new Error('Card refresh unavailable for this session')
    if(callbacks?.onError)callbacks.onError(publicError)
    else throw publicError
   }finally{
    if(isCurrent()){
+    cardDetailAbortController.current=null
     setCardBalanceLoading(false)
     setCardLimitsLoading(false)
     callbacks?.onSettled?.()
@@ -267,7 +275,7 @@ export default function App(){
  const selectWalletTransaction=async(transaction:WalletTransactionRecord)=>{replaceSelectedWalletTransaction(transaction);await loadWalletTransactionDetail(transaction)}
  const refreshSelectedWalletTransaction=()=>{const transaction=selectedWalletTransactionRef.current;if(transaction)void loadWalletTransactionDetail(transaction)}
  useEffect(()=>{cardsRef.current=cards},[cards])
- useEffect(()=>{walletRequestMounted.current=true;return()=>{walletRequestMounted.current=false;walletHistoryRequestSequence.current+=1;walletTransactionDetailRequestSequence.current+=1;cardLimitsUpdateRequestSequence.current+=1;cardLimitsUpdateSubmitGate.current.activeRequestId=null;cardLimitsUpdateInFlight.current=false;cardActionRequestSequence.current+=1;cardActionTarget.current=null;cardStatusSubmitGate.current.activeRequestId=null;cardStatusInFlight.current=false;cardReplacementRequestSequence.current+=1;cardReplacementTarget.current=null;cardReplacementSubmitGate.current.activeRequestId=null;cardReplacementInFlight.current=false;cardRenewalRequestSequence.current+=1;cardRenewalTarget.current=null;cardRenewalSubmitGate.current.activeRequestId=null;cardRenewalInFlight.current=false;abortWalletHistoryRequest();abortWalletTransactionDetailRequest()}},[])
+ useEffect(()=>{walletRequestMounted.current=true;return()=>{walletRequestMounted.current=false;cardDetailRequestSequence.current+=1;abortCardDetailRequest();walletHistoryRequestSequence.current+=1;walletTransactionDetailRequestSequence.current+=1;cardLimitsUpdateRequestSequence.current+=1;cardLimitsUpdateSubmitGate.current.activeRequestId=null;cardLimitsUpdateInFlight.current=false;cardActionRequestSequence.current+=1;cardActionTarget.current=null;cardStatusSubmitGate.current.activeRequestId=null;cardStatusInFlight.current=false;cardReplacementRequestSequence.current+=1;cardReplacementTarget.current=null;cardReplacementSubmitGate.current.activeRequestId=null;cardReplacementInFlight.current=false;cardRenewalRequestSequence.current+=1;cardRenewalTarget.current=null;cardRenewalSubmitGate.current.activeRequestId=null;cardRenewalInFlight.current=false;abortWalletHistoryRequest();abortWalletTransactionDetailRequest()}},[])
  useEffect(()=>{void (async()=>{try{await acceptSession(await walletApi.session())}catch(value){clear();if(!(value instanceof WalletApiError&&value.status===401))setError(describe(value))}finally{if(walletRequestMounted.current)setBusy(false)}})()},[])
  useEffect(()=>{if(!session)return;const expiresAt=typeof session.expiresAt==='string'?Date.parse(session.expiresAt):Number.NaN;const remaining=expiresAt-Date.now();if(!Number.isFinite(remaining)||remaining<=0){clear();return}const timeout=window.setTimeout(()=>clear(),Math.min(remaining,2_147_483_647));return()=>window.clearTimeout(timeout)},[session])
  const authenticate=async(event:FormEvent)=>{event.preventDefault();setBusy(true);setError('');clear();try{const credentials:WalletCredentials={tenantId:tenantId.trim(),email:email.trim(),password};const current=mode==='login'?await walletApi.login(credentials):await walletApi.register(credentials);await acceptSession(current);setPassword('')}catch(value){clear();setError(describe(value))}finally{setBusy(false)}}
@@ -465,7 +473,7 @@ export default function App(){
  }
  const transfer=async(event:FormEvent)=>{event.preventDefault();if(!session||!selectedAccount||walletTransferSubmitGate.current.activeRequestId!==null)return;const scope=walletTransferSessionScope(session,walletRuntime.environment);const account=selectedAccount;if(!scope||scope!==walletScope.current||account.id!==walletAccountTarget.current){setWalletError(describeWalletTransfer());return}let input;try{input=normalizeWalletTransferInput({sourceAccountId:account.id,destinationAccountId:destinationAccountId.trim(),assetCode:account.assetCode,amount:transferAmount},accountsRef.current)}catch{setWalletError('Use an active destination account, matching asset, positive amount, and sufficient available balance.');return}const requestId=++walletTransferRequestSequence.current;if(!beginWalletTransferSubmit(walletTransferSubmitGate.current,requestId))return;const idempotencyKey=crypto.randomUUID();const request=createWalletTransferRequestIdentity(requestId,scope,account,input,idempotencyKey);walletTransferTarget.current=account.id;walletTransferStatusRequestSequence.current+=1;walletTransferStatusTarget.current=null;walletTransferStatusInFlight.current=false;const isCurrent=()=>walletTransferSessionScope(session,walletRuntime.environment)===scope&&walletTransferRequestIsCurrent(request,walletTransferRequestSequence.current,walletScope.current,accountsRef.current,selectedAccountRef.current)&&account.id===walletTransferTarget.current&&account.id===walletAccountTarget.current;setTransferBusy(true);setTransferReceipt(null);setTransferStatusBusy(false);setTransferStatusRefreshCount(0);setWalletError('');try{const receipt=await walletApi.internalTransfer(session,accountsRef.current,input,idempotencyKey);if(!isCurrent())return;walletTransferStatusTarget.current=receipt.id;setTransferReceipt(receipt);setTransferBusy(false);const refreshed=await walletApi.walletAccounts(session);if(!isCurrent())return;const refreshedAccount=refreshed.find(row=>row.id===account.id);replaceAccounts(refreshed);if(!refreshedAccount){walletAccountRequestSequence.current+=1;walletAccountTarget.current=null;replaceSelectedAccount(null);clearWalletBalanceSummary();setAccountBalance(null);clearWalletTransactions();setWalletError('Transferred, but the source account is no longer available in this session.');return}replaceSelectedAccount(refreshedAccount);await Promise.all([loadWallet(refreshedAccount,scope,session),loadWalletBalanceSummary(refreshed,refreshedAccount,session.environment,scope)]);if(scope===walletScope.current)setTransferAmount('')}catch{if(isCurrent())setWalletError(describeWalletTransfer())}finally{const settled=settleWalletTransferSubmit(walletTransferSubmitGate.current,requestId);if(settled&&isCurrent())setTransferBusy(false)}}
  const refreshTransferStatus=async()=>{if(!session||!selectedAccount||!transferReceipt||walletTransferStatusInFlight.current||transferStatusRefreshCount>=WALLET_TRANSFER_STATUS_REFRESH_LIMIT)return;const scope=walletTransferSessionScope(session,walletRuntime.environment);const accountId=selectedAccount.id;const previousReceipt=transferReceipt;const operationId=previousReceipt.id;if(!scope||scope!==walletScope.current||accountId!==walletAccountTarget.current||operationId!==walletTransferStatusTarget.current){setWalletError(describeWalletTransfer());return}const request={requestId:++walletTransferStatusRequestSequence.current,scopeKey:scope,accountId,operationId};walletTransferStatusTarget.current=operationId;const isCurrent=()=>walletTransferSessionScope(session,walletRuntime.environment)===scope&&walletTransferStatusRequestIsCurrent(request,walletTransferStatusRequestSequence.current,walletScope.current,walletAccountTarget.current,walletTransferStatusTarget.current);walletTransferStatusInFlight.current=true;setTransferStatusBusy(true);setTransferStatusRefreshCount(current=>current+1);setWalletError('');try{const receipt=await walletApi.walletTransferStatus(session,previousReceipt);if(!isCurrent())return;setTransferReceipt(receipt)}catch{if(isCurrent())setWalletError(describeWalletTransfer())}finally{if(isCurrent()){walletTransferStatusInFlight.current=false;setTransferStatusBusy(false)}}}
- const refresh=async()=>{if(!session)return;setBusy(true);setError('');try{await acceptSession(await walletApi.refresh())}catch(value){clear();setError(describe(value))}finally{setBusy(false)}}
+ const refresh=async()=>{if(!session)return;abortCardDetailRequest();setBusy(true);setError('');try{await acceptSession(await walletApi.refresh())}catch(value){clear();setError(describe(value))}finally{setBusy(false)}}
  const logout=async()=>{setBusy(true);setError('');clear();try{await walletApi.logout()}catch(value){if(!(value instanceof WalletApiError&&value.status===401))setError(describe(value))}finally{setPassword('');setBusy(false)}}
  return <main style={{maxWidth:980,margin:'40px auto',padding:24,fontFamily:'Inter,system-ui'}}>
   <header><div><h1>FastLink Wallet</h1><p>Environment: <b>{walletRuntime.environment}</b> · Build: <b>{walletRuntime.buildSha}</b></p><p>API: <code>{walletRuntime.apiUrl}</code></p></div>{session&&<div className="session-actions"><button onClick={refresh} disabled={busy||cardReplacing||cardRenewing}><RefreshCw/> Refresh session</button><button onClick={logout} disabled={busy||cardReplacing||cardRenewing}><LogOut/> Sign out</button></div>}</header>

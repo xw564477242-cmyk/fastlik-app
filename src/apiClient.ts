@@ -22,6 +22,7 @@ import {readWalletTransferAccounts,readWalletTransferStatus,submitWalletTransfer
 import type {WalletTransferInput,WalletTransferTransportRequest} from './walletTransfer'
 import {readWalletTransactionDetail,readWalletTransactionHistory} from './walletTransactions'
 import type {WalletTransactionFilters,WalletTransactionHistoryState,WalletTransactionRecord,WalletTransactionTransportRequest} from './walletTransactions'
+import {API_REQUEST_DEADLINE_MS} from './requestPolicy'
 
 export type {WalletAccountRecord,WalletBalanceRecord,WalletTransferReceipt} from './walletData'
 export type {WalletTransactionHistoryState as WalletTransactionPage,WalletTransactionRecord} from './walletTransactions'
@@ -54,7 +55,7 @@ const trace=()=>crypto.randomUUID()
 const csrfToken=()=>document.cookie.split(';').map(value=>value.trim()).find(value=>value.startsWith('fastlink_csrf='))?.slice('fastlink_csrf='.length)
 
 async function request<T>(path:string,method='GET',body?:unknown,idempotencyKey?:string,responseMode:'json'|'text'='json',externalSignal?:AbortSignal):Promise<T>{
- const id=trace();const controller=new AbortController();let timedOut=false;const cancel=()=>controller.abort();if(externalSignal?.aborted)cancel();else externalSignal?.addEventListener('abort',cancel,{once:true});const timeout=window.setTimeout(()=>{timedOut=true;controller.abort()},20_000)
+ const id=trace();const controller=new AbortController();let timedOut=false;const cancel=()=>controller.abort();if(externalSignal?.aborted)cancel();else externalSignal?.addEventListener('abort',cancel,{once:true});const timeout=window.setTimeout(()=>{timedOut=true;controller.abort()},API_REQUEST_DEADLINE_MS)
  try{
   const csrf=csrfToken()
   const mutating=!['GET','HEAD','OPTIONS'].includes(method)
@@ -109,11 +110,11 @@ export const walletApi={
  internalTransfer:async(session:WalletSession,accounts:readonly WalletAccountRecord[],input:InternalTransferInput,idempotencyKey:string):Promise<WalletTransferReceipt>=>submitWalletTransfer(walletTransferTransport,session,walletRuntime.environment,accounts,input,idempotencyKey),
  walletTransferStatus:async(session:WalletSession,previous:WalletTransferReceipt):Promise<WalletTransferReceipt>=>readWalletTransferStatus(walletTransferTransport,session,walletRuntime.environment,previous),
  cards:async(cursor?:string)=>parseCardPage(await request<unknown>(cardListPath(cursor))),
- card:async(id:string)=>parseCardRecord(await request<unknown>(`/v1/cards/${encodeURIComponent(id)}`)),
- balance:async(id:string)=>parseCardBalance(await request<unknown>(cardBalancePath(id)),id),
- limits:async(id:string)=>parseCardLimits(await request<unknown>(cardLimitsPath(id)),id),
+ card:async(id:string,signal?:AbortSignal)=>parseCardRecord(await request<unknown>(`/v1/cards/${encodeURIComponent(id)}`,'GET',undefined,undefined,'json',signal)),
+ balance:async(id:string,signal?:AbortSignal)=>parseCardBalance(await request<unknown>(cardBalancePath(id),'GET',undefined,undefined,'json',signal),id),
+ limits:async(id:string,signal?:AbortSignal)=>parseCardLimits(await request<unknown>(cardLimitsPath(id),'GET',undefined,undefined,'json',signal),id),
  updateCardLimits:async(card:import('./cardList').CardRecord,current:import('./cardLimits').CardLimitsRecord,input:CardLimitsUpdateInput,idempotencyKey:string,sessionEnvironment:FastLinkEnvironment,scopeKey:string,currentScopeKey:string|null,currentCardId:string|null)=>submitCardLimitsUpdate(cardLimitsUpdateTransport,card,current,input,idempotencyKey,sessionEnvironment,walletRuntime.environment,scopeKey,currentScopeKey,currentCardId),
- transactions:async(id:string,cursor?:string)=>parseCardTransactionPage(await request<unknown>(cardTransactionPath(id,cursor))),
+ transactions:async(id:string,cursor?:string,signal?:AbortSignal)=>parseCardTransactionPage(await request<unknown>(cardTransactionPath(id,cursor),'GET',undefined,undefined,'json',signal)),
  createVirtualCard:async(input:VirtualCardCreateInput,idempotencyKey:string,sessionEnvironment:FastLinkEnvironment)=>{const decision=virtualCardCreateDecision(sessionEnvironment,walletRuntime.environment);if(!decision.allowed)throw new Error(decision.reason??'Virtual card creation is unavailable');const normalized=parseVirtualCardCreateInput(input);return parseVirtualCardCreateResponse(await request<unknown>(virtualCardCreatePath(),'POST',normalized,validateVirtualCardIdempotencyKey(idempotencyKey)),normalized)},
  replaceCard:async(session:WalletSession,card:import('./cardList').CardRecord,input:CardReplacementInput,idempotencyKey:string,currentScopeKey:string|null,currentCardId:string|null)=>submitCardReplacement(cardReplacementTransport,session,walletRuntime.environment,currentScopeKey,currentCardId,card,input,idempotencyKey),
  renewCard:async(session:WalletSession,card:import('./cardList').CardRecord,idempotencyKey:string,currentScopeKey:string|null,currentCardId:string|null)=>submitCardRenewal(cardRenewalTransport,session,walletRuntime.environment,currentScopeKey,currentCardId,card,idempotencyKey),
