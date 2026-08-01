@@ -13,6 +13,7 @@ const devConfig = read("wrangler.dev.jsonc");
 const previewConfig = read("wrangler.preview.jsonc");
 const apiClient = read("src/apiClient.ts");
 const app = read("src/App.tsx");
+const walletExperience = read("src/WalletExperience.tsx");
 const cardBalance = read("src/cardBalance.ts");
 const cardLimits = read("src/cardLimits.ts");
 const cardLimitsUpdate = read("src/cardLimitsUpdate.ts");
@@ -83,6 +84,7 @@ assert(walletData.includes("walletRequestIsCurrent"), "Wallet async responses mu
 assert(walletData.includes("walletOperationPath"), "Wallet transfer status must use the existing safe operation endpoint");
 assert(walletData.includes("WALLET_TRANSFER_STATUS_REFRESH_LIMIT = 5"), "Wallet transfer status refresh must remain bounded");
 assert(app.includes("Real wallet balances"), "Wallet UI must expose Backend wallet balances");
+assert(walletExperience.includes("createElement(icon,{size:21})") && !walletExperience.includes("icon({size:21})"), "Consumer Wallet action icons must render as React elements");
 assert(app.includes("Internal transfer"), "Wallet UI must expose internal transfers");
 assert(app.includes("Customer Wallet history"), "Wallet UI must expose public customer Wallet history");
 assert(app.includes("Transaction detail unavailable for this session"), "Wallet detail errors must remain safely normalized");
