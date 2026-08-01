@@ -89,6 +89,8 @@ for (const page of ["数字资产","充值","提现","兑换","支付","转账",
   assert(walletExperience.includes(page), `Consumer Wallet must include the ${page} page`);
 }
 assert(walletExperience.includes("卡片详情") && walletExperience.includes("消费限额") && walletExperience.includes("卡片交易"), "Consumer Wallet must restore the selected Card detail page");
+assert(walletExperience.includes("CNY · USD · SGD · VND") && walletExperience.includes("USDT · USDC · ETH"), "Home asset entries must separate fiat and digital assets");
+assert(walletExperience.includes("虚拟卡") && walletExperience.includes("实体卡"), "Card assets must separate virtual and physical cards");
 assert(walletExperience.includes("不会生成演示数据") && walletExperience.includes("待开发"), "Unavailable flows must be explicit and must not create substitute data");
 assert(app.includes("Internal transfer"), "Wallet UI must expose internal transfers");
 assert(app.includes("Customer Wallet history"), "Wallet UI must expose public customer Wallet history");
