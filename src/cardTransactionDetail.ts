@@ -55,9 +55,14 @@ export function reconcileCardTransactionDetailSelection(
     selection.cardId !== currentCardId
   ) return null;
   const transaction = currentTransaction(selection.transaction.id, transactions);
-  return transaction ? Object.freeze({
+  if (
+    !transaction ||
+    transaction.currency !== selection.transaction.currency ||
+    transaction.occurredAt !== selection.transaction.occurredAt
+  ) return null;
+  return Object.freeze({
     scopeKey: currentScopeKey,
     cardId: currentCardId,
     transaction,
-  }) : null;
+  });
 }

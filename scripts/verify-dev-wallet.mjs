@@ -7,6 +7,8 @@ const app = readFileSync(join(root, "src/App.tsx"), "utf8");
 const cardDetailRefresh = readFileSync(join(root, "src/cardDetailRefresh.ts"), "utf8");
 const cardTransactions = readFileSync(join(root, "src/cardTransactions.ts"), "utf8");
 const cardTransactionHistory = readFileSync(join(root, "src/cardTransactionHistory.ts"), "utf8");
+const cardTransactionRefresh = readFileSync(join(root, "src/cardTransactionRefresh.ts"), "utf8");
+const cardTransactionDetail = readFileSync(join(root, "src/cardTransactionDetail.ts"), "utf8");
 const cardBalance = readFileSync(join(root, "src/cardBalance.ts"), "utf8");
 const cardLimits = readFileSync(join(root, "src/cardLimits.ts"), "utf8");
 const cardLimitsUpdate = readFileSync(join(root, "src/cardLimitsUpdate.ts"), "utf8");
@@ -169,6 +171,23 @@ assert(
     cardTransactionHistory.includes("request.filter === currentFilter") &&
     cardTransactionHistory.includes("request.cursor === currentCursor"),
   "Card transaction requests must remain bound to the active status filter and opaque cursor",
+);
+assert(
+  app.includes("refreshCardTransactions=async") &&
+    app.includes("walletApi.transactions(card.id,{filter},controller.signal)") &&
+    app.includes("commitCardTransactionRefreshPage(request,page)") &&
+    app.includes("replaceCardTransactionHistory(refreshed)"),
+  "Manual Card transaction refresh must issue one filter-bound cancellable GET and atomically replace the first page",
+);
+assert(
+    cardTransactionRefresh.includes("CARD_TRANSACTION_REFRESH_MAX_ATTEMPTS = 3") &&
+    cardTransactionRefresh.includes('sessionEnvironment === "SANDBOX" || sessionEnvironment === "TEST"') &&
+    cardTransactionRefresh.includes("request.snapshot === currentHistory") &&
+    cardTransactionDetail.includes("transaction.currency !== selection.transaction.currency") &&
+    cardTransactionDetail.includes("transaction.occurredAt !== selection.transaction.occurredAt") &&
+    app.includes("Keeping the last verified snapshot until completion") &&
+    app.includes("no automatic retries"),
+  "Card transaction refresh must retain the same-filter snapshot and expose only bounded manual SANDBOX/TEST retries",
 );
 assert(
   cardDetailRefresh.includes("readers.card(selectedCardId, signal)") &&
