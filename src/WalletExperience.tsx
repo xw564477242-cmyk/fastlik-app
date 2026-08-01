@@ -52,6 +52,9 @@ export function WalletExperience(props:Props){
   return Number.isFinite(parsed)?parsed:null
  },[props.summary])
  const recentOperations=props.operations?.items.slice(0,4)??[]
+ const fiatItems=(props.summary?.items??[]).filter(item=>fiatAssetCodes.includes(item.assetCode as typeof fiatAssetCodes[number]))
+ const fiatAmount=fiatItems.length===1?money(fiatItems[0].availableBalance,fiatItems[0].assetCode):'—'
+ const cardAmount=props.cardBalance?minorMoney(props.cardBalance.availableBalanceMinor,props.cardBalance.currency):'—'
  const go=(next:Page)=>setPage(next)
  const action=(next:Page,icon:typeof ArrowDownToLine,label:string)=><button className="wallet-action" onClick={()=>go(next)}><span>{createElement(icon,{size:21})}</span>{label}</button>
  return <div className="consumer-wallet">
@@ -59,7 +62,7 @@ export function WalletExperience(props:Props){
    <div className="phone-status"><span>9:41</span><span className="phone-signal"><i/><b/></span></div>
    {page==='home'?<>
     <header className="consumer-header"><div className="consumer-person"><span>FL</span><div><small>欢迎回来</small><b>{props.session.actorId}</b></div></div><button aria-label="Notifications" onClick={()=>go('notifications')}><Bell size={19}/><i/></button></header>
-    <section className="consumer-balance"><div className="balance-label"><span>总资产</span><button onClick={()=>setHidden(value=>!value)} aria-label="Toggle balance">{hidden?<EyeOff size={17}/>:<Eye size={17}/>}</button></div><strong>{hidden?'••••••':total===null?'Unavailable':money(total)}</strong>{total===null&&<small>不同币种不会按未经验证的汇率合计</small>}<div className="balance-mini asset-entry-grid"><button onClick={()=>go('assets')}><span>法币资产</span><b>{hidden?'••••':`${(props.summary?.items??[]).filter(item=>fiatAssetCodes.includes(item.assetCode as typeof fiatAssetCodes[number])).length} 币种`}</b><small>CNY · USD · SGD · VND</small></button><button onClick={()=>go('digital')}><span>数字货币</span><b>待开发</b><small>USDT · USDC · ETH</small></button><button onClick={()=>go('cards')}><span>卡片资产</span><b>{props.cards.length} 张</b><small>虚拟卡 · 实体卡</small></button></div></section>
+    <section className="consumer-balance"><div className="balance-label"><span>总资产</span><button onClick={()=>setHidden(value=>!value)} aria-label="Toggle balance">{hidden?<EyeOff size={17}/>:<Eye size={17}/>}</button></div><strong>{hidden?'••••••':total===null?'Unavailable':money(total)}</strong>{total===null&&<small>不同币种不会按未经验证的汇率合计</small>}<div className="balance-mini asset-entry-grid"><button onClick={()=>go('assets')}><span>法币资产</span><b>{hidden?'••••':fiatAmount}</b><small>查看资产明细</small></button><button onClick={()=>go('digital')}><span>数字货币</span><b>{hidden?'••••':'—'}</b><small>查看资产明细</small></button><button onClick={()=>go('cards')}><span>卡片资产</span><b>{hidden?'••••':cardAmount}</b><small>查看卡片明细</small></button></div></section>
     <div className="wallet-actions">{action('deposit',ArrowDownToLine,'充值')}{action('withdraw',ArrowUpFromLine,'提现')}{action('convert',ArrowLeftRight,'兑换')}{action('pay',ScanLine,'支付')}{action('transfer',Send,'转账')}{action('cards',CreditCard,'卡片')}</div>
     <section className="consumer-section"><div className="consumer-section-title"><h2>最近交易</h2><button onClick={()=>go('history')}>查看全部</button></div><OperationRows rows={recentOperations}/></section>
    </>:<PageHeader title={pageTitles[page]} onBack={()=>go('home')} onRefresh={['assets','cards','history'].includes(page)?props.onRefresh:undefined}/>} 
