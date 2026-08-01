@@ -107,6 +107,7 @@ assert(worker.includes('url.pathname === "/runtime-config.js"'), "Worker must pr
 assert(worker.includes('"x-fastlink-api-proxy"'), "Worker must expose its proxy identity");
 assert(worker.includes('headers.delete("x-forwarded-host")'), "Worker must remove spoofed forwarding headers");
 assert(worker.includes('headers.set("origin", backendRequestOrigin)'), "Worker must support an explicit Backend-approved request origin");
+assert(worker.includes('backendRequestOrigin ? new URL(backendRequestOrigin).host : publicUrl.host'), "Preview must keep the approved Origin and forwarded host aligned");
 assert(previewConfig.includes('"FASTLINK_BACKEND_REQUEST_ORIGIN": "https://fastlink-wallet-dev.adhesive-snowshoe.workers.dev"'), "Preview must use the Backend-approved Dev Wallet request origin");
 assert(worker.includes("FASTLINK_BACKEND_ORIGIN"), "Worker must require an explicit Backend origin");
 assert(!worker.includes("production-309d") && !worker.includes("fastlink-backend-dev-development-a"), "Worker must not embed Backend hosts");
