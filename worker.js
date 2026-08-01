@@ -51,7 +51,7 @@ function proxyHeaders(request, publicUrl, env) {
   headers.delete("x-forwarded-for");
   headers.delete("x-forwarded-host");
   headers.delete("x-forwarded-proto");
-  headers.set("x-forwarded-host", publicUrl.host);
+  headers.set("x-forwarded-host", backendRequestOrigin ? new URL(backendRequestOrigin).host : publicUrl.host);
   headers.set("x-forwarded-proto", "https");
   return headers;
 }
