@@ -1,4 +1,4 @@
-import {useMemo,useState,type ReactNode} from 'react'
+import {createElement,useMemo,useState,type ReactNode} from 'react'
 import {ArrowDownToLine,ArrowLeft,ArrowLeftRight,ArrowUpFromLine,Bell,CircleUserRound,CreditCard,Eye,EyeOff,History,Home,Layers,LogOut,RefreshCw,ScanLine,Send,ShieldCheck,User,WalletCards} from 'lucide-react'
 import type {CardBalanceRecord,WalletAccountRecord,WalletBalanceSummary,WalletOperationPage,WalletSession,WalletTransactionPage} from './apiClient'
 import type {CardRecord} from './cardList'
@@ -49,7 +49,7 @@ export function WalletExperience(props:Props){
  },[props.summary])
  const recentOperations=props.operations?.items.slice(0,4)??[]
  const go=(next:Page)=>setPage(next)
- const action=(next:Page,icon:typeof ArrowDownToLine,label:string)=><button className="wallet-action" onClick={()=>go(next)}><span>{icon({size:21})}</span>{label}</button>
+ const action=(next:Page,icon:typeof ArrowDownToLine,label:string)=><button className="wallet-action" onClick={()=>go(next)}><span>{createElement(icon,{size:21})}</span>{label}</button>
  return <div className="consumer-wallet">
   <div className="consumer-scroll">
    <div className="phone-status"><span>9:41</span><span className="phone-signal"><i/><b/></span></div>
