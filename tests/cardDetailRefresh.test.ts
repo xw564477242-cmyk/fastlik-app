@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import {
+  CardDetailRefreshError,
   cardDetailRefreshCanRetainSnapshot,
   cardDetailRefreshRequestIsCurrent,
   cardDetailRefreshRequestWasAborted,
@@ -149,7 +150,7 @@ test("rejects without parsing when the shared Card detail request is aborted", a
 test("fails the whole refresh when any component rejects or crosses the selected Card", async () => {
   await assert.rejects(() => readCardDetailRefresh(readers({
     limits: async () => { throw new Error("private provider failure"); },
-  }), selectedCardId));
+  }), selectedCardId), (value: unknown) => value instanceof CardDetailRefreshError && value.resource === "limits");
   await assert.rejects(() => readCardDetailRefresh(readers({
     card: async () => rawCard({ id: "card:detail.2" }),
   }), selectedCardId), /selected Card/);

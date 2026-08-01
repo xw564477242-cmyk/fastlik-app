@@ -4,6 +4,7 @@ import { join, relative } from "node:path";
 const root = process.cwd();
 const apiClient = readFileSync(join(root, "src/apiClient.ts"), "utf8");
 const app = readFileSync(join(root, "src/App.tsx"), "utf8");
+const sessionLifecycle = readFileSync(join(root, "src/sessionLifecycle.ts"), "utf8");
 const cardDetailRefresh = readFileSync(join(root, "src/cardDetailRefresh.ts"), "utf8");
 const cardTransactions = readFileSync(join(root, "src/cardTransactions.ts"), "utf8");
 const cardTransactionHistory = readFileSync(join(root, "src/cardTransactionHistory.ts"), "utf8");
@@ -47,6 +48,10 @@ assert(entrypoint.includes("RAILWAY_GIT_COMMIT_SHA is required"), "container sta
 assert(entrypoint.includes("SANDBOX Wallet must use the approved Backend Dev API"), "container startup must reject a non-Dev Backend");
 assert(dockerfile.includes("/docker-entrypoint.d/40-fastlink-runtime.sh"), "runtime generation must execute before nginx starts");
 assert(apiClient.includes("credentials:'include'"), "Wallet API must include Cookie credentials");
+assert(apiClient.includes("sessionFailureRequiresClear(error)") && apiClient.includes("fastlink:session-invalid"), "Only explicit authentication failures may broadcast global session invalidation");
+assert(sessionLifecycle.includes("error?.status === 401") && sessionLifecycle.includes("SESSION_INVALIDATION_MESSAGE"), "Session invalidation must remain restricted to explicit authentication failure evidence");
+assert(app.includes("setSession(current)") && app.includes("runSessionInitializationModule"), "A validated session must be committed before independent business initialization modules settle");
+assert(app.includes("sessionInitializationRequestIsCurrent") && app.includes("sessionInitializationSequence.current+=1"), "Late initialization work must be generation and scope bound");
 assert(apiClient.includes("fastlink_csrf"), "Wallet API must use the CSRF cookie/header contract");
 assert(!apiClient.includes("Authorization"), "Wallet API must not send a Bearer token");
 assert(!apiClient.includes("localStorage"), "Wallet authentication must not use localStorage");

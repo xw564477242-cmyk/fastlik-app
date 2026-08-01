@@ -26,6 +26,17 @@ export type CardDetailRefreshReaders = Readonly<{
   transactions: (cardId: string, signal?: AbortSignal) => Promise<unknown>;
 }>;
 
+export type CardDetailRefreshResource = "card" | "balance" | "limits" | "transactions";
+
+export class CardDetailRefreshError extends Error {
+  readonly resource: CardDetailRefreshResource;
+
+  constructor(resource: CardDetailRefreshResource, options?: ErrorOptions) {
+    super(`Card ${resource} refresh failed`, options);
+    this.resource = resource;
+  }
+}
+
 const CARD_ID = /^[A-Za-z0-9._:-]{2,128}$/;
 
 export function createCardDetailRefreshRequestIdentity(
@@ -84,11 +95,19 @@ export async function readCardDetailRefresh(
   if (!CARD_ID.test(selectedCardId)) throw new Error("Invalid Card detail refresh Card ID");
   throwIfCardDetailRefreshRequestWasAborted(signal);
 
+  const guarded = async (resource: CardDetailRefreshResource, read: () => Promise<unknown>) => {
+    try {
+      return await read();
+    } catch (cause) {
+      if (cardDetailRefreshRequestWasAborted(cause)) throw cause;
+      throw new CardDetailRefreshError(resource, { cause });
+    }
+  };
   const [rawCard, rawBalance, rawLimits, rawTransactions] = await Promise.all([
-    readers.card(selectedCardId, signal),
-    readers.balance(selectedCardId, signal),
-    readers.limits(selectedCardId, signal),
-    readers.transactions(selectedCardId, signal),
+    guarded("card", () => readers.card(selectedCardId, signal)),
+    guarded("balance", () => readers.balance(selectedCardId, signal)),
+    guarded("limits", () => readers.limits(selectedCardId, signal)),
+    guarded("transactions", () => readers.transactions(selectedCardId, signal)),
   ]);
   throwIfCardDetailRefreshRequestWasAborted(signal);
 
