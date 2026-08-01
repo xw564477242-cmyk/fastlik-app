@@ -1,0 +1,87 @@
+name: Deploy Wallet PR Preview
+
+on:
+  pull_request:
+    branches: [dev]
+    types: [opened, synchronize, reopened]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: fastlink-wallet-preview-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+jobs:
+  deploy-preview:
+    if: github.event.pull_request.head.repo.full_name == github.repository
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    environment: cloudflare-wallet-preview
+    env:
+      PREVIEW_NAME: fastlink-wallet-pr-${{ github.event.pull_request.number }}
+      PREVIEW_URL: https://fastlink-wallet-pr-${{ github.event.pull_request.number }}.adhesive-snowshoe.workers.dev
+    steps:
+      - name: Check out PR Head
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+
+      - run: npm ci
+
+      - name: Build immutable Sandbox preview
+        env:
+          FASTLINK_ENVIRONMENT: SANDBOX
+          FASTLINK_BUILD_SHA: ${{ github.event.pull_request.head.sha }}
+        run: npm run build:cloudflare
+
+      - name: Deploy isolated preview Worker
+        uses: cloudflare/wrangler-action@v3
+        with:
+          apiToken: ${{ secrets.CLOUDFLARE_DEV_API_TOKEN }}
+          accountId: ${{ secrets.CLOUDFLARE_DEV_ACCOUNT_ID }}
+          wranglerVersion: "4.114.0"
+          command: >-
+            deploy --config wrangler.preview.jsonc
+            --name ${{ env.PREVIEW_NAME }}
+            --var FASTLINK_BACKEND_ORIGIN:${{ vars.FASTLINK_DEV_BACKEND_ORIGIN }}
+            --var FASTLINK_BUILD_SHA:${{ github.event.pull_request.head.sha }}
+
+      - name: Verify preview identity and API proxy
+        shell: bash
+        run: |
+          set -euo pipefail
+          health=''
+          runtime=''
+          for _ in {1..18}; do
+            health="$(curl --fail --silent --show-error --location "$PREVIEW_URL/healthz" || true)"
+            runtime="$(curl --fail --silent --show-error --location "$PREVIEW_URL/runtime-config.js" || true)"
+            if grep -Fq "\"buildSha\":\"${{ github.event.pull_request.head.sha }}\"" <<<"$health"; then
+              break
+            fi
+            sleep 5
+          done
+          grep -F '"environment":"SANDBOX"' <<<"$health"
+          grep -F "\"buildSha\":\"${{ github.event.pull_request.head.sha }}\"" <<<"$health"
+          grep -F '"apiUrl":"/api"' <<<"$runtime"
+          curl --fail --silent --show-error --dump-header preview-headers.txt --output preview-health.json "$PREVIEW_URL/api/health"
+          grep -i -F 'x-fastlink-api-proxy: wallet-preview-dev' preview-headers.txt
+          grep -i -F 'cache-control: no-store' preview-headers.txt
+
+      - name: Publish preview summary
+        shell: bash
+        run: |
+          {
+            echo '## App Wallet preview ready'
+            echo
+            echo "- URL: $PREVIEW_URL"
+            echo "- Environment: SANDBOX"
+            echo "- Build: ${{ github.event.pull_request.head.sha }}"
+            echo '- Money-moving actions remain unavailable in this read-only preview.'
+          } >> "$GITHUB_STEP_SUMMARY"

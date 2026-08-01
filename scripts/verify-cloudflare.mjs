@@ -10,8 +10,11 @@ const assert = (condition, message) => {
 const worker = read("worker.js");
 const testConfig = read("wrangler.test.jsonc");
 const devConfig = read("wrangler.dev.jsonc");
+const previewConfig = read("wrangler.preview.jsonc");
 const apiClient = read("src/apiClient.ts");
 const app = read("src/App.tsx");
+const walletExperience = read("src/WalletExperience.tsx");
+const styles = read("src/styles.css");
 const cardBalance = read("src/cardBalance.ts");
 const cardLimits = read("src/cardLimits.ts");
 const cardLimitsUpdate = read("src/cardLimitsUpdate.ts");
@@ -82,6 +85,18 @@ assert(walletData.includes("walletRequestIsCurrent"), "Wallet async responses mu
 assert(walletData.includes("walletOperationPath"), "Wallet transfer status must use the existing safe operation endpoint");
 assert(walletData.includes("WALLET_TRANSFER_STATUS_REFRESH_LIMIT = 5"), "Wallet transfer status refresh must remain bounded");
 assert(app.includes("Real wallet balances"), "Wallet UI must expose Backend wallet balances");
+assert(walletExperience.includes("createElement(icon,{size:21})") && !walletExperience.includes("icon({size:21})"), "Consumer Wallet action icons must render as React elements");
+for (const page of ["数字资产","充值","提现","兑换","支付","转账","通知","设置","安全中心","帮助与支持"]) {
+  assert(walletExperience.includes(page), `Consumer Wallet must include the ${page} page`);
+}
+assert(walletExperience.includes("卡片详情") && walletExperience.includes("消费限额") && walletExperience.includes("卡片交易"), "Consumer Wallet must restore the selected Card detail page");
+assert(walletExperience.includes("['CNY','USD','SGD','VND']") && walletExperience.includes("['USDT','USDC','ETH']"), "Asset detail pages must separate fiat and digital asset allowlists");
+assert(walletExperience.includes("虚拟卡") && walletExperience.includes("实体卡"), "Card assets must separate virtual and physical cards");
+assert(walletExperience.includes("fiatAmount") && walletExperience.includes("cardAmount") && walletExperience.includes("查看资产明细"), "Home asset cards must show category amounts and defer breakdowns to detail pages");
+assert(!walletExperience.includes('label="资产"') && styles.includes(".consumer-nav{grid-template-columns:repeat(5,1fr)}"), "Bottom navigation must reserve space for five primary destinations and keep assets on Home");
+assert(walletExperience.includes("总法币资产") && walletExperience.includes("结算单位") && walletExperience.includes("第三方汇率汇总待接入"), "Fiat detail must reserve a Backend-priced settlement total");
+assert(walletExperience.includes("法币资产账本") && walletExperience.includes("资金进出明细") && walletExperience.includes("onConvert"), "Fiat detail must expose account conversion links and the real ledger");
+assert(walletExperience.includes("不会生成演示数据") && walletExperience.includes("待开发"), "Unavailable flows must be explicit and must not create substitute data");
 assert(app.includes("Internal transfer"), "Wallet UI must expose internal transfers");
 assert(app.includes("Customer Wallet history"), "Wallet UI must expose public customer Wallet history");
 assert(app.includes("Transaction detail unavailable for this session"), "Wallet detail errors must remain safely normalized");
@@ -105,6 +120,9 @@ assert(!app.includes("mock") && !app.includes("Mock"), "Wallet UI must not conta
 assert(worker.includes('url.pathname === "/runtime-config.js"'), "Worker must provide runtime config");
 assert(worker.includes('"x-fastlink-api-proxy"'), "Worker must expose its proxy identity");
 assert(worker.includes('headers.delete("x-forwarded-host")'), "Worker must remove spoofed forwarding headers");
+assert(worker.includes('headers.set("origin", backendRequestOrigin)'), "Worker must support an explicit Backend-approved request origin");
+assert(worker.includes('backendRequestOrigin ? new URL(backendRequestOrigin).host : publicUrl.host'), "Preview must keep the approved Origin and forwarded host aligned");
+assert(previewConfig.includes('"FASTLINK_BACKEND_REQUEST_ORIGIN": "https://fastlink-wallet-dev.adhesive-snowshoe.workers.dev"'), "Preview must use the Backend-approved Dev Wallet request origin");
 assert(worker.includes("FASTLINK_BACKEND_ORIGIN"), "Worker must require an explicit Backend origin");
 assert(!worker.includes("production-309d") && !worker.includes("fastlink-backend-dev-development-a"), "Worker must not embed Backend hosts");
 assert(testConfig.includes('"name": "fastlink-wallet-test"'), "Test Worker name must be isolated");
