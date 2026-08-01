@@ -17,6 +17,7 @@ jobs:
     if: github.event.pull_request.head.repo.full_name == github.repository
     runs-on: ubuntu-latest
     timeout-minutes: 20
+    environment: cloudflare-wallet-preview
     env:
       PREVIEW_NAME: fastlink-wallet-pr-${{ github.event.pull_request.number }}
       PREVIEW_URL: https://fastlink-wallet-pr-${{ github.event.pull_request.number }}.adhesive-snowshoe.workers.dev
