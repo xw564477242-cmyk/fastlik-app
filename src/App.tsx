@@ -19,7 +19,7 @@ import {beginCardRenewal,captureCardRenewalVersion,cardRenewalDecision,cardRenew
 import {captureWalletAccountsVersion,walletBalanceSummaryRequestIsCurrent} from './walletBalanceSummary'
 import {beginWalletTransferSubmit,createWalletTransferRequestIdentity,normalizeWalletTransferInput,settleWalletTransferSubmit,walletTransferRequestIsCurrent,walletTransferSessionScope} from './walletTransfer'
 import {WALLET_TRANSACTION_STATUSES,WALLET_TRANSACTION_TYPES,createWalletTransactionDetailRequestIdentity,createWalletTransactionHistoryRequestIdentity,normalizeWalletTransactionFilterSelection,walletTransactionDetailRefreshAllowed,walletTransactionDetailRequestIsCurrent,walletTransactionFilterKey,walletTransactionFilterRequestAllowed,walletTransactionFiltersForSelectedAsset,walletTransactionHistoryRequestIsCurrent,walletTransactionRequestWasAborted,type WalletTransactionFilterSelection} from './walletTransactions'
-import {SessionValidationError,createSessionInitializationRequest,runSessionInitializationModule,sessionFailureRequiresClear,sessionInitializationRequestIsCurrent} from './sessionLifecycle'
+import {SessionValidationError,createSessionInitializationRequest,runBoundedWalletInitialization,runSessionInitializationModule,sessionFailureRequiresClear,sessionInitializationRequestIsCurrent} from './sessionLifecycle'
 
 const sessionScope=(session:WalletSession)=>walletTransferSessionScope(session,walletRuntime.environment)??JSON.stringify([session.actorId,session.tenantId,session.customerId,session.environment,session.expiresAt??null])
 
@@ -356,12 +356,14 @@ export default function App(){
   const account=accountsResult?.[0]||null
   setSelectedCard(card)
   replaceSelectedAccount(account)
-  await Promise.all([
-   card?loadCard(card,scope,{onError:value=>{if(!handleSessionInvalidation(value,isCurrent()))setCardRefreshError('Card refresh unavailable for this session')}}):Promise.resolve(),
-   account?loadWallet(account,scope,current):Promise.resolve(),
-   accountsResult?loadWalletBalanceSummary(accountsResult,account,current.environment,scope):Promise.resolve(),
-   loadWalletOperations(scope,current,{type:walletOperationTypeFilterTarget.current,status:walletOperationStatusFilterTarget.current}),
-  ])
+  await runBoundedWalletInitialization({
+   selectedWallet:()=>account?loadWallet(account,scope,current):Promise.resolve(),
+   balanceSummary:()=>accountsResult?loadWalletBalanceSummary(accountsResult,account,current.environment,scope):Promise.resolve(),
+   operations:()=>loadWalletOperations(scope,current,{type:walletOperationTypeFilterTarget.current,status:walletOperationStatusFilterTarget.current}),
+   isCurrent,
+  })
+  if(!isCurrent())return
+  if(card)await loadCard(card,scope,{onError:value=>{if(!handleSessionInvalidation(value,isCurrent()))setCardRefreshError('Card refresh unavailable for this session')}})
  }
  const loadMoreCards=async()=>{if(!session||!cardNextCursor||cardListLoadingMore)return;const scope=sessionScope(session);if(scope!==cardScope.current)return;const cursor=cardNextCursor;const requestId=++cardRequestSequence.current;setCardListLoadingMore(true);setCardListError('');try{const page=await walletApi.cards(cursor);if(cardScope.current!==scope||cardRequestSequence.current!==requestId)return;setCards(current=>mergeCardPages(current,page.cards));setCardNextCursor(page.nextCursor)}catch(value){if(cardScope.current===scope&&cardRequestSequence.current===requestId)setCardListError(describe(value))}finally{if(cardScope.current===scope&&cardRequestSequence.current===requestId)setCardListLoadingMore(false)}}
  const loadMoreCardTransactions=async()=>{
