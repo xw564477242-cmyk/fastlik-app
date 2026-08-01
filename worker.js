@@ -40,6 +40,10 @@ function requireBackendOrigin(env) {
 function proxyHeaders(request, publicUrl) {
   const headers = new Headers(request.headers);
   headers.delete("host");
+  // The browser talks to this Worker same-origin. Do not forward its public
+  // Origin as if the browser were calling Railway directly; the Worker is the
+  // trusted server-side boundary and Backend CORS must not reject preview hosts.
+  headers.delete("origin");
   headers.delete("forwarded");
   headers.delete("x-forwarded-for");
   headers.delete("x-forwarded-host");
