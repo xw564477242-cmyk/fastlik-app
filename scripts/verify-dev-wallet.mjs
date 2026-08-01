@@ -105,8 +105,8 @@ assert(app.includes("catch{if(isCurrent())setWalletError(describeWalletTransfer(
 assert(apiClient.includes("readWalletTransactionHistory(walletTransactionTransport,session,walletRuntime.environment,filters,previous,signal)"), "Wallet must consume bounded session-gated customer Wallet history with caller cancellation");
 assert(apiClient.includes("walletTransactionDetail:async"), "Wallet must consume the public selected transaction detail endpoint");
 assert(apiClient.includes("walletTransactionTransport=({path,method,signal}") && apiClient.includes("externalSignal?.addEventListener('abort',cancel,{once:true})"), "Wallet transaction fetches must compose timeout and caller cancellation signals");
-assert(apiClient.includes("walletOperations:async") && apiClient.includes("parseWalletOperationPage(await request<unknown>(walletOperationActivityPath(cursor)))"), "Wallet must consume typed all-account operation activity");
-assert(apiClient.includes("walletOperationDetail:async") && apiClient.includes("parseWalletOperationDetail(await request<unknown>(walletOperationDetailPath(selected.id)),selected)"), "Wallet must consume typed selected operation detail");
+assert(apiClient.includes("walletOperations:async") && apiClient.includes("readWalletOperationActivity(walletOperationTransport,session,walletRuntime.environment,scopeKey,filters,cursor,signal)"), "Wallet must consume typed, session-gated and caller-cancelled all-account operation activity");
+assert(apiClient.includes("walletOperationDetail:async") && apiClient.includes("readWalletOperationDetail(walletOperationTransport,session,walletRuntime.environment,scopeKey,selected,signal)"), "Wallet must consume typed, session-gated and caller-cancelled selected operation detail");
 assert(apiClient.includes("createVirtualCard:async") && apiClient.includes("virtualCardCreateDecision(sessionEnvironment,walletRuntime.environment)"), "Virtual Card creation must fail closed against both session and runtime environment");
 assert(apiClient.includes("request<unknown>(virtualCardCreatePath(),'POST',normalized,validateVirtualCardIdempotencyKey(idempotencyKey))"), "Virtual Card creation must make one typed request with the caller-owned idempotency key");
 assert(virtualCardCreate.includes('sessionEnvironment !== "SANDBOX" && sessionEnvironment !== "TEST"'), "Virtual Card creation must be limited to SANDBOX and TEST");
@@ -126,8 +126,11 @@ assert(cardReplacement.includes("request.reason !== currentReason") && cardRepla
 assert(cardReplacement.includes("beginCardReplacement") && cardReplacement.includes("gate.activeRequestId !== null"), "Card replacement must synchronously reject double click");
 assert(cardReplacement.includes("createCardReplacementCommit") && cardReplacement.includes("collides with an existing Card"), "Card replacement must atomically replace the old Card and reject identity collisions");
 assert(walletOperations.includes("/v1/wallet/operations?"), "Wallet activity must use the public operation history contract");
-assert(walletOperations.includes("new URLSearchParams({ limit:"), "Wallet activity requests must remain bounded");
+assert(walletOperations.includes('query.set("limit", String(WALLET_OPERATION_PAGE_SIZE))'), "Wallet activity requests must remain bounded");
 assert(!walletOperations.includes("new URLSearchParams({ assetCode"), "Wallet activity must not invent an asset filter");
+assert(walletOperations.includes("WALLET_OPERATION_TYPES") && walletOperations.includes("WALLET_OPERATION_STATUSES"), "Wallet activity must use only the Backend canonical type and status filters");
+assert(walletOperations.includes("exactDataRecord(value, operationFields") && walletOperations.includes("exactDataRecord(value, pageFields"), "Wallet activity must reject non-public list and item DTO fields");
+assert(walletOperations.includes("readWalletOperationActivity") && walletOperations.includes('method: "GET"'), "Wallet activity and detail must remain caller-cancelled GET-only reads");
 assert(walletOperations.includes("parseWalletOperationPage"), "Wallet activity must reconstruct the public response allowlist");
 assert(walletOperations.includes("walletOperationActivityRequestIsCurrent"), "Wallet activity must be isolated by session scope, cursor and request generation");
 assert(walletOperations.includes("parseWalletOperationDetail"), "Wallet operation detail must reconstruct the public response allowlist and bind immutable summary fields");
@@ -251,7 +254,10 @@ assert(app.includes("All-account Wallet activity · read only"), "Wallet activit
 assert(app.includes("No unvalidated or cross-session activity displayed"), "Wallet activity UI must fail closed for stale or invalid responses");
 assert(app.includes("Selected operation · read only"), "Wallet operation detail UI must remain explicitly read only");
 assert(app.includes("Wallet operation detail unavailable for this session"), "Wallet operation detail errors must use one safe public message");
-assert(app.includes("clearWalletOperationDetail();const request={requestId:++walletOperationRequestSequence.current"), "Wallet pagination must synchronously clear selected operation detail");
+assert(app.includes("clearWalletOperationDetail();const controller=new AbortController()") && app.includes("appendWalletOperationPage(snapshot,page,cursor)"), "Wallet pagination must synchronously clear selected operation detail and commit only the exact current cursor page");
+assert(app.includes("walletOperationAbortController.current?.abort()") && app.includes("walletOperationDetailAbortController.current?.abort()"), "Wallet operation list and detail invalidation must actively cancel transport");
+assert(app.includes("walletTransferSessionScope(activeSession,walletRuntime.environment)===expectedScope") && app.includes("walletOperationFilterKey({type:walletOperationTypeFilterTarget.current,status:walletOperationStatusFilterTarget.current})"), "Wallet operation completion must bind unexpired actor/session/tenant/customer/environment and filter scope");
+assert(app.includes("Refresh activity") && app.includes("wallet-operation-filters"), "Wallet activity must expose one manual refresh and closed type/status controls");
 assert(app.includes("virtualCardDecision.allowed&&<form"), "Virtual Card creation UI must be hidden unless the environment decision allows it");
 assert(app.includes("const idempotencyKey=crypto.randomUUID();try{const created=await walletApi.createVirtualCard(input,idempotencyKey"), "Each Virtual Card submission must generate and reuse exactly one idempotency key");
 assert(app.includes("Automatic retries are disabled"), "Virtual Card UI must state the no-retry boundary");

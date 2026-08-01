@@ -1,8 +1,13 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import {
+  DEFAULT_WALLET_OPERATION_FILTERS,
   WALLET_OPERATION_PAGE_SIZE,
-  mergeWalletOperationPages,
+  WALLET_OPERATION_STATUSES,
+  WALLET_OPERATION_TYPES,
+  appendWalletOperationPage,
+  createWalletOperationActivityRequestIdentity,
+  createWalletOperationDetailRequestIdentity,
   parseWalletOperation,
   parseWalletOperationDetail,
   parseWalletOperationPage,
@@ -10,47 +15,67 @@ import {
   walletOperationActivityRequestIsCurrent,
   walletOperationDetailPath,
   walletOperationDetailRequestIsCurrent,
+  walletOperationFilterKey,
 } from "../src/walletOperations.ts";
 
-const rawOperation = (id = "operation-1"): Record<string, unknown> => ({
+const backendCursor = (
+  id = "operation-1",
+  createdAt = "2026-08-01T01:02:03.000Z",
+  type: "DEPOSIT" | "INTERNAL_TRANSFER" | "WITHDRAWAL" | "FX_CONVERSION" | null = null,
+  status: "PROCESSING" | "PENDING_SETTLEMENT" | "COMPLETED" | "FAILED" | null = null,
+) => Buffer.from(JSON.stringify({
+  version: 2,
+  createdAt,
+  id,
+  type,
+  status,
+})).toString("base64url");
+
+const rawOperation = (
+  id = "operation-1",
+  createdAt = "2026-07-31T01:02:03.000Z",
+): Record<string, unknown> => ({
   id,
   type: "INTERNAL_TRANSFER",
   status: "COMPLETED",
   assetCode: "USD",
   amount: "25.5",
   direction: "BETWEEN_OWN_ACCOUNTS",
-  createdAt: "2026-07-31T01:02:03.000Z",
+  createdAt,
   completedAt: "2026-07-31T01:02:04.000Z",
   updatedAt: "2026-07-31T01:02:04.000Z",
-  tenantId: "tenant-private",
-  customerId: "customer-private",
-  environment: "TEST",
-  sourceAccountId: "source-private",
-  destinationAccountId: "destination-private",
-  providerPayload: { raw: true },
-  journalIds: ["journal-private"],
-  failureReason: "private",
 });
 
-test("builds the bounded all-account activity request without an asset filter", () => {
+test("builds only canonical Backend type/status filters, bounded cursor pagination and no asset filter", () => {
+  const cursor = backendCursor("operation-1", "2026-08-01T01:02:03.000Z", "DEPOSIT", "COMPLETED");
   assert.equal(WALLET_OPERATION_PAGE_SIZE, 25);
-  assert.equal(walletOperationActivityPath(), "/v1/wallet/operations?limit=25");
-  assert.equal(walletOperationActivityPath("next_cursor-1"), "/v1/wallet/operations?limit=25&cursor=next_cursor-1");
-  assert.equal(walletOperationActivityPath().includes("assetCode"), false);
-  assert.throws(() => walletOperationActivityPath("bad/cursor"), /cursor/);
-  assert.throws(() => walletOperationActivityPath("x".repeat(513)), /cursor/);
+  assert.equal(
+    walletOperationActivityPath(DEFAULT_WALLET_OPERATION_FILTERS),
+    "/v1/wallet/operations?limit=25",
+  );
+  assert.equal(
+    walletOperationActivityPath({ type: "DEPOSIT", status: "COMPLETED" }, cursor),
+    `/v1/wallet/operations?type=DEPOSIT&status=COMPLETED&limit=25&cursor=${cursor}`,
+  );
+  assert.equal(walletOperationActivityPath(DEFAULT_WALLET_OPERATION_FILTERS).includes("assetCode"), false);
+  assert.throws(() => walletOperationActivityPath({ type: "TREASURY_RESERVE" as never, status: "ALL" }), /type filter/);
+  assert.throws(() => walletOperationActivityPath({ type: "ALL", status: "REVERSED" as never }), /status filter/);
+  assert.throws(() => walletOperationActivityPath(DEFAULT_WALLET_OPERATION_FILTERS, "bad/cursor"), /cursor/);
+  assert.throws(() => walletOperationActivityPath(DEFAULT_WALLET_OPERATION_FILTERS, "x".repeat(513)), /cursor/);
 });
 
-test("reconstructs exactly the nine public Wallet operation fields", () => {
+test("accepts exactly the nine public DTO fields and rejects every internal or unknown field", () => {
   const operation = parseWalletOperation(rawOperation());
   assert.deepEqual(Object.keys(operation).sort(), [
     "amount", "assetCode", "completedAt", "createdAt", "direction", "id", "status", "type", "updatedAt",
   ]);
-  for (const forbidden of ["tenantId", "customerId", "environment", "sourceAccountId", "destinationAccountId", "providerPayload", "journalIds", "failureReason"])
-    assert.equal(forbidden in operation, false);
+  for (const forbidden of ["tenantId", "customerId", "environment", "sourceAccountId", "destinationAccountId", "providerPayload", "journalIds", "failureReason"]) {
+    assert.throws(() => parseWalletOperation({ ...rawOperation(), [forbidden]: "private" }), /exactly the public fields/);
+  }
+  assert.throws(() => parseWalletOperationPage({ items: [], nextCursor: null, internal: true }, DEFAULT_WALLET_OPERATION_FILTERS), /exactly the public fields/);
 });
 
-test("reconstructs operation detail and permits only non-identity fields to evolve", () => {
+test("reconstructs operation detail while binding id, type, asset and canonical amount", () => {
   const selected = parseWalletOperation(rawOperation());
   const detail = parseWalletOperationDetail({
     ...rawOperation(),
@@ -62,13 +87,6 @@ test("reconstructs operation detail and permits only non-identity fields to evol
   assert.equal(detail.status, "FAILED");
   assert.equal(detail.direction, "OUTGOING");
   assert.equal(detail.completedAt, null);
-  assert.deepEqual(Object.keys(detail).sort(), [
-    "amount", "assetCode", "completedAt", "createdAt", "direction", "id", "status", "type", "updatedAt",
-  ]);
-});
-
-test("fails closed when operation detail identity, type, asset or amount changes", () => {
-  const selected = parseWalletOperation(rawOperation());
   assert.throws(() => parseWalletOperationDetail(rawOperation("operation-2"), selected), /detail id/);
   assert.throws(() => parseWalletOperationDetail({ ...rawOperation(), type: "DEPOSIT" }, selected), /detail type/);
   assert.throws(() => parseWalletOperationDetail({ ...rawOperation(), assetCode: "EUR" }, selected), /detail asset/);
@@ -76,15 +94,17 @@ test("fails closed when operation detail identity, type, asset or amount changes
   assert.equal(parseWalletOperationDetail({ ...rawOperation(), amount: "25.5000" }, selected).amount, "25.5000");
 });
 
-test("builds a separately validated public operation detail path", () => {
+test("builds a separately validated public operation detail GET path", () => {
   assert.equal(walletOperationDetailPath("operation:1"), "/v1/wallet/operations/operation%3A1");
   assert.throws(() => walletOperationDetailPath("bad/id"), /operation id/);
 });
 
-test("accepts only the public operation enums", () => {
-  for (const type of ["DEPOSIT", "INTERNAL_TRANSFER", "WITHDRAWAL", "FX_CONVERSION"])
+test("uses only the Backend canonical public operation enums", () => {
+  assert.deepEqual(WALLET_OPERATION_TYPES, ["DEPOSIT", "INTERNAL_TRANSFER", "WITHDRAWAL", "FX_CONVERSION"]);
+  assert.deepEqual(WALLET_OPERATION_STATUSES, ["PROCESSING", "PENDING_SETTLEMENT", "COMPLETED", "FAILED"]);
+  for (const type of WALLET_OPERATION_TYPES)
     assert.equal(parseWalletOperation({ ...rawOperation(), type }).type, type);
-  for (const status of ["PROCESSING", "PENDING_SETTLEMENT", "COMPLETED", "FAILED"])
+  for (const status of WALLET_OPERATION_STATUSES)
     assert.equal(parseWalletOperation({ ...rawOperation(), status }).status, status);
   for (const direction of ["OUTGOING", "INCOMING", "BETWEEN_OWN_ACCOUNTS"])
     assert.equal(parseWalletOperation({ ...rawOperation(), direction }).direction, direction);
@@ -113,38 +133,64 @@ test("validates strict RFC3339 timestamps and nullable completedAt", () => {
   assert.throws(() => parseWalletOperation({ ...rawOperation(), updatedAt: "0" }), /updatedAt/);
 });
 
-test("rejects oversized pages, malformed ids and duplicate operation ids", () => {
-  assert.deepEqual(parseWalletOperationPage({ items: [], nextCursor: null }), { items: [], nextCursor: null });
+test("rejects oversized, duplicate and non-monotonic pages", () => {
+  assert.deepEqual(parseWalletOperationPage({ items: [], nextCursor: null }, DEFAULT_WALLET_OPERATION_FILTERS), { items: [], nextCursor: null });
   assert.throws(() => parseWalletOperation({ ...rawOperation(), id: "bad/id" }), /operation id/);
-  assert.throws(() => parseWalletOperationPage({ items: [rawOperation(), rawOperation()], nextCursor: null }), /Duplicate/);
-  assert.throws(() => parseWalletOperationPage({ items: Array.from({ length: 26 }, (_, index) => rawOperation(`operation-${index}`)), nextCursor: null }), /consumer limit/);
+  assert.throws(() => parseWalletOperationPage({ items: [rawOperation(), rawOperation()], nextCursor: null }, DEFAULT_WALLET_OPERATION_FILTERS), /Duplicate/);
+  assert.throws(() => parseWalletOperationPage({ items: Array.from({ length: 26 }, (_, index) => rawOperation(`operation-${index}`)), nextCursor: null }, DEFAULT_WALLET_OPERATION_FILTERS), /consumer limit/);
+  assert.throws(() => parseWalletOperationPage({
+    items: [rawOperation("operation-1", "2026-07-31T01:00:00.000Z"), rawOperation("operation-2", "2026-07-31T02:00:00.000Z")],
+    nextCursor: null,
+  }, DEFAULT_WALLET_OPERATION_FILTERS), /order/);
 });
 
-test("merges paged activity without duplicate operation ids", () => {
-  const first = parseWalletOperation(rawOperation("operation-1"));
-  const updated = parseWalletOperation({ ...rawOperation("operation-1"), status: "FAILED" });
-  const second = parseWalletOperation(rawOperation("operation-2"));
-  assert.deepEqual(mergeWalletOperationPages([first], [updated, second]).map(item => [item.id, item.status]), [
-    ["operation-1", "FAILED"],
-    ["operation-2", "COMPLETED"],
-  ]);
+test("binds page items and Backend v2 cursors to filters, sorting and cursor history", () => {
+  const filters = { type: "INTERNAL_TRANSFER", status: "COMPLETED" } as const;
+  const firstItems = Array.from({ length: WALLET_OPERATION_PAGE_SIZE }, (_, index) =>
+    rawOperation(`operation-${String(50 - index).padStart(2, "0")}`, `2026-07-31T02:${String(59 - index).padStart(2, "0")}:00.000Z`));
+  const cursorA = backendCursor(firstItems.at(-1)!.id as string, firstItems.at(-1)!.createdAt as string, "INTERNAL_TRANSFER", "COMPLETED");
+  const firstRaw = parseWalletOperationPage({ items: firstItems, nextCursor: cursorA }, filters);
+  const first = { ...firstRaw, filterKey: walletOperationFilterKey(filters), cursorTrail: [cursorA] };
+  const next = {
+    ...parseWalletOperationPage({ items: [rawOperation("operation-01", "2026-07-31T01:00:00.000Z")], nextCursor: null }, filters, cursorA),
+    filterKey: walletOperationFilterKey(filters),
+    cursorTrail: [],
+  };
+  assert.equal(appendWalletOperationPage(first, next, cursorA).items.length, 26);
+  assert.throws(() => parseWalletOperationPage({ items: [{ ...rawOperation(), type: "DEPOSIT" }], nextCursor: null }, filters), /requested filters/);
+  assert.throws(() => parseWalletOperationPage({ items: [], nextCursor: backendCursor("operation-x", "2026-07-31T01:00:00.000Z", "DEPOSIT", "COMPLETED") }, filters), /cursor/);
+  assert.throws(() => parseWalletOperationPage({ items: [rawOperation("operation-new", "2026-07-31T03:00:00.000Z")], nextCursor: null }, filters, cursorA), /cursor boundary/);
+  const cursorB = backendCursor("operation-01", "2026-07-31T01:00:00.000Z", "INTERNAL_TRANSFER", "COMPLETED");
+  const rollback = { ...next, nextCursor: cursorA, cursorTrail: [cursorA] };
+  const history = { ...first, nextCursor: cursorB, cursorTrail: [cursorA, cursorB] };
+  assert.throws(() => appendWalletOperationPage(history, rollback, cursorB), /rollback/);
 });
 
-test("rejects operation activity success, error and finally after scope, cursor or generation changes", () => {
-  const request = { requestId: 7, scopeKey: "actor|tenant|customer|TEST", cursor: "cursor-a" };
-  assert.equal(walletOperationActivityRequestIsCurrent(request, 7, request.scopeKey, "cursor-a"), true);
-  assert.equal(walletOperationActivityRequestIsCurrent(request, 8, request.scopeKey, "cursor-a"), false);
-  assert.equal(walletOperationActivityRequestIsCurrent(request, 7, "other-actor|tenant|customer|TEST", "cursor-a"), false);
-  assert.equal(walletOperationActivityRequestIsCurrent(request, 7, "actor|other-tenant|customer|TEST", "cursor-a"), false);
-  assert.equal(walletOperationActivityRequestIsCurrent(request, 7, "actor|tenant|other-customer|TEST", "cursor-a"), false);
-  assert.equal(walletOperationActivityRequestIsCurrent(request, 7, "actor|tenant|customer|SANDBOX", "cursor-a"), false);
-  assert.equal(walletOperationActivityRequestIsCurrent(request, 7, request.scopeKey, "cursor-b"), false);
+test("binds activity writes to actor/session scope, filters, cursor, generation and mount", () => {
+  const filters = { type: "DEPOSIT", status: "COMPLETED" } as const;
+  const cursor = backendCursor("operation-1", "2026-08-01T01:02:03.000Z", "DEPOSIT", "COMPLETED");
+  const request = createWalletOperationActivityRequestIdentity(7, "actor|expiry|tenant|customer|TEST", filters, cursor);
+  const filterKey = walletOperationFilterKey(filters);
+  assert.equal(walletOperationActivityRequestIsCurrent(request, 7, request.scopeKey, filterKey, cursor, true), true);
+  assert.equal(walletOperationActivityRequestIsCurrent(request, 8, request.scopeKey, filterKey, cursor, true), false);
+  assert.equal(walletOperationActivityRequestIsCurrent(request, 7, "other-scope", filterKey, cursor, true), false);
+  assert.equal(walletOperationActivityRequestIsCurrent(request, 7, request.scopeKey, walletOperationFilterKey({ ...filters, status: "FAILED" }), cursor, true), false);
+  assert.equal(walletOperationActivityRequestIsCurrent(request, 7, request.scopeKey, filterKey, null, true), false);
+  assert.equal(walletOperationActivityRequestIsCurrent(request, 7, request.scopeKey, filterKey, cursor, false), false);
 });
 
-test("rejects operation detail success, error and finally after selection, scope or generation changes", () => {
-  const request = { requestId: 11, scopeKey: "actor|tenant|customer|TEST", operationId: "operation-1" };
-  assert.equal(walletOperationDetailRequestIsCurrent(request, 11, request.scopeKey, "operation-1"), true);
-  assert.equal(walletOperationDetailRequestIsCurrent(request, 12, request.scopeKey, "operation-1"), false);
-  assert.equal(walletOperationDetailRequestIsCurrent(request, 11, "actor|tenant|other-customer|TEST", "operation-1"), false);
-  assert.equal(walletOperationDetailRequestIsCurrent(request, 11, request.scopeKey, "operation-2"), false);
+test("binds detail writes to the exact filter, list snapshot, selection, scope and generation", () => {
+  const filters = { type: "ALL", status: "COMPLETED" } as const;
+  const parsed = parseWalletOperationPage({ items: [rawOperation()], nextCursor: null }, { type: "ALL", status: "COMPLETED" });
+  const list = { ...parsed, filterKey: walletOperationFilterKey({ type: "ALL", status: "COMPLETED" }), cursorTrail: [] };
+  const selected = list.items[0];
+  const request = createWalletOperationDetailRequestIdentity(11, "actor|expiry|tenant|customer|TEST", filters, selected, list);
+  const filterKey = walletOperationFilterKey(filters);
+  assert.equal(walletOperationDetailRequestIsCurrent(request, 11, request.scopeKey, filterKey, list, selected.id, true), true);
+  assert.equal(walletOperationDetailRequestIsCurrent(request, 12, request.scopeKey, filterKey, list, selected.id, true), false);
+  assert.equal(walletOperationDetailRequestIsCurrent(request, 11, "other-scope", filterKey, list, selected.id, true), false);
+  assert.equal(walletOperationDetailRequestIsCurrent(request, 11, request.scopeKey, walletOperationFilterKey(DEFAULT_WALLET_OPERATION_FILTERS), list, selected.id, true), false);
+  assert.equal(walletOperationDetailRequestIsCurrent(request, 11, request.scopeKey, filterKey, { ...list }, selected.id, true), false);
+  assert.equal(walletOperationDetailRequestIsCurrent(request, 11, request.scopeKey, filterKey, list, "operation-2", true), false);
+  assert.equal(walletOperationDetailRequestIsCurrent(request, 11, request.scopeKey, filterKey, list, selected.id, false), false);
 });
