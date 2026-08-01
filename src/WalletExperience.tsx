@@ -84,7 +84,6 @@ export function WalletExperience(props:Props){
   </div>
   <nav className="consumer-nav">
    <Nav active={page==='home'} icon={<Home/>} label="首页" onClick={()=>go('home')}/>
-   <Nav active={page==='assets'} icon={<Layers/>} label="资产" onClick={()=>go('assets')}/>
    <Nav active={page==='convert'} icon={<ArrowLeftRight/>} label="兑换" onClick={()=>go('convert')}/>
    <Nav active={page==='pay'} icon={<ScanLine/>} label="支付" onClick={()=>go('pay')}/>
    <Nav active={page==='cards'} icon={<CreditCard/>} label="卡片" onClick={()=>go('cards')}/>
