@@ -37,13 +37,16 @@ function requireBackendOrigin(env) {
   return configured;
 }
 
-function proxyHeaders(request, publicUrl) {
+function proxyHeaders(request, publicUrl, env) {
   const headers = new Headers(request.headers);
   headers.delete("host");
-  // The browser talks to this Worker same-origin. Do not forward its public
-  // Origin as if the browser were calling Railway directly; the Worker is the
-  // trusted server-side boundary and Backend CORS must not reject preview hosts.
-  headers.delete("origin");
+  const backendRequestOrigin = env.FASTLINK_BACKEND_REQUEST_ORIGIN?.trim();
+  if (backendRequestOrigin) {
+    if (!BACKEND_ORIGIN_PATTERN.test(backendRequestOrigin)) {
+      throw new Error("FASTLINK_BACKEND_REQUEST_ORIGIN must be an HTTPS origin without a path");
+    }
+    headers.set("origin", backendRequestOrigin);
+  }
   headers.delete("forwarded");
   headers.delete("x-forwarded-for");
   headers.delete("x-forwarded-host");
@@ -66,7 +69,7 @@ async function proxyBackend(request, env) {
   const backendUrl = new URL(publicUrl.pathname + publicUrl.search, requireBackendOrigin(env));
   const response = await fetch(backendUrl, {
     method: request.method,
-    headers: proxyHeaders(request, publicUrl),
+    headers: proxyHeaders(request, publicUrl, env),
     body: request.method === "GET" || request.method === "HEAD" ? undefined : request.body,
     redirect: "manual",
   });
