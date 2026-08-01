@@ -359,7 +359,7 @@ export default function App(){
   cardTransactionCursorTarget.current=null
   cardTransactionRefreshAttemptRef.current=nextAttempt
   setCardTransactionRefreshAttempt(nextAttempt)
-  const isCurrent=()=>cardTransactionAbortController.current===controller&&card.id===cardDetailTarget.current&&cardTransactionTarget.current===card.id&&cardTransactionRefreshRequestIsCurrent(request,cardTransactionRequestSequence.current,cardScope.current,selectedCardRef.current?.id??null,cardTransactionFilterRef.current,cardTransactionRefreshAttemptRef.current,cardTransactionHistoryRef.current,walletRequestMounted.current)
+  const isCurrent=()=>cardTransactionAbortController.current===controller&&walletTransferSessionScope(activeSession,walletRuntime.environment)===scope&&card.id===cardDetailTarget.current&&cardTransactionTarget.current===card.id&&cardTransactionRefreshRequestIsCurrent(request,cardTransactionRequestSequence.current,cardScope.current,selectedCardRef.current?.id??null,cardTransactionFilterRef.current,cardTransactionRefreshAttemptRef.current,cardTransactionHistoryRef.current,walletRequestMounted.current)
   setCardTransactionRefreshing(true)
   setCardTransactionError('')
   try{

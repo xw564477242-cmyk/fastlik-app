@@ -175,9 +175,10 @@ assert(
 assert(
   app.includes("refreshCardTransactions=async") &&
     app.includes("walletApi.transactions(card.id,{filter},controller.signal)") &&
+    app.includes("cardTransactionAbortController.current===controller&&walletTransferSessionScope(activeSession,walletRuntime.environment)===scope&&card.id===cardDetailTarget.current") &&
     app.includes("commitCardTransactionRefreshPage(request,page)") &&
     app.includes("replaceCardTransactionHistory(refreshed)"),
-  "Manual Card transaction refresh must issue one filter-bound cancellable GET and atomically replace the first page",
+  "Manual Card transaction refresh must issue one filter-bound cancellable GET, revalidate live session expiry, and atomically replace the first page",
 );
 assert(
     cardTransactionRefresh.includes("CARD_TRANSACTION_REFRESH_MAX_ATTEMPTS = 3") &&

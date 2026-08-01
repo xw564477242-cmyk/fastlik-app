@@ -17,9 +17,14 @@ import {
   type CardTransactionDetailSelection,
 } from "../src/cardTransactionDetail.ts";
 import type { CardTransactionFilter } from "../src/cardTransactions.ts";
+import {
+  walletTransferSessionScope,
+  type WalletTransferSession,
+} from "../src/walletTransfer.ts";
 
 const environment = process.env.FASTLINK_TEST_ENVIRONMENT;
 const mounted = environment === "SANDBOX" || environment === "TEST" ? test : test.skip;
+const runtime = environment as "SANDBOX" | "TEST";
 
 const transaction = (id: string, merchantName: string) => ({
   id,
@@ -37,9 +42,9 @@ const transaction = (id: string, merchantName: string) => ({
   occurredAt: "2026-08-01T02:00:00.000Z",
 });
 
-const initialHistory = () => commitCardTransactionHistoryPage(
+const initialHistory = (scope = "scope-a") => commitCardTransactionHistoryPage(
   null,
-  createCardTransactionHistoryRequestIdentity(1, "scope-a", "card:one", "SETTLED", null),
+  createCardTransactionHistoryRequestIdentity(1, scope, "card:one", "SETTLED", null),
   { transactions: [transaction("tx-selected", "Before")], nextCursor: "cursor-before" },
 );
 
@@ -170,4 +175,71 @@ mounted(`repeat refresh, filter, Card, session, logout and unmount abort old wor
     await operation;
     assert.notEqual(state.history?.transactions[0]?.id, "tx-late");
   }
+});
+
+mounted(`natural session expiry makes late refresh success, error and finally write zero (${environment ?? "ENVIRONMENT_REQUIRED"})`, async () => {
+  const startedAt = Date.parse("2026-08-01T00:00:00.000Z");
+  const expiresAt = Date.parse("2026-08-01T00:00:01.000Z");
+  const activeSession: WalletTransferSession = {
+    actorId: "actor-card-refresh-expiry",
+    tenantId: "tenant-card-refresh-expiry",
+    customerId: "customer-card-refresh-expiry",
+    environment: runtime,
+    expiresAt: new Date(expiresAt).toISOString(),
+  };
+  const scope = walletTransferSessionScope(activeSession, runtime, startedAt);
+  if (!scope) throw new Error("mounted refresh scope required");
+  const writes = { success: 0, error: 0, finally: 0 };
+
+  for (const outcome of ["success", "error"] as const) {
+    const state = context();
+    state.scope = scope;
+    state.history = initialHistory(scope);
+    const retained = state.history;
+    const controller = new AbortController();
+    state.controller = controller;
+    state.attempt = 1;
+    const request = createCardTransactionRefreshRequestIdentity(
+      ++state.requestId,
+      scope,
+      "card:one",
+      "SETTLED",
+      1,
+      retained,
+    );
+    let now = startedAt;
+    let resolve!: (value: unknown) => void;
+    let reject!: (reason: unknown) => void;
+    const pending = new Promise<unknown>((done, fail) => {
+      resolve = done;
+      reject = fail;
+    });
+    const current = () =>
+      walletTransferSessionScope(activeSession, runtime, now) === scope &&
+      isCurrent(state, request, controller);
+    const operation = pending.then(
+      page => {
+        if (!current()) return;
+        writes.success += 1;
+        state.history = commitCardTransactionRefreshPage(request, page);
+      },
+      () => {
+        if (current()) writes.error += 1;
+      },
+    ).finally(() => {
+      if (current()) writes.finally += 1;
+    });
+
+    now = expiresAt;
+    assert.equal(controller.signal.aborted, false, "expiry alone must invalidate completion");
+    if (outcome === "success") {
+      resolve({ transactions: [transaction("tx-expired-late", "Expired Late")], nextCursor: null });
+    } else {
+      reject(new Error("expired-late-provider-shaped-failure"));
+    }
+    await operation;
+    assert.equal(state.history, retained, `${outcome} must retain the verified snapshot`);
+  }
+
+  assert.deepEqual(writes, { success: 0, error: 0, finally: 0 });
 });
