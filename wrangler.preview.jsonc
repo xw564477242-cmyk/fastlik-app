@@ -13,7 +13,8 @@
     "FASTLINK_ENVIRONMENT": "SANDBOX",
     "FASTLINK_API_URL": "/api",
     "FASTLINK_SERVICE_NAME": "fastlink-wallet-preview-dev",
-    "FASTLINK_PROXY_ID": "wallet-preview-dev"
+    "FASTLINK_PROXY_ID": "wallet-preview-dev",
+    "FASTLINK_BACKEND_REQUEST_ORIGIN": "https://fastlink-wallet-dev.adhesive-snowshoe.workers.dev"
   },
   "observability": { "enabled": true }
 }
