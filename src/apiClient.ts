@@ -26,6 +26,7 @@ import type {WalletTransferInput,WalletTransferTransportRequest} from './walletT
 import {readWalletTransactionDetail,readWalletTransactionHistory} from './walletTransactions'
 import type {WalletTransactionFilters,WalletTransactionHistoryState,WalletTransactionRecord,WalletTransactionTransportRequest} from './walletTransactions'
 import {API_REQUEST_DEADLINE_MS} from './requestPolicy'
+import {sessionFailureRequiresClear} from './sessionLifecycle'
 
 export type {WalletAccountRecord,WalletBalanceRecord,WalletTransferReceipt} from './walletData'
 export type {WalletTransactionHistoryState as WalletTransactionPage,WalletTransactionRecord} from './walletTransactions'
@@ -82,7 +83,7 @@ async function request<T>(path:string,method='GET',body?:unknown,idempotencyKey?
   if(response.status===204)return undefined as T
   return (responseMode==='text'?response.text():response.json()) as Promise<T>
  }catch(error){
-  if(error instanceof WalletApiError)throw error
+  if(error instanceof WalletApiError){if(sessionFailureRequiresClear(error))window.dispatchEvent(new CustomEvent('fastlink:session-invalid',{detail:error}));throw error}
   if(error instanceof DOMException&&error.name==='AbortError'&&timedOut)throw new WalletApiError(408,id,`API timeout · HTTP 408 · Trace ${id}`)
   if(error instanceof DOMException&&error.name==='AbortError'&&externalSignal?.aborted)throw new DOMException('Wallet transaction request cancelled','AbortError')
   const message=error instanceof Error?error.message:'Network failure'
