@@ -10,6 +10,7 @@ const assert = (condition, message) => {
 const worker = read("worker.js");
 const testConfig = read("wrangler.test.jsonc");
 const devConfig = read("wrangler.dev.jsonc");
+const previewConfig = read("wrangler.preview.jsonc");
 const apiClient = read("src/apiClient.ts");
 const app = read("src/App.tsx");
 const cardBalance = read("src/cardBalance.ts");
@@ -105,7 +106,8 @@ assert(!app.includes("mock") && !app.includes("Mock"), "Wallet UI must not conta
 assert(worker.includes('url.pathname === "/runtime-config.js"'), "Worker must provide runtime config");
 assert(worker.includes('"x-fastlink-api-proxy"'), "Worker must expose its proxy identity");
 assert(worker.includes('headers.delete("x-forwarded-host")'), "Worker must remove spoofed forwarding headers");
-assert(worker.includes('headers.delete("origin")'), "Worker must not forward the browser Origin to Backend");
+assert(worker.includes('headers.set("origin", backendRequestOrigin)'), "Worker must support an explicit Backend-approved request origin");
+assert(previewConfig.includes('"FASTLINK_BACKEND_REQUEST_ORIGIN": "https://fastlink-wallet-dev.adhesive-snowshoe.workers.dev"'), "Preview must use the Backend-approved Dev Wallet request origin");
 assert(worker.includes("FASTLINK_BACKEND_ORIGIN"), "Worker must require an explicit Backend origin");
 assert(!worker.includes("production-309d") && !worker.includes("fastlink-backend-dev-development-a"), "Worker must not embed Backend hosts");
 assert(testConfig.includes('"name": "fastlink-wallet-test"'), "Test Worker name must be isolated");
