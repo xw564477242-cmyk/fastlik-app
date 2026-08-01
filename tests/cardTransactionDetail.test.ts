@@ -56,6 +56,8 @@ test("refresh retains the current transaction, replaces its public snapshot, and
   assert.equal(retained?.transaction.status, "REFUNDED");
   assert.equal(retained?.transaction.refundedAmountMinor, "1250");
   assert.equal(reconcileCardTransactionDetailSelection(selected, "session-a", "card:one", [], true), null);
+  assert.equal(reconcileCardTransactionDetailSelection(selected, "session-a", "card:one", [transaction("transaction-1", { currency: "EUR" })], true), null);
+  assert.equal(reconcileCardTransactionDetailSelection(selected, "session-a", "card:one", [transaction("transaction-1", { occurredAt: "2026-08-01T00:00:01.000Z" })], true), null);
 });
 
 test("an old response cannot move a selection across session or Card scope", () => {
