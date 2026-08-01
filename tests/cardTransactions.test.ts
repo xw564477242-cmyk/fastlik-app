@@ -1,18 +1,20 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import {
+  CARD_TRANSACTION_FILTERS,
   CARD_TRANSACTION_PAGE_SIZE,
   CARD_TRANSACTION_PUBLIC_FIELDS,
   cardTransactionLifecycleType,
   cardTransactionPath,
   mergeCardTransactionPages,
   parseCardTransaction,
+  parseCardTransactionFilter,
   parseCardTransactionPage,
 } from "../src/cardTransactions.ts";
 
-const rawTransaction = (id: string): Record<string, unknown> => ({
+const rawTransaction = (id: string, status = "SETTLED"): Record<string, unknown> => ({
   id,
-  status: "SETTLED",
+  status,
   amountMinor: "12345",
   authorizedAmountMinor: "12345",
   clearedAmountMinor: "12345",
@@ -33,11 +35,16 @@ const rawTransaction = (id: string): Record<string, unknown> => ({
 
 test("builds the bounded canonical card transaction request", () => {
   assert.equal(CARD_TRANSACTION_PAGE_SIZE, 25);
-  assert.equal(cardTransactionPath("card/1"), "/v1/cards/card%2F1/transactions?limit=25");
+  assert.deepEqual(CARD_TRANSACTION_FILTERS, ["ALL", "AUTHORIZED", "CLEARED", "SETTLED", "DECLINED", "REVERSED", "REFUNDED"]);
+  assert.equal(cardTransactionPath("card:1", { filter: "ALL" }), "/v1/cards/card%3A1/transactions?limit=25");
   assert.equal(
-    cardTransactionPath("card-1", "opaque cursor/+"),
-    "/v1/cards/card-1/transactions?limit=25&cursor=opaque+cursor%2F%2B",
+    cardTransactionPath("card-1", { filter: "SETTLED", cursor: "opaque:cursor-01" }),
+    "/v1/cards/card-1/transactions?limit=25&status=SETTLED&cursor=opaque%3Acursor-01",
   );
+  assert.equal(parseCardTransactionFilter("REFUNDED"), "REFUNDED");
+  assert.throws(() => parseCardTransactionFilter("PENDING"), /status filter/);
+  assert.throws(() => cardTransactionPath("card/1", { filter: "ALL" }), /Card ID/);
+  assert.throws(() => cardTransactionPath("card-1", { filter: "ALL", cursor: "opaque cursor/+" }), /cursor/);
 });
 
 test("reconstructs exactly the verified 13-field public DTO", () => {
@@ -85,6 +92,14 @@ test("accepts empty pages and rejects malformed records or cursors", () => {
   assert.throws(
     () => parseCardTransactionPage({ transactions: [rawTransaction("transaction-1")], nextCursor: "" }),
     /cursor/,
+  );
+  assert.throws(
+    () => parseCardTransactionPage({ transactions: [rawTransaction("transaction-1", "AUTHORIZED")], nextCursor: null }, "SETTLED"),
+    /active status filter/,
+  );
+  assert.throws(
+    () => parseCardTransactionPage({ transactions: [rawTransaction("transaction-1"), rawTransaction("transaction-1")], nextCursor: null }),
+    /Duplicate/,
   );
 });
 

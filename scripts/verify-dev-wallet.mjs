@@ -5,6 +5,8 @@ const root = process.cwd();
 const apiClient = readFileSync(join(root, "src/apiClient.ts"), "utf8");
 const app = readFileSync(join(root, "src/App.tsx"), "utf8");
 const cardDetailRefresh = readFileSync(join(root, "src/cardDetailRefresh.ts"), "utf8");
+const cardTransactions = readFileSync(join(root, "src/cardTransactions.ts"), "utf8");
+const cardTransactionHistory = readFileSync(join(root, "src/cardTransactionHistory.ts"), "utf8");
 const cardBalance = readFileSync(join(root, "src/cardBalance.ts"), "utf8");
 const cardLimits = readFileSync(join(root, "src/cardLimits.ts"), "utf8");
 const cardLimitsUpdate = readFileSync(join(root, "src/cardLimitsUpdate.ts"), "utf8");
@@ -152,8 +154,21 @@ assert(
   apiClient.includes("card:async(id:string,signal?:AbortSignal)") &&
     apiClient.includes("balance:async(id:string,signal?:AbortSignal)") &&
     apiClient.includes("limits:async(id:string,signal?:AbortSignal)") &&
-    apiClient.includes("transactions:async(id:string,cursor?:string,signal?:AbortSignal)"),
+    apiClient.includes("transactions:async(id:string,query:CardTransactionQuery,signal?:AbortSignal)") &&
+    apiClient.includes("request<unknown>(cardTransactionPath(id,query),'GET',undefined,undefined,'json',signal)"),
   "Every Card detail GET must accept an active AbortSignal",
+);
+assert(
+  app.includes("walletApi.transactions(id,{filter:transactionFilter},signal)") &&
+    app.includes("walletApi.transactions(cardId,{filter,cursor},controller.signal)"),
+  "Card transaction first-page and pagination GETs must carry the active filter, cursor and AbortSignal",
+);
+assert(
+  cardTransactions.includes('if (filter !== "ALL") params.set("status", filter)') &&
+    cardTransactions.includes('if (nextCursor) params.set("cursor", nextCursor)') &&
+    cardTransactionHistory.includes("request.filter === currentFilter") &&
+    cardTransactionHistory.includes("request.cursor === currentCursor"),
+  "Card transaction requests must remain bound to the active status filter and opaque cursor",
 );
 assert(
   cardDetailRefresh.includes("readers.card(selectedCardId, signal)") &&
