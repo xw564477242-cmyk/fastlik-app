@@ -41,6 +41,8 @@ assert(apiClient.includes("createVirtualCard:async"), "Wallet must use the typed
 assert(virtualCardCreate.includes('sessionEnvironment !== "SANDBOX" && sessionEnvironment !== "TEST"'), "Virtual Card creation must remain non-production only");
 assert(virtualCardCreate.includes("virtualCardCreateRequestIsCurrent"), "Virtual Card creation must remain session-scope and generation isolated");
 assert(walletOperations.includes("/v1/wallet/operations?"), "Wallet activity must use the public bounded operation contract");
+assert(walletOperations.includes("WALLET_OPERATION_TYPES") && walletOperations.includes("WALLET_OPERATION_STATUSES"), "Wallet activity filters must use the Backend canonical allowlists");
+assert(walletOperations.includes("readWalletOperationActivity") && walletOperations.includes('method: "GET"'), "Wallet activity must remain a one-GET caller-cancelled read");
 assert(walletOperations.includes("walletOperationActivityRequestIsCurrent"), "Wallet activity must remain scope, cursor and generation isolated");
 assert(walletOperations.includes("parseWalletOperationDetail"), "Wallet operation detail must bind its immutable public summary fields");
 assert(walletOperations.includes("walletOperationDetailRequestIsCurrent"), "Wallet operation detail must remain scope, selection and generation isolated");
@@ -90,6 +92,7 @@ assert(app.includes("Wallet transaction type filter") && app.includes("Wallet tr
 assert(walletTransactions.includes("walletTransactionFiltersForSelectedAsset") && walletTransactions.includes("limit: WALLET_TRANSACTION_PAGE_SIZE"), "Wallet history filters must retain selected-asset and fixed-limit boundaries");
 assert(app.includes("walletTransactionFilterRequestAllowed") && walletTransactions.includes("ownedAccounts.some"), "Wallet history filters must reject unowned or cross-scope account requests");
 assert(app.includes("All-account Wallet activity · read only"), "Wallet UI must expose read-only all-account operation activity");
+assert(app.includes("Refresh activity") && app.includes("wallet-operation-filters"), "Wallet UI must expose one manual refresh and closed operation filters");
 assert(app.includes("Selected operation · read only"), "Wallet UI must expose read-only selected operation detail");
 assert(app.includes("Create virtual card"), "Wallet UI must expose the gated non-production Virtual Card form");
 assert(app.includes("Automatic retries are disabled"), "Wallet UI must retain the one-submit no-retry boundary");
