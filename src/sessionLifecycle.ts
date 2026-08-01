@@ -79,3 +79,14 @@ export async function runSessionInitializationModule<T>(input: Readonly<{
     else input.moduleError(value);
   }
 }
+
+export async function runBoundedWalletInitialization(input: Readonly<{
+  selectedWallet: () => Promise<void>;
+  balanceSummary: () => Promise<void>;
+  operations: () => Promise<void>;
+  isCurrent: () => boolean;
+}>): Promise<void> {
+  await input.selectedWallet();
+  if (!input.isCurrent()) return;
+  await Promise.all([input.balanceSummary(), input.operations()]);
+}
