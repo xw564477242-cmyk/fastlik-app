@@ -3,6 +3,7 @@ import test from "node:test";
 import {
   SessionValidationError,
   createSessionInitializationRequest,
+  runBoundedWalletInitialization,
   runSessionInitializationModule,
   sessionFailureRequiresClear,
   sessionInitializationRequestIsCurrent,
@@ -84,4 +85,52 @@ test("late initialization response cannot write into a replacement session", asy
   resolve("old-session-data");
   await operation;
   assert.equal(committed, "");
+});
+
+test("Wallet initialization bounds the database fan-out and prioritizes required modules", async () => {
+  const events: string[] = [];
+  let active = 0;
+  let maximum = 0;
+  let releaseSelected!: () => void;
+  const selectedPending = new Promise<void>(resolve => { releaseSelected = resolve; });
+  const run = (name: string, pending: Promise<void> = Promise.resolve()) => async () => {
+    active += 1;
+    maximum = Math.max(maximum, active);
+    events.push(`${name}:start`);
+    await pending;
+    events.push(`${name}:end`);
+    active -= 1;
+  };
+
+  const operation = runBoundedWalletInitialization({
+    selectedWallet: run("selected", selectedPending),
+    balanceSummary: run("summary"),
+    operations: run("operations"),
+    isCurrent: () => true,
+  });
+  await Promise.resolve();
+  assert.deepEqual(events, ["selected:start"]);
+  releaseSelected();
+  await operation;
+  assert.deepEqual(events, [
+    "selected:start",
+    "selected:end",
+    "summary:start",
+    "operations:start",
+    "summary:end",
+    "operations:end",
+  ]);
+  assert.equal(maximum, 2);
+});
+
+test("Wallet initialization does not start later modules after the session scope changes", async () => {
+  let current = true;
+  let laterStarts = 0;
+  await runBoundedWalletInitialization({
+    selectedWallet: async () => { current = false; },
+    balanceSummary: async () => { laterStarts += 1; },
+    operations: async () => { laterStarts += 1; },
+    isCurrent: () => current,
+  });
+  assert.equal(laterStarts, 0);
 });
