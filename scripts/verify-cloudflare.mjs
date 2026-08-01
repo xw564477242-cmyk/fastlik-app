@@ -85,6 +85,11 @@ assert(walletData.includes("walletOperationPath"), "Wallet transfer status must 
 assert(walletData.includes("WALLET_TRANSFER_STATUS_REFRESH_LIMIT = 5"), "Wallet transfer status refresh must remain bounded");
 assert(app.includes("Real wallet balances"), "Wallet UI must expose Backend wallet balances");
 assert(walletExperience.includes("createElement(icon,{size:21})") && !walletExperience.includes("icon({size:21})"), "Consumer Wallet action icons must render as React elements");
+for (const page of ["数字资产","充值","提现","兑换","支付","转账","通知","设置","安全中心","帮助与支持"]) {
+  assert(walletExperience.includes(page), `Consumer Wallet must include the ${page} page`);
+}
+assert(walletExperience.includes("卡片详情") && walletExperience.includes("消费限额") && walletExperience.includes("卡片交易"), "Consumer Wallet must restore the selected Card detail page");
+assert(walletExperience.includes("不会生成演示数据") && walletExperience.includes("待开发"), "Unavailable flows must be explicit and must not create substitute data");
 assert(app.includes("Internal transfer"), "Wallet UI must expose internal transfers");
 assert(app.includes("Customer Wallet history"), "Wallet UI must expose public customer Wallet history");
 assert(app.includes("Transaction detail unavailable for this session"), "Wallet detail errors must remain safely normalized");
