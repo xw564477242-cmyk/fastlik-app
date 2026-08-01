@@ -4,6 +4,7 @@ import {
   appendWalletOperationPage,
   createWalletOperationActivityRequestIdentity,
   createWalletOperationDetailRequestIdentity,
+  parseWalletOperationPage,
   readWalletOperationActivity,
   readWalletOperationDetail,
   walletOperationActivityRequestIsCurrent,
@@ -38,12 +39,17 @@ const scope = () => {
   return value;
 };
 const filters: WalletOperationFilterSelection = Object.freeze({ type: "DEPOSIT", status: "COMPLETED" });
-const backendCursor = (id: string) => Buffer.from(JSON.stringify({
+const backendCursor = (
+  id: string,
+  createdAt = "2026-08-01T01:00:00.000Z",
+  type: WalletOperationFilterSelection["type"] | null = "DEPOSIT",
+  status: WalletOperationFilterSelection["status"] | null = "COMPLETED",
+) => Buffer.from(JSON.stringify({
   version: 2,
-  createdAt: "2026-08-01T01:00:00.000Z",
+  createdAt,
   id,
-  type: "DEPOSIT",
-  status: "COMPLETED",
+  type,
+  status,
 })).toString("base64url");
 const operation = (
   id: string,
@@ -63,6 +69,8 @@ const operation = (
 const snapshot = (): WalletOperationPage => ({
   items: [operation("operation-2", "2026-08-01T00:59:00.000Z")],
   nextCursor: backendCursor("operation-2"),
+  filterKey: walletOperationFilterKey(filters),
+  cursorTrail: [backendCursor("operation-2")],
 });
 const deferred = () => {
   let resolve!: (value: unknown) => void;
@@ -319,4 +327,41 @@ mountedTest(`detail GET is snapshot-bound and filter, list, selection, repeat, e
     assert.equal(calls, 1);
     assert.deepEqual(writes, { success: 0, error: 0, finally: 0 });
   }
+});
+
+mountedTest(`cross-filter rows and wrongly bound Backend v2 cursors fail closed (${environment ?? "ENVIRONMENT_REQUIRED"})`, () => {
+  assert.throws(() => parseWalletOperationPage({
+    items: [operation("operation-cross-filter", "2026-08-01T00:59:00.000Z", "FAILED")],
+    nextCursor: null,
+  }, filters), /requested filters/);
+  assert.throws(() => parseWalletOperationPage({
+    items: [],
+    nextCursor: backendCursor("operation-wrong-binding", "2026-08-01T00:59:00.000Z", "WITHDRAWAL", "COMPLETED"),
+  }, filters), /cursor/);
+});
+
+mountedTest(`page rows cannot cross the decoded requested-cursor boundary (${environment ?? "ENVIRONMENT_REQUIRED"})`, () => {
+  const requested = backendCursor("operation-anchor");
+  assert.throws(() => parseWalletOperationPage({
+    items: [operation("operation-newer", "2026-08-01T01:01:00.000Z")],
+    nextCursor: null,
+  }, filters, requested), /cursor boundary/);
+});
+
+mountedTest(`cursorTrail rejects an A to B to A historical rollback (${environment ?? "ENVIRONMENT_REQUIRED"})`, () => {
+  const cursorA = backendCursor("operation-a", "2026-08-01T00:59:00.000Z");
+  const cursorB = backendCursor("operation-b", "2026-08-01T00:58:00.000Z");
+  const history: WalletOperationPage = {
+    items: [operation("operation-a", "2026-08-01T00:59:00.000Z")],
+    nextCursor: cursorB,
+    filterKey: walletOperationFilterKey(filters),
+    cursorTrail: [cursorA, cursorB],
+  };
+  const rollback: WalletOperationPage = {
+    items: [operation("operation-c", "2026-08-01T00:57:00.000Z")],
+    nextCursor: cursorA,
+    filterKey: walletOperationFilterKey(filters),
+    cursorTrail: [cursorA],
+  };
+  assert.throws(() => appendWalletOperationPage(history, rollback, cursorB), /rollback/);
 });

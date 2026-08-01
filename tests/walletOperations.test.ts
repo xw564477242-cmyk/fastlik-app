@@ -18,12 +18,17 @@ import {
   walletOperationFilterKey,
 } from "../src/walletOperations.ts";
 
-const backendCursor = (id = "operation-1") => Buffer.from(JSON.stringify({
+const backendCursor = (
+  id = "operation-1",
+  createdAt = "2026-08-01T01:02:03.000Z",
+  type: "DEPOSIT" | "INTERNAL_TRANSFER" | "WITHDRAWAL" | "FX_CONVERSION" | null = null,
+  status: "PROCESSING" | "PENDING_SETTLEMENT" | "COMPLETED" | "FAILED" | null = null,
+) => Buffer.from(JSON.stringify({
   version: 2,
-  createdAt: "2026-08-01T01:02:03.000Z",
+  createdAt,
   id,
-  type: null,
-  status: null,
+  type,
+  status,
 })).toString("base64url");
 
 const rawOperation = (
@@ -42,7 +47,7 @@ const rawOperation = (
 });
 
 test("builds only canonical Backend type/status filters, bounded cursor pagination and no asset filter", () => {
-  const cursor = backendCursor();
+  const cursor = backendCursor("operation-1", "2026-08-01T01:02:03.000Z", "DEPOSIT", "COMPLETED");
   assert.equal(WALLET_OPERATION_PAGE_SIZE, 25);
   assert.equal(
     walletOperationActivityPath(DEFAULT_WALLET_OPERATION_FILTERS),
@@ -67,7 +72,7 @@ test("accepts exactly the nine public DTO fields and rejects every internal or u
   for (const forbidden of ["tenantId", "customerId", "environment", "sourceAccountId", "destinationAccountId", "providerPayload", "journalIds", "failureReason"]) {
     assert.throws(() => parseWalletOperation({ ...rawOperation(), [forbidden]: "private" }), /exactly the public fields/);
   }
-  assert.throws(() => parseWalletOperationPage({ items: [], nextCursor: null, internal: true }), /exactly the public fields/);
+  assert.throws(() => parseWalletOperationPage({ items: [], nextCursor: null, internal: true }, DEFAULT_WALLET_OPERATION_FILTERS), /exactly the public fields/);
 });
 
 test("reconstructs operation detail while binding id, type, asset and canonical amount", () => {
@@ -129,34 +134,41 @@ test("validates strict RFC3339 timestamps and nullable completedAt", () => {
 });
 
 test("rejects oversized, duplicate and non-monotonic pages", () => {
-  assert.deepEqual(parseWalletOperationPage({ items: [], nextCursor: null }), { items: [], nextCursor: null });
+  assert.deepEqual(parseWalletOperationPage({ items: [], nextCursor: null }, DEFAULT_WALLET_OPERATION_FILTERS), { items: [], nextCursor: null });
   assert.throws(() => parseWalletOperation({ ...rawOperation(), id: "bad/id" }), /operation id/);
-  assert.throws(() => parseWalletOperationPage({ items: [rawOperation(), rawOperation()], nextCursor: null }), /Duplicate/);
-  assert.throws(() => parseWalletOperationPage({ items: Array.from({ length: 26 }, (_, index) => rawOperation(`operation-${index}`)), nextCursor: null }), /consumer limit/);
+  assert.throws(() => parseWalletOperationPage({ items: [rawOperation(), rawOperation()], nextCursor: null }, DEFAULT_WALLET_OPERATION_FILTERS), /Duplicate/);
+  assert.throws(() => parseWalletOperationPage({ items: Array.from({ length: 26 }, (_, index) => rawOperation(`operation-${index}`)), nextCursor: null }, DEFAULT_WALLET_OPERATION_FILTERS), /consumer limit/);
   assert.throws(() => parseWalletOperationPage({
     items: [rawOperation("operation-1", "2026-07-31T01:00:00.000Z"), rawOperation("operation-2", "2026-07-31T02:00:00.000Z")],
     nextCursor: null,
-  }), /order/);
+  }, DEFAULT_WALLET_OPERATION_FILTERS), /order/);
 });
 
-test("appends filter-bound cursor pages without duplicate, regression or cursor loop", () => {
-  const cursor = backendCursor("operation-2");
-  const first = parseWalletOperationPage({
-    items: [rawOperation("operation-2", "2026-07-31T02:00:00.000Z")],
-    nextCursor: cursor,
-  });
-  const next = parseWalletOperationPage({
-    items: [rawOperation("operation-1", "2026-07-31T01:00:00.000Z")],
-    nextCursor: null,
-  });
-  assert.deepEqual(appendWalletOperationPage(first, next, cursor).items.map((item) => item.id), ["operation-2", "operation-1"]);
-  assert.throws(() => appendWalletOperationPage(first, parseWalletOperationPage({ items: [rawOperation("operation-2", "2026-07-31T01:00:00.000Z")], nextCursor: null }), cursor), /across pages/);
-  assert.throws(() => appendWalletOperationPage(first, { ...next, nextCursor: cursor }, cursor), /cursor loop/);
+test("binds page items and Backend v2 cursors to filters, sorting and cursor history", () => {
+  const filters = { type: "INTERNAL_TRANSFER", status: "COMPLETED" } as const;
+  const firstItems = Array.from({ length: WALLET_OPERATION_PAGE_SIZE }, (_, index) =>
+    rawOperation(`operation-${String(50 - index).padStart(2, "0")}`, `2026-07-31T02:${String(59 - index).padStart(2, "0")}:00.000Z`));
+  const cursorA = backendCursor(firstItems.at(-1)!.id as string, firstItems.at(-1)!.createdAt as string, "INTERNAL_TRANSFER", "COMPLETED");
+  const firstRaw = parseWalletOperationPage({ items: firstItems, nextCursor: cursorA }, filters);
+  const first = { ...firstRaw, filterKey: walletOperationFilterKey(filters), cursorTrail: [cursorA] };
+  const next = {
+    ...parseWalletOperationPage({ items: [rawOperation("operation-01", "2026-07-31T01:00:00.000Z")], nextCursor: null }, filters, cursorA),
+    filterKey: walletOperationFilterKey(filters),
+    cursorTrail: [],
+  };
+  assert.equal(appendWalletOperationPage(first, next, cursorA).items.length, 26);
+  assert.throws(() => parseWalletOperationPage({ items: [{ ...rawOperation(), type: "DEPOSIT" }], nextCursor: null }, filters), /requested filters/);
+  assert.throws(() => parseWalletOperationPage({ items: [], nextCursor: backendCursor("operation-x", "2026-07-31T01:00:00.000Z", "DEPOSIT", "COMPLETED") }, filters), /cursor/);
+  assert.throws(() => parseWalletOperationPage({ items: [rawOperation("operation-new", "2026-07-31T03:00:00.000Z")], nextCursor: null }, filters, cursorA), /cursor boundary/);
+  const cursorB = backendCursor("operation-01", "2026-07-31T01:00:00.000Z", "INTERNAL_TRANSFER", "COMPLETED");
+  const rollback = { ...next, nextCursor: cursorA, cursorTrail: [cursorA] };
+  const history = { ...first, nextCursor: cursorB, cursorTrail: [cursorA, cursorB] };
+  assert.throws(() => appendWalletOperationPage(history, rollback, cursorB), /rollback/);
 });
 
 test("binds activity writes to actor/session scope, filters, cursor, generation and mount", () => {
   const filters = { type: "DEPOSIT", status: "COMPLETED" } as const;
-  const cursor = backendCursor();
+  const cursor = backendCursor("operation-1", "2026-08-01T01:02:03.000Z", "DEPOSIT", "COMPLETED");
   const request = createWalletOperationActivityRequestIdentity(7, "actor|expiry|tenant|customer|TEST", filters, cursor);
   const filterKey = walletOperationFilterKey(filters);
   assert.equal(walletOperationActivityRequestIsCurrent(request, 7, request.scopeKey, filterKey, cursor, true), true);
@@ -169,7 +181,8 @@ test("binds activity writes to actor/session scope, filters, cursor, generation 
 
 test("binds detail writes to the exact filter, list snapshot, selection, scope and generation", () => {
   const filters = { type: "ALL", status: "COMPLETED" } as const;
-  const list = parseWalletOperationPage({ items: [rawOperation()], nextCursor: null });
+  const parsed = parseWalletOperationPage({ items: [rawOperation()], nextCursor: null }, { type: "ALL", status: "COMPLETED" });
+  const list = { ...parsed, filterKey: walletOperationFilterKey({ type: "ALL", status: "COMPLETED" }), cursorTrail: [] };
   const selected = list.items[0];
   const request = createWalletOperationDetailRequestIdentity(11, "actor|expiry|tenant|customer|TEST", filters, selected, list);
   const filterKey = walletOperationFilterKey(filters);

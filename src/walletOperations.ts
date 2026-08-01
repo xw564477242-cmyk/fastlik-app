@@ -60,7 +60,11 @@ export type WalletOperationRecord = {
 export type WalletOperationPage = {
   items: WalletOperationRecord[];
   nextCursor: string | null;
+  filterKey: string;
+  cursorTrail: readonly string[];
 };
+
+export type WalletOperationParsedPage = Pick<WalletOperationPage, "items" | "nextCursor">;
 
 export type WalletOperationActivityRequestIdentity = {
   requestId: number;
@@ -172,7 +176,26 @@ const rfc3339DateTime = (value: unknown, name: string): string => {
 const nullableRfc3339DateTime = (value: unknown, name: string): string | null =>
   value === null ? null : rfc3339DateTime(value, name);
 
-const cursor = (value: unknown): string | null => {
+type WalletOperationCursor = Readonly<{
+  version: 2;
+  createdAt: string;
+  id: string;
+  type: WalletOperationType | null;
+  status: WalletOperationStatus | null;
+}>;
+
+const cursorFields = Object.freeze([
+  "version",
+  "createdAt",
+  "id",
+  "type",
+  "status",
+] as const);
+
+const decodeCursor = (
+  value: unknown,
+  filters: WalletOperationFilterSelection,
+): WalletOperationCursor | null => {
   if (value === null) return null;
   if (typeof value !== "string" || value.length > 512 || !/^[A-Za-z0-9_-]+$/.test(value))
     throw new Error("Invalid Wallet operation cursor");
@@ -185,10 +208,41 @@ const cursor = (value: unknown): string | null => {
       .replace(/\//g, "_")
       .replace(/=+$/g, "");
     if (canonical !== value) throw new Error("non-canonical cursor");
-    return value;
+    const decoded = new TextDecoder("utf-8", { fatal: true }).decode(
+      Uint8Array.from(binary, (character) => character.charCodeAt(0)),
+    );
+    const payload = exactDataRecord(JSON.parse(decoded), cursorFields, "Wallet operation cursor");
+    if (payload.version !== 2) throw new Error("unsupported cursor version");
+    const createdAt = rfc3339DateTime(payload.createdAt, "cursor createdAt");
+    if (new Date(createdAt).toISOString() !== createdAt)
+      throw new Error("non-canonical cursor timestamp");
+    const id = operationId(payload.id);
+    const type = payload.type === null
+      ? null
+      : (WALLET_OPERATION_TYPES as readonly unknown[]).includes(payload.type)
+        ? payload.type as WalletOperationType
+        : (() => { throw new Error("invalid cursor type"); })();
+    const status = payload.status === null
+      ? null
+      : (WALLET_OPERATION_STATUSES as readonly unknown[]).includes(payload.status)
+        ? payload.status as WalletOperationStatus
+        : (() => { throw new Error("invalid cursor status"); })();
+    if (
+      type !== (filters.type === "ALL" ? null : filters.type) ||
+      status !== (filters.status === "ALL" ? null : filters.status)
+    ) throw new Error("cursor filters do not match request");
+    return { version: 2, createdAt, id, type, status };
   } catch {
     throw new Error("Invalid Wallet operation cursor");
   }
+};
+
+const cursorString = (
+  value: unknown,
+  filters: WalletOperationFilterSelection,
+): string | null => {
+  decodeCursor(value, filters);
+  return value as string | null;
 };
 
 export function walletOperationFilterKey(
@@ -226,7 +280,19 @@ export function parseWalletOperation(value: unknown): WalletOperationRecord {
   };
 }
 
-export function parseWalletOperationPage(value: unknown): WalletOperationPage {
+const operationPrecedes = (
+  left: Pick<WalletOperationRecord, "createdAt" | "id">,
+  right: Pick<WalletOperationRecord, "createdAt" | "id">,
+): boolean =>
+  Date.parse(left.createdAt) > Date.parse(right.createdAt) ||
+  (Date.parse(left.createdAt) === Date.parse(right.createdAt) && left.id > right.id);
+
+export function parseWalletOperationPage(
+  value: unknown,
+  filters: WalletOperationFilterSelection,
+  requestedCursor: string | null = null,
+): WalletOperationParsedPage {
+  walletOperationFilterKey(filters);
   const record = exactDataRecord(value, pageFields, "Wallet operation page");
   if (!Array.isArray(record.items)) throw new Error("Invalid Wallet operation page");
   if (record.items.length > WALLET_OPERATION_PAGE_SIZE)
@@ -234,17 +300,29 @@ export function parseWalletOperationPage(value: unknown): WalletOperationPage {
   const items = record.items.map(parseWalletOperation);
   if (new Set(items.map((item) => item.id)).size !== items.length)
     throw new Error("Duplicate Wallet operation id");
-  for (let index = 1; index < items.length; index += 1) {
-    const previous = items[index - 1];
-    const current = items[index];
-    if (
-      Date.parse(previous.createdAt) < Date.parse(current.createdAt) ||
-      (previous.createdAt === current.createdAt && previous.id <= current.id)
-    ) throw new Error("Wallet operation page order is invalid");
-  }
-  const nextCursor = cursor(record.nextCursor);
+  if (items.some((item) =>
+    (filters.type !== "ALL" && item.type !== filters.type) ||
+    (filters.status !== "ALL" && item.status !== filters.status)
+  )) throw new Error("Wallet operation does not match the requested filters");
+  for (let index = 1; index < items.length; index += 1)
+    if (!operationPrecedes(items[index - 1], items[index]))
+      throw new Error("Wallet operation page order is invalid");
+  const requested = decodeCursor(requestedCursor, filters);
+  if (requested && items.length > 0 && !operationPrecedes(requested, items[0]))
+    throw new Error("Wallet operation page crosses the requested cursor boundary");
+  const nextCursor = cursorString(record.nextCursor, filters);
   if (items.length === 0 && nextCursor !== null)
     throw new Error("Invalid Wallet operation cursor");
+  if (nextCursor !== null) {
+    if (items.length !== WALLET_OPERATION_PAGE_SIZE)
+      throw new Error("Wallet operation cursor does not match a full page");
+    const decodedNext = decodeCursor(nextCursor, filters)!;
+    const last = items.at(-1)!;
+    if (
+      decodedNext.createdAt !== new Date(last.createdAt).toISOString() ||
+      decodedNext.id !== last.id
+    ) throw new Error("Wallet operation cursor does not match the page boundary");
+  }
   return { items, nextCursor };
 }
 
@@ -276,7 +354,7 @@ export function walletOperationActivityPath(
   if (filters.type !== "ALL") query.set("type", filters.type);
   if (filters.status !== "ALL") query.set("status", filters.status);
   query.set("limit", String(WALLET_OPERATION_PAGE_SIZE));
-  if (nextCursor !== undefined) query.set("cursor", cursor(nextCursor) as string);
+  if (nextCursor !== undefined) query.set("cursor", cursorString(nextCursor, filters) as string);
   return `/v1/wallet/operations?${query.toString()}`;
 }
 
@@ -298,24 +376,30 @@ export function appendWalletOperationPage(
   incoming: WalletOperationPage,
   requestedCursor: string,
 ): WalletOperationPage {
-  if (current.nextCursor !== cursor(requestedCursor))
-    throw new Error("Wallet operation cursor does not match the current page");
+  if (
+    current.filterKey !== incoming.filterKey ||
+    current.nextCursor !== requestedCursor ||
+    current.cursorTrail.at(-1) !== current.nextCursor
+  ) throw new Error("Wallet operation cursor is not bound to the current filters");
   const seen = new Set(current.items.map((item) => item.id));
   if (incoming.items.some((item) => seen.has(item.id)))
     throw new Error("Duplicate Wallet operation id across pages");
   if (current.items.length && incoming.items.length) {
     const previous = current.items.at(-1)!;
     const next = incoming.items[0];
-    if (
-      Date.parse(previous.createdAt) < Date.parse(next.createdAt) ||
-      (previous.createdAt === next.createdAt && previous.id <= next.id)
-    ) throw new Error("Wallet operation page order is invalid");
+    if (!operationPrecedes(previous, next))
+      throw new Error("Wallet operation page order is invalid");
   }
-  if (incoming.nextCursor === requestedCursor)
-    throw new Error("Wallet operation cursor loop");
+  const trail = current.cursorTrail;
+  if (
+    incoming.nextCursor !== null &&
+    (incoming.nextCursor === requestedCursor || trail.includes(incoming.nextCursor))
+  ) throw new Error("Wallet operation cursor loop or rollback");
   return {
     items: [...current.items, ...incoming.items],
     nextCursor: incoming.nextCursor,
+    filterKey: current.filterKey,
+    cursorTrail: incoming.nextCursor === null ? [...trail] : [...trail, incoming.nextCursor],
   };
 }
 
@@ -327,7 +411,7 @@ export function createWalletOperationActivityRequestIdentity(
 ): WalletOperationActivityRequestIdentity {
   if (!Number.isSafeInteger(requestId) || requestId < 1 || scopeKey.length === 0 || scopeKey.length > 4096)
     throw new Error("Invalid Wallet operation request identity");
-  if (nextCursor !== null) cursor(nextCursor);
+  if (nextCursor !== null) decodeCursor(nextCursor, filters);
   return Object.freeze({
     requestId,
     scopeKey,
@@ -413,15 +497,21 @@ export async function readWalletOperationActivity(
   if (walletTransferSessionScope(session, runtimeEnvironment, now()) !== expectedScopeKey)
     throw new Error("Wallet operation activity is unavailable for this session");
   throwIfAborted(signal);
+  const requestedCursor = nextCursor ?? null;
   const raw = await transport({
-    path: walletOperationActivityPath(filters, nextCursor),
+    path: walletOperationActivityPath(filters, requestedCursor ?? undefined),
     method: "GET",
     signal,
   });
   throwIfAborted(signal);
   if (walletTransferSessionScope(session, runtimeEnvironment, now()) !== expectedScopeKey)
     throw new Error("Wallet operation activity session expired");
-  return parseWalletOperationPage(raw);
+  const page = parseWalletOperationPage(raw, filters, requestedCursor);
+  return {
+    ...page,
+    filterKey: walletOperationFilterKey(filters),
+    cursorTrail: page.nextCursor === null ? [] : [page.nextCursor],
+  };
 }
 
 export async function readWalletOperationDetail(
