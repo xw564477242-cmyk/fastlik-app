@@ -89,7 +89,7 @@ for (const page of ["数字资产","充值","提现","兑换","支付","转账",
   assert(walletExperience.includes(page), `Consumer Wallet must include the ${page} page`);
 }
 assert(walletExperience.includes("卡片详情") && walletExperience.includes("消费限额") && walletExperience.includes("卡片交易"), "Consumer Wallet must restore the selected Card detail page");
-assert(walletExperience.includes("CNY · USD · SGD · VND") && walletExperience.includes("USDT · USDC · ETH"), "Home asset entries must separate fiat and digital assets");
+assert(walletExperience.includes("['CNY','USD','SGD','VND']") && walletExperience.includes("['USDT','USDC','ETH']"), "Asset detail pages must separate fiat and digital asset allowlists");
 assert(walletExperience.includes("虚拟卡") && walletExperience.includes("实体卡"), "Card assets must separate virtual and physical cards");
 assert(walletExperience.includes("fiatAmount") && walletExperience.includes("cardAmount") && walletExperience.includes("查看资产明细"), "Home asset cards must show category amounts and defer breakdowns to detail pages");
 assert(walletExperience.includes("总法币资产") && walletExperience.includes("结算单位") && walletExperience.includes("第三方汇率汇总待接入"), "Fiat detail must reserve a Backend-priced settlement total");
