@@ -60,11 +60,20 @@ jobs:
         env:
           WALLET_URL: ${{ vars.FASTLINK_DEV_WALLET_URL }}
         run: |
-          health="$(curl --fail --silent --show-error --location --retry 6 --retry-delay 5 "$WALLET_URL/healthz")"
+          health=''
+          runtime=''
+          for _ in {1..18}; do
+            health="$(curl --fail --silent --show-error --location --retry 2 --retry-delay 2 "$WALLET_URL/healthz" || true)"
+            runtime="$(curl --fail --silent --show-error --location --retry 2 --retry-delay 2 "$WALLET_URL/runtime-config.js" || true)"
+            if grep -Fq "\"buildSha\":\"${{ github.sha }}\"" <<<"$health" && grep -Fq "\"buildSha\":\"${{ github.sha }}\"" <<<"$runtime"; then
+              break
+            fi
+            sleep 5
+          done
           grep -F '"environment":"SANDBOX"' <<<"$health"
           grep -F "\"buildSha\":\"${{ github.sha }}\"" <<<"$health"
-          runtime="$(curl --fail --silent --show-error --location "$WALLET_URL/runtime-config.js")"
           grep -F '"environment":"SANDBOX"' <<<"$runtime"
           grep -F '"apiUrl":"/api"' <<<"$runtime"
+          grep -F "\"buildSha\":\"${{ github.sha }}\"" <<<"$runtime"
           curl --fail --silent --show-error --dump-header headers.txt --output health.json "$WALLET_URL/api/health"
           grep -i -F 'x-fastlink-api-proxy: wallet-dev' headers.txt
