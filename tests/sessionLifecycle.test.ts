@@ -57,6 +57,14 @@ test("ordinary forbidden business response does not clear authentication", () =>
   assert.equal(sessionFailureRequiresClear(first), false);
 });
 
+test("anonymous session discovery can suppress its expected 401 while an established session clears", () => {
+  const failure = { status: 401, message: "Session unavailable" };
+  const action = (hasEstablishedScope: boolean) =>
+    sessionFailureRequiresClear(failure) && hasEstablishedScope ? "clear-and-report" : "stay-signed-out";
+  assert.equal(action(false), "stay-signed-out");
+  assert.equal(action(true), "clear-and-report");
+});
+
 test("late initialization response cannot write into a replacement session", async () => {
   let resolve!: (value: string) => void;
   const pending = new Promise<string>(done => { resolve = done; });
