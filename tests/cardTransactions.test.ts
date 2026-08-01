@@ -2,6 +2,8 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import {
   CARD_TRANSACTION_PAGE_SIZE,
+  CARD_TRANSACTION_PUBLIC_FIELDS,
+  cardTransactionLifecycleType,
   cardTransactionPath,
   mergeCardTransactionPages,
   parseCardTransaction,
@@ -18,7 +20,7 @@ const rawTransaction = (id: string): Record<string, unknown> => ({
   reversedAmountMinor: "0",
   refundedAmountMinor: "0",
   currency: "USD",
-  traceId: "trace-private-to-ui",
+  traceId: "trace:public-01",
   merchantName: "Example Merchant",
   merchantCategory: "5411",
   occurredAt: "2026-07-31T01:02:03.000Z",
@@ -38,28 +40,39 @@ test("builds the bounded canonical card transaction request", () => {
   );
 });
 
-test("reconstructs only the UI public-field allowlist", () => {
+test("reconstructs exactly the verified 13-field public DTO", () => {
   const transaction = parseCardTransaction(rawTransaction("transaction-1"));
 
-  assert.deepEqual(Object.keys(transaction).sort(), [
-    "amountMinor",
-    "currency",
-    "id",
-    "merchantCategory",
-    "merchantName",
-    "occurredAt",
-    "status",
-  ]);
+  assert.deepEqual(Object.keys(transaction).sort(), [...CARD_TRANSACTION_PUBLIC_FIELDS].sort());
   for (const forbidden of [
     "providerPublicToken",
     "pan",
     "journalIds",
     "payload",
     "metadata",
-    "traceId",
+  ]) assert.equal(forbidden in transaction, false);
+  assert.equal(cardTransactionLifecycleType(transaction.status), "SETTLEMENT");
+});
+
+test("bounds every money, identity, merchant, currency and timestamp field", () => {
+  for (const field of [
+    "amountMinor",
     "authorizedAmountMinor",
-  ])
-    assert.equal(forbidden in transaction, false);
+    "clearedAmountMinor",
+    "settledAmountMinor",
+    "reversedAmountMinor",
+    "refundedAmountMinor",
+  ]) {
+    assert.throws(() => parseCardTransaction({ ...rawTransaction("transaction-1"), [field]: "01" }), new RegExp(field));
+    assert.throws(() => parseCardTransaction({ ...rawTransaction("transaction-1"), [field]: "9223372036854775808" }), new RegExp(field));
+  }
+  assert.throws(() => parseCardTransaction({ ...rawTransaction("transaction-1"), id: "../private" }), /id/);
+  assert.throws(() => parseCardTransaction({ ...rawTransaction("transaction-1"), traceId: "x".repeat(129) }), /traceId/);
+  assert.throws(() => parseCardTransaction({ ...rawTransaction("transaction-1"), currency: "usd" }), /currency/);
+  assert.throws(() => parseCardTransaction({ ...rawTransaction("transaction-1"), merchantName: "x".repeat(201) }), /merchantName/);
+  assert.throws(() => parseCardTransaction({ ...rawTransaction("transaction-1"), merchantName: "Unsafe\nMerchant" }), /merchantName/);
+  assert.throws(() => parseCardTransaction({ ...rawTransaction("transaction-1"), merchantCategory: "12A4" }), /merchantCategory/);
+  assert.throws(() => parseCardTransaction({ ...rawTransaction("transaction-1"), occurredAt: "2026-07-31" }), /occurredAt/);
 });
 
 test("accepts empty pages and rejects malformed records or cursors", () => {
@@ -67,12 +80,32 @@ test("accepts empty pages and rejects malformed records or cursors", () => {
     transactions: [],
     nextCursor: null,
   });
-  assert.throws(() => parseCardTransaction({ ...rawTransaction("transaction-1"), amountMinor: 123 }), /amount/);
+  assert.throws(() => parseCardTransaction({ ...rawTransaction("transaction-1"), amountMinor: 123 }), /amountMinor/);
   assert.throws(() => parseCardTransaction({ ...rawTransaction("transaction-1"), status: "RAW" }), /status/);
   assert.throws(
     () => parseCardTransactionPage({ transactions: [rawTransaction("transaction-1")], nextCursor: "" }),
     /cursor/,
   );
+});
+
+test("never executes unexpected accessors while reconstructing public fields", () => {
+  let getterExecutions = 0;
+  const hostile = rawTransaction("transaction-1");
+  Object.defineProperty(hostile, "providerPayload", {
+    enumerable: true,
+    get() { getterExecutions += 1; throw new Error("must not execute"); },
+  });
+  const parsed = parseCardTransaction(hostile);
+  assert.equal(getterExecutions, 0);
+  assert.equal("providerPayload" in parsed, false);
+
+  const hostilePublicField = rawTransaction("transaction-2");
+  Object.defineProperty(hostilePublicField, "merchantName", {
+    enumerable: true,
+    get() { getterExecutions += 1; throw new Error("must not execute"); },
+  });
+  assert.throws(() => parseCardTransaction(hostilePublicField), /merchantName/);
+  assert.equal(getterExecutions, 0);
 });
 
 test("fails closed when Backend returns more than the requested 25 records", () => {

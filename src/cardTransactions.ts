@@ -1,84 +1,166 @@
 export const CARD_TRANSACTION_PAGE_SIZE = 25;
 
-export type CardTransactionStatus =
-  | "AUTHORIZED"
-  | "CLEARED"
-  | "SETTLED"
-  | "DECLINED"
-  | "REVERSED"
-  | "REFUNDED";
-
-export type CardTransactionRecord = {
-  id: string;
-  status: CardTransactionStatus;
-  amountMinor: string;
-  currency: string;
-  merchantName: string | null;
-  merchantCategory: string | null;
-  occurredAt: string;
-};
-
-export type CardTransactionPage = {
-  transactions: CardTransactionRecord[];
-  nextCursor: string | null;
-};
-
-const statuses: CardTransactionStatus[] = [
+export const CARD_TRANSACTION_STATUSES = [
   "AUTHORIZED",
   "CLEARED",
   "SETTLED",
   "DECLINED",
   "REVERSED",
   "REFUNDED",
-];
+] as const;
 
-const isObject = (value: unknown): value is Record<string, unknown> =>
-  typeof value === "object" && value !== null && !Array.isArray(value);
+export type CardTransactionStatus = (typeof CARD_TRANSACTION_STATUSES)[number];
+export type CardTransactionLifecycleType =
+  | "AUTHORIZATION"
+  | "CLEARING"
+  | "SETTLEMENT"
+  | "DECLINE"
+  | "REVERSAL"
+  | "REFUND";
 
-const nullableString = (value: unknown, name: string): string | null => {
-  if (value === null) return null;
-  if (typeof value !== "string") throw new Error(`Invalid card transaction ${name}`);
+export const CARD_TRANSACTION_PUBLIC_FIELDS = [
+  "id",
+  "status",
+  "amountMinor",
+  "authorizedAmountMinor",
+  "clearedAmountMinor",
+  "settledAmountMinor",
+  "reversedAmountMinor",
+  "refundedAmountMinor",
+  "currency",
+  "traceId",
+  "merchantName",
+  "merchantCategory",
+  "occurredAt",
+] as const;
+
+export type CardTransactionRecord = Readonly<{
+  id: string;
+  status: CardTransactionStatus;
+  amountMinor: string;
+  authorizedAmountMinor: string;
+  clearedAmountMinor: string;
+  settledAmountMinor: string;
+  reversedAmountMinor: string;
+  refundedAmountMinor: string;
+  currency: string;
+  traceId: string | null;
+  merchantName: string | null;
+  merchantCategory: string | null;
+  occurredAt: string;
+}>;
+
+export type CardTransactionPage = Readonly<{
+  transactions: readonly CardTransactionRecord[];
+  nextCursor: string | null;
+}>;
+
+type OwnData = Readonly<Record<string, PropertyDescriptor>>;
+const MIN_SIGNED_64 = -9_223_372_036_854_775_808n;
+const MAX_SIGNED_64 = 9_223_372_036_854_775_807n;
+
+const ownData = (value: unknown, message: string): OwnData => {
+  if (!value || typeof value !== "object" || Array.isArray(value)) throw new Error(message);
+  const prototype = Object.getPrototypeOf(value);
+  if (prototype !== Object.prototype && prototype !== null) throw new Error(message);
+  return Object.getOwnPropertyDescriptors(value);
+};
+
+const ownValue = (source: OwnData, key: string): unknown => source[key]?.value;
+
+const text = (source: OwnData, key: string, maxBytes: number): string => {
+  const value = ownValue(source, key);
+  if (
+    typeof value !== "string" ||
+    value.length === 0 ||
+    new TextEncoder().encode(value).byteLength > maxBytes ||
+    [...value].some((character) => character.charCodeAt(0) <= 0x1f || character.charCodeAt(0) === 0x7f)
+  ) throw new Error(`Invalid card transaction ${key}`);
   return value;
 };
 
-export function parseCardTransaction(value: unknown): CardTransactionRecord {
-  if (!isObject(value)) throw new Error("Invalid card transaction record");
-  if (typeof value.id !== "string" || value.id.length === 0)
-    throw new Error("Invalid card transaction id");
-  if (!statuses.includes(value.status as CardTransactionStatus))
-    throw new Error("Invalid card transaction status");
-  if (typeof value.amountMinor !== "string" || !/^-?\d+$/.test(value.amountMinor))
-    throw new Error("Invalid card transaction amount");
-  if (typeof value.currency !== "string" || !/^[A-Z]{3}$/.test(value.currency))
-    throw new Error("Invalid card transaction currency");
-  if (typeof value.occurredAt !== "string" || Number.isNaN(Date.parse(value.occurredAt)))
-    throw new Error("Invalid card transaction occurredAt");
+const identifier = (source: OwnData, key: string): string => {
+  const value = text(source, key, 128);
+  if (!/^[A-Za-z0-9][A-Za-z0-9._:-]*$/.test(value))
+    throw new Error(`Invalid card transaction ${key}`);
+  return value;
+};
 
-  return {
-    id: value.id,
-    status: value.status as CardTransactionStatus,
-    amountMinor: value.amountMinor,
-    currency: value.currency,
-    merchantName: nullableString(value.merchantName, "merchantName"),
-    merchantCategory: nullableString(value.merchantCategory, "merchantCategory"),
-    occurredAt: value.occurredAt,
-  };
+const minorUnits = (source: OwnData, key: string): string => {
+  const value = ownValue(source, key);
+  if (typeof value !== "string" || !/^(0|-?[1-9][0-9]{0,18})$/.test(value))
+    throw new Error(`Invalid card transaction ${key}`);
+  const amount = BigInt(value);
+  if (amount < MIN_SIGNED_64 || amount > MAX_SIGNED_64)
+    throw new Error(`Invalid card transaction ${key}`);
+  return value;
+};
+
+const nullableText = (source: OwnData, key: string, maxBytes: number): string | null =>
+  ownValue(source, key) === null ? null : text(source, key, maxBytes);
+
+const timestamp = (source: OwnData, key: string): string => {
+  const value = text(source, key, 32);
+  const parsed = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/.test(value) ? new Date(value) : null;
+  if (!parsed || Number.isNaN(parsed.getTime()) || parsed.toISOString() !== value)
+    throw new Error(`Invalid card transaction ${key}`);
+  return value;
+};
+
+export function cardTransactionLifecycleType(status: CardTransactionStatus): CardTransactionLifecycleType {
+  switch (status) {
+    case "AUTHORIZED": return "AUTHORIZATION";
+    case "CLEARED": return "CLEARING";
+    case "SETTLED": return "SETTLEMENT";
+    case "DECLINED": return "DECLINE";
+    case "REVERSED": return "REVERSAL";
+    case "REFUNDED": return "REFUND";
+  }
+}
+
+export function parseCardTransaction(value: unknown): CardTransactionRecord {
+  const source = ownData(value, "Invalid card transaction record");
+  const status = text(source, "status", 32);
+  if (!(CARD_TRANSACTION_STATUSES as readonly string[]).includes(status))
+    throw new Error("Invalid card transaction status");
+  const currency = text(source, "currency", 3);
+  if (!/^[A-Z]{3}$/.test(currency)) throw new Error("Invalid card transaction currency");
+  const merchantCategory = nullableText(source, "merchantCategory", 4);
+  if (merchantCategory !== null && !/^[0-9]{4}$/.test(merchantCategory))
+    throw new Error("Invalid card transaction merchantCategory");
+
+  return Object.freeze({
+    id: identifier(source, "id"),
+    status: status as CardTransactionStatus,
+    amountMinor: minorUnits(source, "amountMinor"),
+    authorizedAmountMinor: minorUnits(source, "authorizedAmountMinor"),
+    clearedAmountMinor: minorUnits(source, "clearedAmountMinor"),
+    settledAmountMinor: minorUnits(source, "settledAmountMinor"),
+    reversedAmountMinor: minorUnits(source, "reversedAmountMinor"),
+    refundedAmountMinor: minorUnits(source, "refundedAmountMinor"),
+    currency,
+    traceId: ownValue(source, "traceId") === null ? null : identifier(source, "traceId"),
+    merchantName: nullableText(source, "merchantName", 200),
+    merchantCategory,
+    occurredAt: timestamp(source, "occurredAt"),
+  });
 }
 
 export function parseCardTransactionPage(value: unknown): CardTransactionPage {
-  if (!isObject(value) || !Array.isArray(value.transactions))
-    throw new Error("Invalid card transaction page");
-  if (value.transactions.length > CARD_TRANSACTION_PAGE_SIZE)
+  const source = ownData(value, "Invalid card transaction page");
+  const rawTransactions = ownValue(source, "transactions");
+  if (!Array.isArray(rawTransactions)) throw new Error("Invalid card transaction page");
+  if (rawTransactions.length > CARD_TRANSACTION_PAGE_SIZE)
     throw new Error("Card transaction page exceeds the consumer limit");
+  const rawCursor = ownValue(source, "nextCursor");
   if (
-    value.nextCursor !== null &&
-    (typeof value.nextCursor !== "string" || value.nextCursor.length === 0 || value.nextCursor.length > 2048)
-  )
-    throw new Error("Invalid card transaction cursor");
-  return {
-    transactions: value.transactions.map(parseCardTransaction),
-    nextCursor: value.nextCursor as string | null,
-  };
+    rawCursor !== null &&
+    (typeof rawCursor !== "string" || rawCursor.length === 0 || new TextEncoder().encode(rawCursor).byteLength > 2048)
+  ) throw new Error("Invalid card transaction cursor");
+  return Object.freeze({
+    transactions: Object.freeze(rawTransactions.map(parseCardTransaction)),
+    nextCursor: rawCursor as string | null,
+  });
 }
 
 export function cardTransactionPath(cardId: string, cursor?: string): string {
@@ -88,8 +170,8 @@ export function cardTransactionPath(cardId: string, cursor?: string): string {
 }
 
 export function mergeCardTransactionPages(
-  current: CardTransactionRecord[],
-  incoming: CardTransactionRecord[],
+  current: readonly CardTransactionRecord[],
+  incoming: readonly CardTransactionRecord[],
 ): CardTransactionRecord[] {
   const merged = new Map(current.map((transaction) => [transaction.id, transaction]));
   for (const transaction of incoming) merged.set(transaction.id, transaction);
