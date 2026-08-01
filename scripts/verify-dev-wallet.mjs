@@ -9,6 +9,7 @@ const cardTransactions = readFileSync(join(root, "src/cardTransactions.ts"), "ut
 const cardTransactionHistory = readFileSync(join(root, "src/cardTransactionHistory.ts"), "utf8");
 const cardTransactionRefresh = readFileSync(join(root, "src/cardTransactionRefresh.ts"), "utf8");
 const cardTransactionDetail = readFileSync(join(root, "src/cardTransactionDetail.ts"), "utf8");
+const cardTransactionDetailRefresh = readFileSync(join(root, "src/cardTransactionDetailRefresh.ts"), "utf8");
 const cardBalance = readFileSync(join(root, "src/cardBalance.ts"), "utf8");
 const cardLimits = readFileSync(join(root, "src/cardLimits.ts"), "utf8");
 const cardLimitsUpdate = readFileSync(join(root, "src/cardLimitsUpdate.ts"), "utf8");
@@ -189,6 +190,28 @@ assert(
     app.includes("Keeping the last verified snapshot until completion") &&
     app.includes("no automatic retries"),
   "Card transaction refresh must retain the same-filter snapshot and expose only bounded manual SANDBOX/TEST retries",
+);
+assert(
+  cardTransactionDetailRefresh.includes('method: "GET"') &&
+    cardTransactionDetailRefresh.includes("CARD_TRANSACTION_PUBLIC_FIELDS") &&
+    cardTransactionDetailRefresh.includes("Reflect.ownKeys(value)") &&
+    cardTransactionDetailRefresh.includes("parsed.id !== requested.id"),
+  "Card transaction detail refresh must use one GET and reconstruct exactly the 13-field public DTO for the requested ID",
+);
+assert(
+  cardTransactionDetailRefresh.includes("request.listSnapshot === currentHistory") &&
+    cardTransactionDetailRefresh.includes("request.transactionId === currentTransactionId") &&
+    cardTransactionDetailRefresh.includes("walletTransferSessionScope(session, runtimeEnvironment, now()) !== expectedScopeKey"),
+  "Card transaction detail completion must bind the exact list snapshot, selection and live unexpired actor scope",
+);
+assert(
+  apiClient.includes("readCardTransactionDetailRefresh(cardTransactionDetailTransport,session,walletRuntime.environment,scopeKey,cardId,selected,signal)") &&
+    app.includes("refreshSelectedCardTransactionDetail=async") &&
+    app.includes("walletApi.cardTransactionDetail(activeSession,card.id,listRow,scope,controller.signal)") &&
+    app.includes("cardTransactionDetailAbortController.current===controller") &&
+    app.includes("one GET per click · no automatic retries") &&
+    app.match(/walletApi\.cardTransactionDetail\(/g)?.length === 1,
+  "App must expose one manual selected Card transaction detail GET with cancellation, no retries and no automatic call site",
 );
 assert(
   cardDetailRefresh.includes("readers.card(selectedCardId, signal)") &&

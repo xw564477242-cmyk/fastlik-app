@@ -44,9 +44,9 @@ assert(walletOperations.includes("/v1/wallet/operations?"), "Wallet activity mus
 assert(walletOperations.includes("walletOperationActivityRequestIsCurrent"), "Wallet activity must remain scope, cursor and generation isolated");
 assert(walletOperations.includes("parseWalletOperationDetail"), "Wallet operation detail must bind its immutable public summary fields");
 assert(walletOperations.includes("walletOperationDetailRequestIsCurrent"), "Wallet operation detail must remain scope, selection and generation isolated");
-assert(apiClient.includes("parseCardBalance(await request<unknown>(cardBalancePath(id)),id)"), "Card balance must use the strict public response parser");
+assert(apiClient.includes("parseCardBalance(await request<unknown>(cardBalancePath(id),'GET',undefined,undefined,'json',signal),id)"), "Card balance must use the strict public response parser with caller cancellation");
 assert(cardBalance.includes("cardBalanceRequestIsCurrent"), "Card balance must remain scope, selected-card and generation isolated");
-assert(apiClient.includes("parseCardLimits(await request<unknown>(cardLimitsPath(id)),id)"), "Card limits must use the strict public response parser");
+assert(apiClient.includes("parseCardLimits(await request<unknown>(cardLimitsPath(id),'GET',undefined,undefined,'json',signal),id)"), "Card limits must use the strict public response parser with caller cancellation");
 assert(cardLimits.includes("cardLimitsRequestIsCurrent"), "Card limits must remain scope, selected-card and generation isolated");
 assert(cardLimitsUpdate.includes('sessionEnvironment !== "SANDBOX" && sessionEnvironment !== "TEST"'), "Card limits updates must remain SANDBOX/TEST only");
 assert(cardLimitsUpdate.includes("CARD_LIMIT_UPDATE_MAX_MINOR = 9_000_000_000_000") && cardLimitsUpdate.includes("Number.isSafeInteger"), "Card limits updates must retain the Backend numeric contract");
