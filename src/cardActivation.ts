@@ -1,9 +1,15 @@
 import type { CardPage, CardRecord } from "./cardList.ts";
+import type { CardDetailRefreshSnapshot } from "./cardDetailRefresh.ts";
 
 export const CARD_ACTIVATION_LIST_MAX_PAGES = 25;
 
 export type CardActivationConfirmation = Readonly<{
   card: CardRecord;
+  cards: readonly CardRecord[];
+  nextCursor: string | null;
+}>;
+
+export type CardActivationCommit = Readonly<CardDetailRefreshSnapshot & {
   cards: readonly CardRecord[];
   nextCursor: string | null;
 }>;
@@ -21,6 +27,13 @@ export class CardActivationConfirmationError extends Error {
   constructor(message = "Card activation could not be confirmed by persisted reads") {
     super(message);
     this.name = "CardActivationConfirmationError";
+  }
+}
+
+export class CardActivationPostRefreshError extends Error {
+  constructor(message = "Confirmed Card activation did not match the complete Card refresh") {
+    super(message);
+    this.name = "CardActivationPostRefreshError";
   }
 }
 
@@ -109,6 +122,32 @@ export async function readCardActivationConfirmation(
     card,
     cards: Object.freeze([...accumulated]),
     nextCursor,
+  });
+}
+
+/**
+ * Produces the only commit-ready activation state. The already-confirmed Card
+ * list and the complete five-resource Card snapshot must describe the exact
+ * same ACTIVE public Card; otherwise callers must invalidate associated state.
+ */
+export function createCardActivationCommit(
+  confirmation: CardActivationConfirmation,
+  snapshot: CardDetailRefreshSnapshot,
+): CardActivationCommit {
+  if (
+    snapshot.card.status !== "ACTIVE" ||
+    cardPublicVersion(snapshot.card) !== cardPublicVersion(confirmation.card)
+  ) throw new CardActivationPostRefreshError();
+  const listed = confirmation.cards.find(card => card.id === snapshot.card.id);
+  if (!listed || cardPublicVersion(listed) !== cardPublicVersion(snapshot.card))
+    throw new CardActivationPostRefreshError();
+
+  return Object.freeze({
+    ...snapshot,
+    cards: Object.freeze(confirmation.cards.map(card =>
+      card.id === snapshot.card.id ? snapshot.card : card
+    )),
+    nextCursor: confirmation.nextCursor,
   });
 }
 

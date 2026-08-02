@@ -11,7 +11,8 @@ import {
   submitCardStatusAction,
   type CardStatusSession,
 } from "../src/cardStatusAction.ts";
-import { readCardActivationConfirmation } from "../src/cardActivation.ts";
+import { createCardActivationCommit, readCardActivationConfirmation } from "../src/cardActivation.ts";
+import { readCardDetailRefresh } from "../src/cardDetailRefresh.ts";
 
 const environment = process.env.FASTLINK_TEST_ENVIRONMENT;
 const mounted = environment === "SANDBOX" || environment === "TEST" ? test : test.skip;
@@ -55,7 +56,7 @@ const wireActive = (overrides: Record<string, unknown> = {}) => ({
   ...overrides,
 });
 
-mounted(`PENDING Card activation uses one operation-bound bodyless POST then two persisted reads (${environment ?? "ENVIRONMENT_REQUIRED"})`, async () => {
+mounted(`PENDING Card activation uses one bodyless POST then atomically refreshes the whole Card screen (${environment ?? "ENVIRONMENT_REQUIRED"})`, async () => {
   const activeSession = session();
   const selected = pending();
   const scope = cardStatusSessionScope(activeSession, runtime, now);
@@ -77,7 +78,27 @@ mounted(`PENDING Card activation uses one operation-bound bodyless POST then two
     cards: async cursor => { reads.push(`GET /v1/cards?limit=20${cursor ? `&cursor=${cursor}` : ""}`); return { cards: [active()], nextCursor: null }; },
   }, selected);
   assert.deepEqual(reads, ["GET /v1/cards/card_activation_1", "GET /v1/cards?limit=20"]);
-  assert.equal(confirmation.card.status, "ACTIVE");
+  const snapshot = await readCardDetailRefresh({
+    card: async id => { reads.push(`GET /v1/cards/${encodeURIComponent(id)}`); return active(); },
+    balance: async id => { reads.push(`GET /v1/cards/${encodeURIComponent(id)}/balance`); return { cardId: id, currency: "USD", availableBalanceMinor: "2500", currentBalanceMinor: "2500", pendingAmountMinor: "0", updatedAt: "2026-08-01T00:00:01.000Z" }; },
+    limits: async id => { reads.push(`GET /v1/cards/${encodeURIComponent(id)}/limits`); return { cardId: id, singleTransactionMinor: "10000", dailySpendMinor: "50000", monthlySpendMinor: "500000", dailyAtmMinor: "20000", updatedAt: "2026-08-01T00:00:01.000Z" }; },
+    transactions: async id => { reads.push(`GET /v1/cards/${encodeURIComponent(id)}/transactions`); return { transactions: [], nextCursor: null }; },
+    timeline: async id => { reads.push(`GET /v1/cards/${encodeURIComponent(id)}/timeline`); return { events: [{ id: "event_activation_1", type: "ACTIVATED", fromStatus: "PENDING", toStatus: "ACTIVE", occurredAt: "2026-08-01T00:00:01.000Z" }], nextCursor: null }; },
+  }, selected.id);
+  const commit = createCardActivationCommit(confirmation, snapshot);
+  assert.deepEqual(reads, [
+    "GET /v1/cards/card_activation_1",
+    "GET /v1/cards?limit=20",
+    "GET /v1/cards/card_activation_1",
+    "GET /v1/cards/card_activation_1/balance",
+    "GET /v1/cards/card_activation_1/limits",
+    "GET /v1/cards/card_activation_1/transactions",
+    "GET /v1/cards/card_activation_1/timeline",
+  ]);
+  assert.equal(commit.card.status, "ACTIVE");
+  assert.equal(commit.balance.cardId, selected.id);
+  assert.equal(commit.limits.cardId, selected.id);
+  assert.equal(commit.timeline.events[0]?.type, "ACTIVATED");
 });
 
 mounted("equal-valued replacement Session/Card, generation change and unmount make late activation write zero", async () => {

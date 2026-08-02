@@ -93,6 +93,12 @@ jobs:
       - name: Atomic Card detail refresh integration in TEST
         run: npm run test:card-detail-refresh:test
 
+      - name: Atomic Card activation post-chain integration in SANDBOX
+        run: npm run test:card-activation:sandbox
+
+      - name: Atomic Card activation post-chain integration in TEST
+        run: npm run test:card-activation:test
+
       - name: Card lifecycle timeline integration in SANDBOX
         run: npm run test:card-timeline:sandbox
 
@@ -173,7 +179,10 @@ jobs:
           node --input-type=module <<'EOF'
           import { readFileSync, writeFileSync } from "node:fs";
           const evidence = JSON.parse(readFileSync("build-evidence.json", "utf8"));
-          evidence.format = "fastlink-wallet-pr-evidence-v13";
+          evidence.format = "fastlink-wallet-pr-evidence-v14";
+          evidence.cardActivationSources = ["src/App.tsx", "src/apiClient.ts", "src/cardActivation.ts", "src/cardDetailRefresh.ts"];
+          evidence.cardActivationTests = ["tests/cardActivation.test.ts", "tests/cardActivation.integration.test.ts", "tests/cardDetailRefresh.test.ts", "tests/cardDetailRefresh.integration.test.ts"];
+          evidence.cardActivationPolicy = {submitMethod:"POST",confirmationMethods:["GET_CARD","GET_CARD_LIST"],postRefreshMethods:["GET_CARD","GET_BALANCE","GET_LIMITS","GET_TRANSACTIONS","GET_TIMELINE"],atomicCommit:true,confirmedFailure:"ACTIVE_CARD_AND_LIST_WITH_ASSOCIATED_STATE_INVALIDATED",automaticRetry:false,validatedEnvironments:["SANDBOX","TEST"],scopeBindings:["actorId","tenantId","customerId","environment","sessionExpiry","cardId","requestGeneration"],productionEnabled:false};
           evidence.consumerTransferSources = ["src/App.tsx", "src/apiClient.ts", "src/ConsumerTransferFlow.tsx", "src/consumerTransferState.ts", "src/walletTransfer.ts"];
           evidence.consumerTransferTests = ["tests/consumerTransferFlow.test.ts", "tests/consumerTransferFlow.integration.test.ts", "tests/walletTransfer.test.ts", "tests/walletTransfer.integration.test.ts"];
           evidence.consumerTransferPolicy = {runtimeApi:"/api",submitPath:"/v1/wallet/transfers",statusPath:"/v1/wallet/operations/{id}",submitMethod:"POST",statusMethod:"GET",authentication:"HTTP_ONLY_COOKIE_CSRF",validatedEnvironments:["SANDBOX","TEST"],automaticRetry:false,ambiguousRetryStatuses:[0,408,"5xx"],idempotency:"same-key-exact-scope-and-input",responseBounds:{accounts:65536,receipt:16384},scopeBindings:["actorId","tenantId","customerId","environment","sessionExpiry","sourceAccountVersion","destinationAccountId","amount","requestGeneration","inputGeneration"],sessionInvalidation:"current-explicit-401-only",staleCompletionWrites:0,productionEnabled:false};
@@ -185,6 +194,7 @@ jobs:
           sha256sum .gitignore .github/workflows/pull-request.yml package.json scripts/verify-dev-wallet.mjs scripts/verify-cloudflare.mjs dist/index.html dist/runtime-config.js wallet-browser-smoke.html package-lock.json build-evidence.json src/sessionLifecycle.ts tests/sessionLifecycle.test.ts src/walletTransfer.ts tests/walletTransfer.test.ts tests/walletTransfer.integration.test.ts src/walletTransactions.ts tests/walletTransactions.test.ts tests/walletTransactions.integration.test.ts src/walletOperations.ts tests/walletOperations.test.ts tests/walletOperationFilters.integration.test.ts src/App.tsx src/apiClient.ts src/cardDetailRefresh.ts src/cardTimeline.ts src/cardTimelineRefresh.ts src/cardTransactionDetail.ts src/cardTransactionRefresh.ts src/cardTransactionDetailRefresh.ts tests/cardDetailRefresh.test.ts tests/cardDetailRefresh.integration.test.ts tests/cardTimeline.test.ts tests/cardTimelineRefresh.test.ts tests/cardTimeline.integration.test.ts tests/cardTransactionDetail.test.ts tests/cardTransactionRefresh.test.ts tests/cardTransactionRefresh.integration.test.ts tests/cardTransactionDetailRefresh.test.ts tests/cardTransactionDetailRefresh.integration.test.ts src/FxQuotePreview.tsx src/fxQuote.ts tests/fxQuote.test.ts tests/fxQuote.integration.test.ts tests/fxQuote.mounted.integration.test.ts src/KycStatusPanel.tsx src/kycStatus.ts tests/kycStatus.test.ts tests/kycStatus.mounted.integration.test.ts > build-provenance.sha256
           sha256sum src/ConsumerTransferFlow.tsx src/consumerTransferState.ts tests/consumerTransferFlow.test.ts tests/consumerTransferFlow.integration.test.ts >> build-provenance.sha256
           sha256sum src/ConsumerOverview.tsx src/consumerOverviewState.ts src/styles.css tests/consumerOverview.test.ts >> build-provenance.sha256
+          sha256sum src/cardActivation.ts tests/cardActivation.test.ts tests/cardActivation.integration.test.ts >> build-provenance.sha256
           sha256sum --check build-provenance.sha256
 
       - name: Upload non-production build evidence
@@ -216,6 +226,7 @@ jobs:
             src/App.tsx
             src/apiClient.ts
             src/cardDetailRefresh.ts
+            src/cardActivation.ts
             src/cardTimeline.ts
             src/cardTimelineRefresh.ts
             src/cardTransactionDetail.ts
@@ -233,6 +244,8 @@ jobs:
             tests/fxQuote.mounted.integration.test.ts
             tests/cardDetailRefresh.test.ts
             tests/cardDetailRefresh.integration.test.ts
+            tests/cardActivation.test.ts
+            tests/cardActivation.integration.test.ts
             tests/cardTimeline.test.ts
             tests/cardTimelineRefresh.test.ts
             tests/cardTimeline.integration.test.ts
