@@ -367,6 +367,10 @@ export function parseCardRecord(value: unknown): CardRecord {
   return parseCardRecordValue(value, false);
 }
 
+export function parseCardRecordRaw(raw: unknown): CardRecord {
+  return parseCardRecordValue(boundedRawJson(raw), true);
+}
+
 export function parseCardPage(value: unknown): CardPage {
   const page = exactDataRecord(value, pageFields, [], "card page");
   if (!Array.isArray(page.cards) || page.cards.length > CARD_LIST_PAGE_SIZE)

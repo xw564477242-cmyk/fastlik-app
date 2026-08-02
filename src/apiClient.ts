@@ -1,4 +1,4 @@
-import {CARD_LIST_MAX_JSON_BYTES,parseCardRecord,readCardListPage} from './cardList'
+import {CARD_LIST_MAX_JSON_BYTES,parseCardRecord,parseCardRecordRaw,readCardListPage} from './cardList'
 import type {CardListTransportRequest,CardPage,CardRecord} from './cardList'
 import {cardBalancePath,parseCardBalance} from './cardBalance'
 import {cardTransactionPath,parseCardTransactionPage} from './cardTransactions'
@@ -10,6 +10,7 @@ import {submitCardLimitsUpdate} from './cardLimitsUpdate'
 import type {CardLimitsUpdateInput,CardLimitsUpdateTransportRequest} from './cardLimitsUpdate'
 import {submitCardStatusAction} from './cardStatusAction'
 import type {CardStatusOperation,CardStatusTransportRequest} from './cardStatusAction'
+import {readCardActivationConfirmation} from './cardActivation'
 import type {WalletAccountRecord,WalletBalanceRecord,WalletTransferReceipt} from './walletData'
 import {readWalletAccountBalance} from './walletAccountBalance'
 import type {WalletAccountBalanceTransportRequest} from './walletAccountBalance'
@@ -115,10 +116,11 @@ const cardListTransport=({path,method,signal}:CardListTransportRequest)=>request
 const walletOperationTransport=({path,method,signal}:WalletOperationTransportRequest)=>request<unknown>(path,method,undefined,undefined,'json',signal)
 const cardTransactionDetailTransport=({path,method,signal}:CardTransactionDetailTransportRequest)=>request<unknown>(path,method,undefined,undefined,'json',signal)
 const cardLimitsUpdateTransport=({path,method,body,idempotencyKey}:CardLimitsUpdateTransportRequest)=>request<unknown>(path,method,body,idempotencyKey)
-const cardStatusTransport=({path,method,idempotencyKey}:CardStatusTransportRequest)=>{
+const cardStatusTransport=({path,method,idempotencyKey,signal}:CardStatusTransportRequest)=>{
  if(!csrfToken())return Promise.reject(new WalletApiError(400,trace(),'Card status security context unavailable'))
- return request<unknown>(path,method,undefined,idempotencyKey,'json',undefined,undefined,'caller')
+ return request<unknown>(path,method,undefined,idempotencyKey,'json',signal,undefined,'caller')
 }
+const cardActivationListTransport=({path,method,signal}:CardListTransportRequest)=>request<string>(path,method,undefined,undefined,'text',signal,CARD_LIST_MAX_JSON_BYTES,'caller')
 const cardReplacementTransport=({path,method,body,idempotencyKey}:CardReplacementTransportRequest)=>request<unknown>(path,method,body,idempotencyKey)
 const cardRenewalTransport=({path,method,idempotencyKey}:CardRenewalTransportRequest)=>request<unknown>(path,method,undefined,idempotencyKey)
 const fxQuoteTransport=({path,method,body,signal}:FxQuoteTransportRequest)=>request<string>(path,method,body,undefined,'text',signal,FX_QUOTE_RESPONSE_MAX_JSON_BYTES,'caller')
@@ -151,5 +153,9 @@ export const walletApi={
  createVirtualCard:async(input:VirtualCardCreateInput,idempotencyKey:string,sessionEnvironment:FastLinkEnvironment)=>{const decision=virtualCardCreateDecision(sessionEnvironment,walletRuntime.environment);if(!decision.allowed)throw new Error(decision.reason??'Virtual card creation is unavailable');const normalized=parseVirtualCardCreateInput(input);return parseVirtualCardCreateResponse(await request<unknown>(virtualCardCreatePath(),'POST',normalized,validateVirtualCardIdempotencyKey(idempotencyKey)),normalized)},
  replaceCard:async(session:WalletSession,card:import('./cardList').CardRecord,input:CardReplacementInput,idempotencyKey:string,currentScopeKey:string|null,currentCardId:string|null)=>submitCardReplacement(cardReplacementTransport,session,walletRuntime.environment,currentScopeKey,currentCardId,card,input,idempotencyKey),
  renewCard:async(session:WalletSession,card:import('./cardList').CardRecord,idempotencyKey:string,currentScopeKey:string|null,currentCardId:string|null)=>submitCardRenewal(cardRenewalTransport,session,walletRuntime.environment,currentScopeKey,currentCardId,card,idempotencyKey),
- setCardStatus:async(session:WalletSession,card:import('./cardList').CardRecord,operation:CardStatusOperation,idempotencyKey:string,currentScopeKey:string|null,currentCardId:string|null)=>submitCardStatusAction(cardStatusTransport,session,walletRuntime.environment,currentScopeKey,currentCardId,card,operation,idempotencyKey),
+ setCardStatus:async(session:WalletSession,card:import('./cardList').CardRecord,operation:CardStatusOperation,idempotencyKey:string,currentScopeKey:string|null,currentCardId:string|null,signal?:AbortSignal)=>submitCardStatusAction(cardStatusTransport,session,walletRuntime.environment,currentScopeKey,currentCardId,card,operation,idempotencyKey,Date.now(),signal),
+ confirmCardActivation:async(session:WalletSession,scopeKey:string,card:import('./cardList').CardRecord,signal?:AbortSignal)=>readCardActivationConfirmation({
+  card:async(id,readSignal)=>parseCardRecordRaw(await request<string>(`/v1/cards/${encodeURIComponent(id)}`,'GET',undefined,undefined,'text',readSignal,CARD_LIST_MAX_JSON_BYTES,'caller')),
+  cards:(cursor,previousCards,readSignal)=>readCardListPage(cardActivationListTransport,session,walletRuntime.environment,scopeKey,cursor,previousCards,readSignal),
+ },card,signal),
 }
