@@ -3,7 +3,11 @@ import test from "node:test";
 import type { CardRecord } from "../src/cardList.ts";
 import {
   beginCardStatusAction,
+  cardStatusConflictIsCurrent,
+  cardStatusFailureIsAmbiguous,
+  cardStatusFailureIsExplicit401,
   cardStatusRequestIsCurrent,
+  cardStatusRetryKey,
   cardStatusSessionScope,
   createCardStatusRequestIdentity,
   settleCardStatusAction,
@@ -114,6 +118,11 @@ mounted("session, selection, complete Card version and unmount invalidation make
   };
   const mutations: Array<(context: Context) => void> = [
     context => {
+      context.session = session();
+      context.scope = cardStatusSessionScope(context.session, runtime, now);
+    },
+    context => { context.selected = card(); },
+    context => {
       context.session = session({ tenantId: "tenant-mounted-02" });
       context.scope = cardStatusSessionScope(context.session, runtime, now);
     },
@@ -137,7 +146,7 @@ mounted("session, selection, complete Card version and unmount invalidation make
       scope,
       selected,
     };
-    const request = createCardStatusRequestIdentity(context.generation, scope, "freeze", selected, key);
+    const request = createCardStatusRequestIdentity(context.generation, scope, "freeze", activeSession, selected, key);
     const isCurrent = () => context.mounted && cardStatusRequestIsCurrent(
       request,
       context.generation,
@@ -194,4 +203,55 @@ mounted("hostile getter, cross-Card response and expired session fail closed", a
     expired, runtime, scope, card().id, card(), "freeze", key, now,
   ));
   assert.equal(transportCalls, 0, "expired sessions must fail before transport");
+});
+
+mounted("one explicit ambiguous retry reuses the same key and a second ambiguity requires real Card refresh", async () => {
+  const activeSession = session();
+  const selected = card();
+  const scope = cardStatusSessionScope(activeSession, runtime, now);
+  if (!scope) throw new Error("mounted scope required");
+  const calls: string[] = [];
+  let retryRequest: ReturnType<typeof createCardStatusRequestIdentity> | null = null;
+  let conflictRequest: ReturnType<typeof createCardStatusRequestIdentity> | null = null;
+  let generation = 0;
+  const click = async () => {
+    if (cardStatusConflictIsCurrent(conflictRequest, activeSession, scope, selected, "freeze"))
+      return;
+    const retryKey = cardStatusRetryKey(retryRequest, activeSession, scope, selected, "freeze");
+    const request = createCardStatusRequestIdentity(
+      ++generation,
+      scope,
+      "freeze",
+      activeSession,
+      selected,
+      retryKey ?? key,
+      Boolean(retryKey),
+    );
+    retryRequest = null;
+    calls.push(request.idempotencyKey);
+    const failure = Object.freeze({ status: 503 });
+    assert.equal(cardStatusFailureIsAmbiguous(failure), true);
+    if (request.retry) conflictRequest = request;
+    else retryRequest = request;
+  };
+  await click();
+  await click();
+  await click();
+  assert.deepEqual(calls, [key, key], "the conflict block must prevent any fresh-key third POST");
+  assert.equal(cardStatusConflictIsCurrent(conflictRequest, activeSession, scope, selected, "freeze"), true);
+  assert.equal(cardStatusConflictIsCurrent(conflictRequest, activeSession, scope, card(), "freeze"), false, "a real refreshed Card object clears the old conflict scope");
+});
+
+mounted("only a current explicit 401 may invalidate the exact Session object", () => {
+  const activeSession = session();
+  const replacementSession = session();
+  const selected = card();
+  const scope = cardStatusSessionScope(activeSession, runtime, now);
+  if (!scope) throw new Error("mounted scope required");
+  const request = createCardStatusRequestIdentity(1, scope, "freeze", activeSession, selected, key);
+  const failure = Object.freeze({ status: 401 });
+  assert.equal(cardStatusFailureIsExplicit401(failure), true);
+  assert.equal(cardStatusRequestIsCurrent(request, 1, replacementSession, runtime, scope, selected, now), false);
+  assert.equal(cardStatusRequestIsCurrent(request, 1, activeSession, runtime, scope, selected, now), true);
+  assert.equal(cardStatusFailureIsExplicit401({ status: 403 }), false);
 });
