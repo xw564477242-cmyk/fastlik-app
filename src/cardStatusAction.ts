@@ -1,7 +1,7 @@
 import type { CardRecord } from "./cardList.ts";
 
 export type CardStatusEnvironment = "LOCAL" | "SANDBOX" | "TEST" | "UAT" | "PRODUCTION";
-export type CardStatusOperation = "freeze" | "unfreeze";
+export type CardStatusOperation = "activate" | "freeze" | "unfreeze";
 
 export type CardStatusSession = Readonly<{
   actorId: string;
@@ -23,6 +23,7 @@ export type CardStatusTransportRequest = Readonly<{
   path: string;
   method: "POST";
   idempotencyKey: string;
+  signal?: AbortSignal;
 }>;
 
 export type CardStatusTransport = (request: CardStatusTransportRequest) => Promise<unknown>;
@@ -38,6 +39,8 @@ export type CardStatusRequestIdentity = Readonly<{
   idempotencyKey: string;
   retry: boolean;
 }>;
+
+export type CardStatusFailureKind = "UNAUTHORIZED" | "FORBIDDEN" | "NOT_FOUND" | "CONFLICT" | "AMBIGUOUS" | "TERMINAL";
 
 const RFC3339 = /^(\d{4})-(\d{2})-(\d{2})T(?:[01]\d|2[0-3]):[0-5]\d:[0-5]\d(?:\.\d{1,9})?(?:Z|[+-](?:[01]\d|2[0-3]):[0-5]\d)$/;
 const MIN_SIGNED_64 = -(2n ** 63n);
@@ -198,13 +201,23 @@ export function cardStatusDecision(
     return card.capabilities.unfreeze
       ? { operation: "unfreeze", label: "Unfreeze", allowed: true, reason: null, scopeKey }
       : { operation: "unfreeze", label: "Unfreeze unavailable", allowed: false, reason: "Unfreeze is not permitted by the current Card capabilities.", scopeKey };
+  if (card.status === "PENDING")
+    return { operation: "activate", label: "Activate", allowed: true, reason: null, scopeKey };
   return { operation: null, label: "Card action unavailable", allowed: false, reason: `Card status ${card.status} does not permit freeze or unfreeze.`, scopeKey };
 }
 
-export function validateCardStatusIdempotencyKey(value: unknown): string {
+const UUID_V4 = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/;
+
+export function createCardStatusIdempotencyKey(operation: CardStatusOperation, randomUuid: unknown): string {
+  if (typeof randomUuid !== "string" || !UUID_V4.test(randomUuid))
+    throw new Error("Invalid Card status random idempotency input");
+  return operation === "activate" ? `activate:${randomUuid}` : randomUuid;
+}
+
+export function validateCardStatusIdempotencyKey(value: unknown, operation?: CardStatusOperation): string {
   if (
     typeof value !== "string" ||
-    !/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/.test(value)
+    !(operation === "activate" ? /^activate:[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/.test(value) : UUID_V4.test(value))
   ) throw new Error("Invalid Card status idempotency key");
   return value;
 }
@@ -239,7 +252,7 @@ export function createCardStatusRequestIdentity(
     session,
     card,
     cardKey: cardVersionKey(card),
-    idempotencyKey: validateCardStatusIdempotencyKey(idempotencyKey),
+    idempotencyKey: validateCardStatusIdempotencyKey(idempotencyKey, operation),
     retry,
   };
 }
@@ -282,6 +295,17 @@ export function cardStatusFailureIsAmbiguous(value: unknown): boolean {
   if (value instanceof TypeError) return true;
   const status = ownNumericStatus(value);
   return status === 0 || status === 408 || status === 409 || (status !== null && status >= 500 && status <= 599);
+}
+
+export function cardStatusFailureKind(value: unknown): CardStatusFailureKind {
+  const status = ownNumericStatus(value);
+  if (status === 401) return "UNAUTHORIZED";
+  if (status === 403) return "FORBIDDEN";
+  if (status === 404) return "NOT_FOUND";
+  if (status === 409) return "CONFLICT";
+  if (value instanceof TypeError || status === 0 || status === 408 || (status !== null && status >= 500 && status <= 599))
+    return "AMBIGUOUS";
+  return "TERMINAL";
 }
 
 export function cardStatusFailureIsExplicit401(value: unknown): boolean {
@@ -385,6 +409,7 @@ export async function submitCardStatusAction(
   operation: CardStatusOperation,
   idempotencyKey: string,
   now = Date.now(),
+  signal?: AbortSignal,
 ): Promise<CardRecord> {
   const decision = cardStatusDecision(card, session, runtimeEnvironment, currentScopeKey, currentCardId, now);
   if (!decision.allowed || decision.operation !== operation || decision.scopeKey === null)
@@ -392,7 +417,8 @@ export async function submitCardStatusAction(
   const response = await transport({
     path: `/v1/cards/${encodeURIComponent(opaqueId(card.id))}/${operation}`,
     method: "POST",
-    idempotencyKey: validateCardStatusIdempotencyKey(idempotencyKey),
+    idempotencyKey: validateCardStatusIdempotencyKey(idempotencyKey, operation),
+    ...(signal ? { signal } : {}),
   });
   return parseCardStatusResponse(response, card, operation);
 }
