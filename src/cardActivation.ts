@@ -1,4 +1,9 @@
 import type { CardPage, CardRecord } from "./cardList.ts";
+import {
+  readCardDetailRefresh,
+  type CardDetailRefreshReaders,
+  type CardDetailRefreshSnapshot,
+} from "./cardDetailRefresh.ts";
 
 export const CARD_ACTIVATION_LIST_MAX_PAGES = 25;
 
@@ -6,6 +11,43 @@ export type CardActivationConfirmation = Readonly<{
   card: CardRecord;
   cards: readonly CardRecord[];
   nextCursor: string | null;
+}>;
+
+export type CardActivationCommit = Readonly<CardDetailRefreshSnapshot & {
+  cards: readonly CardRecord[];
+  nextCursor: string | null;
+}>;
+
+export type CardActivationInvalidatedCommit = Readonly<{
+  card: CardRecord;
+  cards: readonly CardRecord[];
+  nextCursor: string | null;
+  balance: null;
+  limits: null;
+  transactions: null;
+  timeline: null;
+}>;
+
+export type CardActivationPostChainResult =
+  | Readonly<{
+      status: "COMPLETE";
+      confirmation: CardActivationConfirmation;
+      commit: CardActivationCommit;
+    }>
+  | Readonly<{
+      status: "CONFIRMED_REFRESH_FAILED";
+      confirmation: CardActivationConfirmation;
+      commit: CardActivationInvalidatedCommit;
+      failure: unknown;
+    }>;
+
+export type CardActivationPostChainInput = Readonly<{
+  selected: CardRecord;
+  submit: (signal?: AbortSignal) => Promise<CardRecord>;
+  confirm: (signal?: AbortSignal) => Promise<CardActivationConfirmation>;
+  refresh: CardDetailRefreshReaders;
+  isCurrent: () => boolean;
+  signal?: AbortSignal;
 }>;
 
 export type CardActivationReaders = Readonly<{
@@ -21,6 +63,13 @@ export class CardActivationConfirmationError extends Error {
   constructor(message = "Card activation could not be confirmed by persisted reads") {
     super(message);
     this.name = "CardActivationConfirmationError";
+  }
+}
+
+export class CardActivationPostRefreshError extends Error {
+  constructor(message = "Confirmed Card activation did not match the complete Card refresh") {
+    super(message);
+    this.name = "CardActivationPostRefreshError";
   }
 }
 
@@ -110,6 +159,91 @@ export async function readCardActivationConfirmation(
     cards: Object.freeze([...accumulated]),
     nextCursor,
   });
+}
+
+/**
+ * Produces the only commit-ready activation state. The already-confirmed Card
+ * list and the complete five-resource Card snapshot must describe the exact
+ * same ACTIVE public Card; otherwise callers must invalidate associated state.
+ */
+export function createCardActivationCommit(
+  confirmation: CardActivationConfirmation,
+  snapshot: CardDetailRefreshSnapshot,
+): CardActivationCommit {
+  if (
+    snapshot.card.status !== "ACTIVE" ||
+    cardPublicVersion(snapshot.card) !== cardPublicVersion(confirmation.card)
+  ) throw new CardActivationPostRefreshError();
+  const listed = confirmation.cards.find(card => card.id === snapshot.card.id);
+  if (!listed || cardPublicVersion(listed) !== cardPublicVersion(snapshot.card))
+    throw new CardActivationPostRefreshError();
+
+  return Object.freeze({
+    ...snapshot,
+    cards: Object.freeze(confirmation.cards.map(card =>
+      card.id === snapshot.card.id ? snapshot.card : card
+    )),
+    nextCursor: confirmation.nextCursor,
+  });
+}
+
+export function createCardActivationInvalidatedCommit(
+  confirmation: CardActivationConfirmation,
+): CardActivationInvalidatedCommit {
+  return Object.freeze({
+    card: confirmation.card,
+    cards: confirmation.cards,
+    nextCursor: confirmation.nextCursor,
+    balance: null,
+    limits: null,
+    transactions: null,
+    timeline: null,
+  });
+}
+
+/**
+ * Runs the production activation POST, both persisted confirmation reads and
+ * the complete five-resource Card refresh as one fail-closed chain. A stale
+ * request resolves to null, so late success, failure and 401 completions cannot
+ * reach caller-visible commit/error/finally handlers guarded by the same
+ * current-request predicate.
+ */
+export async function runCardActivationPostChain(
+  input: CardActivationPostChainInput,
+): Promise<CardActivationPostChainResult | null> {
+  let confirmation: CardActivationConfirmation | null = null;
+  try {
+    await input.submit(input.signal);
+    if (!input.isCurrent()) return null;
+
+    confirmation = await input.confirm(input.signal);
+    if (!input.isCurrent()) return null;
+
+    try {
+      const snapshot = await readCardDetailRefresh(
+        input.refresh,
+        input.selected.id,
+        input.signal,
+      );
+      if (!input.isCurrent()) return null;
+      return Object.freeze({
+        status: "COMPLETE",
+        confirmation,
+        commit: createCardActivationCommit(confirmation, snapshot),
+      });
+    } catch (failure) {
+      if (!input.isCurrent()) return null;
+      return Object.freeze({
+        status: "CONFIRMED_REFRESH_FAILED",
+        confirmation,
+        commit: createCardActivationInvalidatedCommit(confirmation),
+        failure,
+      });
+    }
+  } catch (failure) {
+    if (!input.isCurrent()) return null;
+    throw failure;
+  }
 }
 
 export function cardActivationFailureIsAmbiguous(value: unknown): boolean {

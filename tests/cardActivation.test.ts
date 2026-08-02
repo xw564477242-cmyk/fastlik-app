@@ -3,9 +3,13 @@ import test from "node:test";
 import {
   CARD_ACTIVATION_LIST_MAX_PAGES,
   CardActivationConfirmationError,
+  CardActivationPostRefreshError,
   cardActivationFailureIsAmbiguous,
+  createCardActivationCommit,
+  createCardActivationInvalidatedCommit,
   readCardActivationConfirmation,
 } from "../src/cardActivation.ts";
+import { readCardDetailRefresh } from "../src/cardDetailRefresh.ts";
 import type { CardPage, CardRecord } from "../src/cardList.ts";
 
 const card = (overrides: Partial<CardRecord> = {}): CardRecord => ({
@@ -28,6 +32,14 @@ const active = (overrides: Partial<CardRecord> = {}): CardRecord => card({
   capabilities: { freeze: true, unfreeze: false, replace: true, renew: true, updateLimits: true },
   ...overrides,
 });
+
+const completeActiveSnapshot = (overrides: Partial<CardRecord> = {}) => readCardDetailRefresh({
+  card: async () => active(overrides),
+  balance: async () => ({ cardId: card().id, currency: "USD", availableBalanceMinor: "2500", currentBalanceMinor: "2500", pendingAmountMinor: "0", updatedAt: "2026-08-01T00:00:01.000Z" }),
+  limits: async () => ({ cardId: card().id, singleTransactionMinor: "10000", dailySpendMinor: "50000", monthlySpendMinor: "500000", dailyAtmMinor: "20000", updatedAt: "2026-08-01T00:00:01.000Z" }),
+  transactions: async () => ({ transactions: [], nextCursor: null }),
+  timeline: async () => ({ events: [{ id: "event_activation_1", type: "ACTIVATED", fromStatus: "PENDING", toStatus: "ACTIVE", occurredAt: "2026-08-01T00:00:01.000Z" }], nextCursor: null }),
+}, card().id);
 
 test("commits only when canonical Card GET and paginated list agree on the same ACTIVE Card", async () => {
   const selected = card();
@@ -74,6 +86,39 @@ test("fails closed when either real read is stale, cross-Card, internally incons
   }
   assert.equal(cardActivationFailureIsAmbiguous(new CardActivationConfirmationError()), true);
   assert.equal(cardActivationFailureIsAmbiguous(new Error("local")), false);
+});
+
+test("creates one atomic activation commit only after detail, list and complete Card snapshot agree", async () => {
+  const verified = active();
+  const confirmation = Object.freeze({ card: verified, cards: Object.freeze([verified]), nextCursor: null });
+  const snapshot = await completeActiveSnapshot();
+  const commit = createCardActivationCommit(confirmation, snapshot);
+  assert.equal(commit.card.status, "ACTIVE");
+  assert.equal(commit.cards[0], commit.card);
+  assert.equal(commit.balance.cardId, commit.card.id);
+  assert.equal(commit.limits.cardId, commit.card.id);
+  assert.equal(commit.timeline.events[0]?.type, "ACTIVATED");
+  assert.equal(Object.isFrozen(commit), true);
+  assert.equal(Object.isFrozen(commit.cards), true);
+
+  await assert.rejects(async () => createCardActivationCommit(
+    confirmation,
+    await completeActiveSnapshot({ alias: "Cross-generation" }),
+  ), CardActivationPostRefreshError);
+  assert.equal(cardActivationFailureIsAmbiguous(new CardActivationPostRefreshError()), false);
+});
+
+test("confirmed refresh failure commit retains only ACTIVE Card/list and invalidates every associated resource", () => {
+  const verified = active();
+  const confirmation = Object.freeze({ card: verified, cards: Object.freeze([verified]), nextCursor: null });
+  const commit = createCardActivationInvalidatedCommit(confirmation);
+  assert.equal(commit.card.status, "ACTIVE");
+  assert.equal(commit.cards[0], verified);
+  assert.equal(commit.balance, null);
+  assert.equal(commit.limits, null);
+  assert.equal(commit.transactions, null);
+  assert.equal(commit.timeline, null);
+  assert.equal(Object.isFrozen(commit), true);
 });
 
 test("rejects non-PENDING selection before reads and propagates cancellation without a commit", async () => {
