@@ -37,6 +37,7 @@ export type WalletTransferTransportRequest = Readonly<{
   method: "GET" | "POST";
   body?: WalletTransferInput;
   idempotencyKey?: string;
+  signal?: AbortSignal;
 }>;
 
 export type WalletTransferTransport = (
@@ -46,10 +47,13 @@ export type WalletTransferTransport = (
 export type WalletTransferRequestIdentity = Readonly<{
   requestId: number;
   scopeKey: string;
+  sourceAccountId: string;
   sourceAccountVersion: string;
   destinationAccountId: string;
-  amount: string;
+  destinationAccountVersion: string;
+  inputVersion: string;
   idempotencyKey: string;
+  retry: boolean;
 }>;
 
 const accountFields = [
@@ -308,6 +312,20 @@ function accountVersion(account: WalletAccountRecord): string {
   ]);
 }
 
+function transferInputVersion(input: WalletTransferInput): string {
+  return JSON.stringify([
+    input.sourceAccountId,
+    input.destinationAccountId,
+    input.assetCode,
+    input.amount,
+  ]);
+}
+
+function throwIfTransferAborted(signal?: AbortSignal): void {
+  if (signal?.aborted)
+    throw new DOMException("Wallet transfer request cancelled", "AbortError");
+}
+
 function parseAccount(value: unknown): WalletAccountRecord {
   const record = exactDataRecord(value, accountFields, "Wallet transfer account");
   const current = decimalParts(record.currentBalance, "current balance");
@@ -534,12 +552,20 @@ export async function readWalletTransferAccounts(
   transport: WalletTransferTransport,
   session: WalletTransferSession,
   runtimeEnvironment: WalletTransferEnvironment,
+  signal?: AbortSignal,
   now = Date.now(),
 ): Promise<WalletAccountRecord[]> {
-  requireScope(session, runtimeEnvironment, now);
-  return parseWalletTransferAccountsRaw(
-    await transport({ path: WALLET_TRANSFER_ACCOUNTS_PATH, method: "GET" }),
-  );
+  throwIfTransferAborted(signal);
+  const scope = requireScope(session, runtimeEnvironment, now);
+  const raw = await transport({
+    path: WALLET_TRANSFER_ACCOUNTS_PATH,
+    method: "GET",
+    ...(signal ? { signal } : {}),
+  });
+  throwIfTransferAborted(signal);
+  if (walletTransferSessionScope(session, runtimeEnvironment) !== scope)
+    throw new Error("Wallet transfer session expired during the account read");
+  return parseWalletTransferAccountsRaw(raw);
 }
 
 export async function submitWalletTransfer(
@@ -549,9 +575,11 @@ export async function submitWalletTransfer(
   accounts: readonly WalletAccountRecord[],
   input: unknown,
   idempotencyKey: unknown,
+  signal?: AbortSignal,
   now = Date.now(),
 ): Promise<WalletTransferReceipt> {
-  requireScope(session, runtimeEnvironment, now);
+  throwIfTransferAborted(signal);
+  const scope = requireScope(session, runtimeEnvironment, now);
   const normalized = normalizeWalletTransferInput(input, accounts);
   const key = validateWalletTransferIdempotencyKey(idempotencyKey);
   const raw = await transport({
@@ -559,7 +587,11 @@ export async function submitWalletTransfer(
     method: "POST",
     body: normalized,
     idempotencyKey: key,
+    ...(signal ? { signal } : {}),
   });
+  throwIfTransferAborted(signal);
+  if (walletTransferSessionScope(session, runtimeEnvironment) !== scope)
+    throw new Error("Wallet transfer session expired during submission");
   return parseWalletTransferReceiptRaw(raw, normalized);
 }
 
@@ -568,14 +600,20 @@ export async function readWalletTransferStatus(
   session: WalletTransferSession,
   runtimeEnvironment: WalletTransferEnvironment,
   previous: WalletTransferReceipt,
+  signal?: AbortSignal,
   now = Date.now(),
 ): Promise<WalletTransferReceipt> {
-  requireScope(session, runtimeEnvironment, now);
+  throwIfTransferAborted(signal);
+  const scope = requireScope(session, runtimeEnvironment, now);
   const operationId = publicId(previous.id, "Wallet transfer operation id");
   const raw = await transport({
     path: `/v1/wallet/operations/${encodeURIComponent(operationId)}`,
     method: "GET",
+    ...(signal ? { signal } : {}),
   });
+  throwIfTransferAborted(signal);
+  if (walletTransferSessionScope(session, runtimeEnvironment) !== scope)
+    throw new Error("Wallet transfer session expired during confirmation");
   return parseWalletTransferReceiptRaw(raw, previous);
 }
 
@@ -583,18 +621,25 @@ export function createWalletTransferRequestIdentity(
   requestId: number,
   scopeKey: string,
   source: WalletAccountRecord,
+  destination: WalletAccountRecord,
   input: WalletTransferInput,
   idempotencyKey: string,
+  retry = false,
 ): WalletTransferRequestIdentity {
   if (!Number.isSafeInteger(requestId) || requestId < 1)
     throw new Error("Invalid Wallet transfer request generation");
+  if (input.sourceAccountId !== source.id || input.destinationAccountId !== destination.id)
+    throw new Error("Wallet transfer account generation changed");
   return {
     requestId,
     scopeKey,
+    sourceAccountId: source.id,
     sourceAccountVersion: accountVersion(source),
     destinationAccountId: input.destinationAccountId,
-    amount: input.amount,
+    destinationAccountVersion: accountVersion(destination),
+    inputVersion: transferInputVersion(input),
     idempotencyKey: validateWalletTransferIdempotencyKey(idempotencyKey),
+    retry,
   };
 }
 
@@ -604,18 +649,20 @@ export function walletTransferRequestIsCurrent(
   currentScopeKey: string | null,
   accounts: readonly WalletAccountRecord[],
   selectedAccount: WalletAccountRecord | null,
+  currentInput?: WalletTransferInput,
 ): boolean {
+  const destination = accounts.find(account => account.id === request.destinationAccountId);
   return (
     request.requestId === currentRequestId &&
     request.scopeKey === currentScopeKey &&
     selectedAccount !== null &&
+    selectedAccount.id === request.sourceAccountId &&
     accountVersion(selectedAccount) === request.sourceAccountVersion &&
-    accounts.some(
-      (account) =>
-        account.id === request.destinationAccountId &&
-        account.assetCode === selectedAccount.assetCode &&
-        account.status === "ACTIVE",
-    )
+    destination !== undefined &&
+    accountVersion(destination) === request.destinationAccountVersion &&
+    destination.assetCode === selectedAccount.assetCode &&
+    destination.status === "ACTIVE" &&
+    (currentInput === undefined || transferInputVersion(currentInput) === request.inputVersion)
   );
 }
 
@@ -628,14 +675,15 @@ export function walletTransferRetryKey(
 ): string | null {
   if (
     !retry ||
+    retry.retry ||
     retry.destinationAccountId !== input.destinationAccountId ||
-    retry.amount !== input.amount ||
     !walletTransferRequestIsCurrent(
       retry,
       retry.requestId,
       scopeKey,
       accounts,
       selectedAccount,
+      input,
     )
   ) return null;
   return retry.idempotencyKey;

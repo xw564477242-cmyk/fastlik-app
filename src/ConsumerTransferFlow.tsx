@@ -12,6 +12,7 @@ type Props={
  amount:string
  busy:boolean
  retryPending:boolean
+ retryExhausted:boolean
  loading:boolean
  error:string
  receipt:WalletTransferReceipt|null
@@ -46,8 +47,8 @@ export function ConsumerTransferFlow(props:Props){
   <label>Amount
    <input value={props.amount} onChange={event=>props.onAmountChange(event.target.value)} inputMode="decimal" pattern="^[0-9]+(?:\\.[0-9]{1,18})?$" placeholder={props.source?`Amount in ${props.source.assetCode}`:'0.00'} disabled={props.loading||props.busy||props.retryPending} required/>
   </label>
-  <button disabled={!allowed}>{props.busy?'Transferring once…':props.retryPending?'Retry safely with same key':'Transfer once'}</button>
-  <small>{props.retryPending?'Uncertain result · inputs locked · one manual retry reuses the same Idempotency-Key.':'Manual SANDBOX/TEST only · one new UUIDv4 Idempotency-Key · no automatic retries.'}</small>
+  <button disabled={!allowed||props.retryExhausted}>{props.busy?'Transferring once…':props.retryExhausted?'Refresh session to continue':props.retryPending?'Retry safely with same key':'Transfer once'}</button>
+  <small>{props.retryExhausted?'Same-key retry exhausted · no third POST · refresh the exact session before continuing.':props.retryPending?'Uncertain result · inputs locked · one manual retry reuses the same Idempotency-Key.':'Manual SANDBOX/TEST only · one new UUIDv4 Idempotency-Key · no automatic retries · commit only after persisted operation status and complete two-account refresh.'}</small>
   {props.error&&<div className="inline-error">{props.error} · Login remains active; no Provider or internal details are displayed.</div>}
   {props.receipt&&<div className="transfer-receipt">
    <div><span>Transfer receipt</span><b>{props.receipt.status}</b></div>

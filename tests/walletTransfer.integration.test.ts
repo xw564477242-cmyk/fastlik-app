@@ -143,7 +143,7 @@ integration("an uncertain response permits only an exact same-key manual retry",
     amount: "25",
   };
   const key = "123e4567-e89b-42d3-a456-426614174000";
-  const request = createWalletTransferRequestIdentity(1, scope, accounts[0], input, key);
+  const request = createWalletTransferRequestIdentity(1, scope, accounts[0], accounts[1], input, key);
   const calls: WalletTransferTransportRequest[] = [];
   const uncertainTransport = async (transportRequest: WalletTransferTransportRequest) => {
     calls.push(transportRequest);
@@ -176,6 +176,7 @@ integration("a late old-session 401 cannot invalidate a replacement session", ()
     1,
     oldScope,
     accounts[0],
+    accounts[1],
     {
       sourceAccountId: accounts[0].id,
       destinationAccountId: accounts[1].id,
@@ -228,6 +229,7 @@ integration("denies mismatch and expiry before transport and rejects stale compl
     1,
     scope,
     accounts[0],
+    accounts[1],
     {
       sourceAccountId: accounts[0].id,
       destinationAccountId: accounts[1].id,

@@ -26,6 +26,7 @@ import {cardRenewalPostChainFailureIsAmbiguous,createCardRenewalInvalidatedCommi
 import {captureWalletAccountsVersion,walletBalanceSummaryRequestIsCurrent,walletBalanceSummaryRequestWasAborted,walletBalanceSummaryRetainsSnapshotOnFailure} from './walletBalanceSummary'
 import {walletAccountBalanceRequestWasAborted,walletAccountBalanceRetainsSnapshotOnFailure} from './walletAccountBalance'
 import {beginWalletTransferSubmit,createWalletTransferRequestIdentity,normalizeWalletTransferInput,settleWalletTransferSubmit,walletTransferFailureIsAmbiguous,walletTransferRequestIsCurrent,walletTransferRetryKey,walletTransferSessionScope,type WalletTransferRequestIdentity} from './walletTransfer'
+import {createWalletTransferInvalidatedCommit,runWalletTransferPostChain,walletTransferPostChainFailureCause,walletTransferPostChainFailureIsAmbiguous,type WalletTransferInvalidatedCommit} from './walletTransferPostChain'
 import {WALLET_TRANSACTION_STATUSES,WALLET_TRANSACTION_TYPES,createWalletTransactionDetailRequestIdentity,createWalletTransactionHistoryRequestIdentity,normalizeWalletTransactionFilterSelection,walletTransactionDetailRefreshAllowed,walletTransactionDetailRequestIsCurrent,walletTransactionFilterKey,walletTransactionFilterRequestAllowed,walletTransactionFiltersForSelectedAsset,walletTransactionHistoryRequestIsCurrent,walletTransactionRequestWasAborted,type WalletTransactionFilterSelection} from './walletTransactions'
 import {SessionValidationError,createSessionInitializationRequest,runBoundedWalletInitialization,runSessionInitializationModule,sessionFailureRequiresClear,sessionInitializationRequestIsCurrent} from './sessionLifecycle'
 import FxQuotePreview from './FxQuotePreview'
@@ -225,6 +226,7 @@ export default function App(){
  const walletTransferStatusRequestSequence=useRef(0)
  const walletTransferStatusTarget=useRef<string|null>(null)
  const walletTransferSubmitGate=useRef<{activeRequestId:number|null}>({activeRequestId:null})
+ const walletTransferAbortController=useRef<AbortController|null>(null)
  const walletTransferRetryRequest=useRef<WalletTransferRequestIdentity|null>(null)
  const walletTransferStatusInFlight=useRef(false)
  const walletTransferInputGeneration=useRef(0)
@@ -248,6 +250,8 @@ export default function App(){
  const abortWalletOperationDetailRequest=()=>{walletOperationDetailAbortController.current?.abort();walletOperationDetailAbortController.current=null}
  const abortWalletHistoryRequest=()=>{walletHistoryAbortController.current?.abort();walletHistoryAbortController.current=null}
  const abortWalletTransactionDetailRequest=()=>{walletTransactionDetailAbortController.current?.abort();walletTransactionDetailAbortController.current=null}
+ const abortWalletTransferRequest=()=>{walletTransferAbortController.current?.abort();walletTransferAbortController.current=null}
+ useEffect(()=>()=>abortWalletTransferRequest(),[])
  const abortWalletBalanceSummaryRequest=()=>{walletBalanceSummaryAbortController.current?.abort();walletBalanceSummaryAbortController.current=null}
  const abortWalletAccountBalanceRequest=()=>{walletAccountBalanceAbortController.current?.abort();walletAccountBalanceAbortController.current=null}
  const abortCardListRequest=()=>{cardListAbortController.current?.abort();cardListAbortController.current=null}
@@ -283,7 +287,7 @@ export default function App(){
  const replaceWalletBalanceSummary=(summary:WalletBalanceSummary|null)=>setWalletBalanceSummary(summary)
  const clearWalletBalanceSummary=()=>{abortWalletBalanceSummaryRequest();walletBalanceSummaryRequestSequence.current+=1;replaceWalletBalanceSummary(null);setWalletBalanceSummaryLoading(false);setWalletBalanceSummaryError('')}
  const resetTransferInputs=()=>{walletTransferRetryRequest.current=null;walletTransferInputGeneration.current+=1;destinationAccountIdRef.current='';transferAmountRef.current='';setDestinationAccountId('');setTransferAmount('')}
- const invalidateTransferForInputChange=()=>{walletTransferRetryRequest.current=null;walletTransferRequestSequence.current+=1;walletTransferTarget.current=null;walletTransferSubmitGate.current.activeRequestId=null;walletTransferStatusRequestSequence.current+=1;walletTransferStatusTarget.current=null;walletTransferStatusInFlight.current=false;setTransferBusy(false);setTransferReceipt(null);setTransferStatusBusy(false);setTransferStatusRefreshCount(0);setTransferError('')}
+ const invalidateTransferForInputChange=()=>{abortWalletTransferRequest();walletTransferRetryRequest.current=null;walletTransferRequestSequence.current+=1;walletTransferTarget.current=null;walletTransferSubmitGate.current.activeRequestId=null;walletTransferStatusRequestSequence.current+=1;walletTransferStatusTarget.current=null;walletTransferStatusInFlight.current=false;setTransferBusy(false);setTransferReceipt(null);setTransferStatusBusy(false);setTransferStatusRefreshCount(0);setTransferError('')}
  const updateTransferDestination=(value:string)=>{if(walletTransferRetryRequest.current||value===destinationAccountIdRef.current)return;walletTransferInputGeneration.current+=1;destinationAccountIdRef.current=value;invalidateTransferForInputChange();setDestinationAccountId(value)}
  const updateTransferAmount=(value:string)=>{if(walletTransferRetryRequest.current||value===transferAmountRef.current)return;walletTransferInputGeneration.current+=1;transferAmountRef.current=value;invalidateTransferForInputChange();setTransferAmount(value)}
  const clearAcceptedTransferAmount=()=>{walletTransferRetryRequest.current=null;transferAmountRef.current='';walletTransferInputGeneration.current+=1;setTransferAmount('')}
@@ -291,7 +295,7 @@ export default function App(){
  const updateVirtualCardCurrency=(value:string)=>{const next=value.toUpperCase();if(virtualCardCreateInFlight.current&&virtualCardCurrencyRef.current!==next)clearVirtualCardCreate();virtualCardCurrencyRef.current=next;setVirtualCardCurrency(next)}
  const updateVirtualCardAlias=(value:string)=>{if(virtualCardCreateInFlight.current&&virtualCardAliasRef.current!==value)clearVirtualCardCreate();virtualCardAliasRef.current=value;setVirtualCardAlias(value)}
  const setSelectedCard=(card:CardRecord|null)=>{const previous=selectedCardRef.current;const versionChanged=Boolean(previous&&!cardReplacementVersionMatches(captureCardReplacementVersion(previous),card));if(cardReplacementInFlight.current&&versionChanged)clearCardReplacement();if(cardRenewalInFlight.current&&previous&&!cardRenewalVersionMatches(captureCardRenewalVersion(previous),card))clearCardRenewal();if(cardLimitsUpdateInFlight.current&&versionChanged)clearCardLimitsUpdate();if((cardStatusInFlight.current||cardStatusRetryRequest.current||cardStatusConflictRequest.current)&&previous!==card)clearCardStatusAction();selectedCardRef.current=card;setSelectedCardState(card)}
- const invalidateWalletDetail=()=>{abortWalletHistoryRequest();abortWalletTransactionDetailRequest();abortWalletAccountBalanceRequest();abortWalletBalanceSummaryRequest();walletAccountRequestSequence.current+=1;walletAccountTarget.current=null;walletHistoryRequestSequence.current+=1;walletHistoryAssetTarget.current=null;walletHistoryFilterTarget.current=null;walletHistoryCursorTarget.current=null;walletHistoryInFlight.current=false;walletTransactionDetailRequestSequence.current+=1;walletTransactionDetailAssetTarget.current=null;walletTransactionDetailTarget.current=null;walletTransferRequestSequence.current+=1;walletTransferTarget.current=null;walletTransferSubmitGate.current.activeRequestId=null;walletTransferStatusRequestSequence.current+=1;walletTransferStatusTarget.current=null;walletTransferStatusInFlight.current=false;walletBalanceSummaryRequestSequence.current+=1}
+ const invalidateWalletDetail=()=>{abortWalletHistoryRequest();abortWalletTransactionDetailRequest();abortWalletAccountBalanceRequest();abortWalletBalanceSummaryRequest();abortWalletTransferRequest();walletAccountRequestSequence.current+=1;walletAccountTarget.current=null;walletHistoryRequestSequence.current+=1;walletHistoryAssetTarget.current=null;walletHistoryFilterTarget.current=null;walletHistoryCursorTarget.current=null;walletHistoryInFlight.current=false;walletTransactionDetailRequestSequence.current+=1;walletTransactionDetailAssetTarget.current=null;walletTransactionDetailTarget.current=null;walletTransferRequestSequence.current+=1;walletTransferTarget.current=null;walletTransferSubmitGate.current.activeRequestId=null;walletTransferStatusRequestSequence.current+=1;walletTransferStatusTarget.current=null;walletTransferStatusInFlight.current=false;walletBalanceSummaryRequestSequence.current+=1}
  const replaceSelectedWalletTransaction=(transaction:WalletTransactionRecord|null)=>{selectedWalletTransactionRef.current=transaction;setSelectedWalletTransaction(transaction)}
  const resetWalletTransactionDetailRequest=()=>{abortWalletTransactionDetailRequest();walletTransactionDetailRequestSequence.current+=1;walletTransactionDetailAssetTarget.current=null;walletTransactionDetailTarget.current=null;setWalletTransactionDetail(null);setWalletTransactionDetailLoading(false);setWalletTransactionDetailError('')}
  const clearWalletTransactionDetail=()=>{resetWalletTransactionDetailRequest();replaceSelectedWalletTransaction(null)}
@@ -1475,67 +1479,148 @@ export default function App(){
   let input
   try{input=normalizeWalletTransferInput({sourceAccountId:account.id,destinationAccountId:destinationAccountIdRef.current.trim(),assetCode:account.assetCode,amount:transferAmountRef.current},accountsRef.current)}
   catch{setTransferError('Use an active destination account, matching asset, positive amount, and sufficient available balance.');return}
+  const destination=accountsRef.current.find(row=>row.id===input.destinationAccountId)
+  if(!destination){setTransferError(describeWalletTransfer());return}
+  let transactionFilters
+  try{transactionFilters=walletTransactionFiltersForSelectedAsset({type:walletTransactionTypeFilterTarget.current,status:walletTransactionStatusFilterTarget.current},account.assetCode)}
+  catch{setTransferError(describeWalletHistory());return}
+  const transactionFilterKey=walletTransactionFilterKey(transactionFilters)
   const requestId=++walletTransferRequestSequence.current
   if(!beginWalletTransferSubmit(walletTransferSubmitGate.current,requestId))return
   const retryRequest=walletTransferRetryRequest.current
   const retryKey=walletTransferRetryKey(retryRequest,scope,accountsRef.current,account,input)
   if(retryRequest&&!retryKey){settleWalletTransferSubmit(walletTransferSubmitGate.current,requestId);setTransferError('The uncertain transfer no longer matches this session. No new transfer was sent.');return}
   const idempotencyKey=retryKey??crypto.randomUUID()
-  const request=createWalletTransferRequestIdentity(requestId,scope,account,input,idempotencyKey)
+  const request=createWalletTransferRequestIdentity(requestId,scope,account,destination,input,idempotencyKey,Boolean(retryKey))
   const uiRequest=createConsumerTransferUiRequest(walletTransferInputGeneration.current,{sourceAccountId:account.id,destinationAccountId:destinationAccountIdRef.current.trim(),amount:transferAmountRef.current})
+  abortWalletTransferRequest()
+  abortWalletHistoryRequest()
+  abortWalletTransactionDetailRequest()
+  abortWalletAccountBalanceRequest()
+  abortWalletBalanceSummaryRequest()
+  const controller=new AbortController()
+  walletTransferAbortController.current=controller
   walletTransferTarget.current=account.id
   walletTransferStatusRequestSequence.current+=1
   walletTransferStatusTarget.current=null
   walletTransferStatusInFlight.current=false
-  const isCurrent=()=>walletTransferSubmitGate.current.activeRequestId===requestId&&
-   walletTransferSessionScope(activeSession,walletRuntime.environment)===scope&&
-   walletTransferRequestIsCurrent(request,walletTransferRequestSequence.current,walletScope.current,accountsRef.current,selectedAccountRef.current)&&
-   consumerTransferUiRequestIsCurrent(uiRequest,walletTransferInputGeneration.current,walletRequestMounted.current,selectedAccountRef.current?.id??null,destinationAccountIdRef.current,transferAmountRef.current)&&
-   account.id===walletTransferTarget.current&&account.id===walletAccountTarget.current
+  const isCurrent=()=>{
+   let currentInput
+   let currentFilterKey
+   try{
+    currentInput=normalizeWalletTransferInput({sourceAccountId:account.id,destinationAccountId:destinationAccountIdRef.current.trim(),assetCode:account.assetCode,amount:transferAmountRef.current},accountsRef.current)
+    currentFilterKey=walletTransactionFilterKey(walletTransactionFiltersForSelectedAsset({type:walletTransactionTypeFilterTarget.current,status:walletTransactionStatusFilterTarget.current},account.assetCode))
+   }catch{return false}
+   return walletTransferAbortController.current===controller&&sessionRef.current===activeSession&&!controller.signal.aborted&&walletTransferSubmitGate.current.activeRequestId===requestId&&
+    walletTransferSessionScope(activeSession,walletRuntime.environment)===scope&&
+    walletTransferRequestIsCurrent(request,walletTransferRequestSequence.current,walletScope.current,accountsRef.current,selectedAccountRef.current,currentInput)&&
+    consumerTransferUiRequestIsCurrent(uiRequest,walletTransferInputGeneration.current,walletRequestMounted.current,selectedAccountRef.current?.id??null,destinationAccountIdRef.current,transferAmountRef.current)&&
+    transactionFilterKey===currentFilterKey&&account.id===walletTransferTarget.current&&account.id===walletAccountTarget.current
+  }
   setTransferBusy(true)
   setTransferError('')
   setTransferReceipt(null)
   setTransferStatusBusy(false)
   setTransferStatusRefreshCount(0)
-  let receipt:WalletTransferReceipt|null=null
+  let confirmedReceipt:WalletTransferReceipt|null=null
+  let invalidatedCommit:WalletTransferInvalidatedCommit|null=null
   try{
-   receipt=await walletApi.internalTransfer(activeSession,accountsRef.current,input,idempotencyKey)
-   if(!isCurrent())return
+   const outcome=await runWalletTransferPostChain({
+    sourceAccountId:account.id,
+    destinationAccountId:destination.id,
+    assetCode:account.assetCode,
+    submit:signal=>walletApi.internalTransfer(activeSession,accountsRef.current,input,idempotencyKey,signal??controller.signal),
+    confirm:(submitted,signal)=>walletApi.walletTransferStatus(activeSession,submitted,signal??controller.signal),
+    refresh:{
+     accounts:signal=>walletApi.walletAccounts(activeSession,signal??controller.signal),
+     balance:(row,signal)=>walletApi.walletTransferBalance(activeSession,scope,row,signal??controller.signal),
+     transactions:signal=>walletApi.walletTransferTransactions(activeSession,transactionFilters,signal??controller.signal),
+    },
+    isCurrent,
+    signal:controller.signal,
+   })
+   if(!outcome||!isCurrent())return
+   confirmedReceipt=outcome.commit.receipt
+   if(outcome.status==='CONFIRMED_REFRESH_FAILED'){invalidatedCommit=outcome.commit;throw outcome.failure}
+   const commit=outcome.commit
+   controller.abort()
+   settleWalletTransferSubmit(walletTransferSubmitGate.current,requestId)
+   walletTransferAbortController.current=null
    walletTransferRetryRequest.current=null
-   const refreshed=await walletApi.walletAccounts(activeSession)
-   if(!isCurrent())return
-   const refreshedAccount=refreshed.find(row=>row.id===account.id)
-   walletTransferStatusTarget.current=receipt.id
-   setTransferReceipt(receipt)
-   replaceAccounts(refreshed)
-   if(!refreshedAccount){clearAcceptedTransferAmount();settleWalletTransferSubmit(walletTransferSubmitGate.current,requestId);setTransferBusy(false);walletAccountRequestSequence.current+=1;walletAccountTarget.current=null;replaceSelectedAccount(null);clearWalletBalanceSummary();replaceAccountBalance(null);clearWalletTransactions();setTransferError('Transfer accepted, but the source account is no longer available in this session.');return}
-   replaceSelectedAccount(refreshedAccount)
+   setTransferBusy(false)
+   walletTransferStatusTarget.current=commit.receipt.id
+   setTransferReceipt(commit.receipt)
+   replaceAccounts([...commit.accounts])
+   replaceSelectedAccount(commit.sourceAccount)
+   replaceAccountBalance(commit.sourceBalance)
+   walletAccountTarget.current=commit.sourceAccount.id
+   walletHistoryAssetTarget.current=commit.sourceAccount.assetCode
+   walletHistoryFilterTarget.current=commit.transactions.filterKey
+   walletHistoryCursorTarget.current=commit.transactions.nextCursor
+   walletHistoryInFlight.current=false
+   clearWalletTransactionDetail()
+   replaceWalletTransactions(commit.transactions)
+   setWalletLoading(false)
+   setWalletError('')
+   setWalletHistoryLoading(false)
+   setWalletTransactionLoadingMore(false)
+   setWalletHistoryError('')
+   clearWalletBalanceSummary()
+   clearWalletOperations()
    clearAcceptedTransferAmount()
-   await Promise.all([loadWallet(refreshedAccount,scope,activeSession),loadWalletBalanceSummary(refreshed,refreshedAccount,activeSession,scope)])
-   const refreshIsCurrent=walletRequestMounted.current&&walletTransferSessionScope(activeSession,walletRuntime.environment)===scope&&walletScope.current===scope&&walletAccountTarget.current===account.id&&selectedAccountRef.current?.id===refreshedAccount.id
-   if(refreshIsCurrent){settleWalletTransferSubmit(walletTransferSubmitGate.current,requestId);setTransferBusy(false)}
   }catch(value){
    if(!isCurrent())return
-   if(sessionFailureRequiresClear(value)){walletTransferRetryRequest.current=null;handleSessionInvalidation(value);return}
-   if(receipt){walletTransferStatusTarget.current=receipt.id;setTransferReceipt(receipt)}
-   if(!receipt&&walletTransferFailureIsAmbiguous(value))walletTransferRetryRequest.current=request
-   else walletTransferRetryRequest.current=null
-   settleWalletTransferSubmit(walletTransferSubmitGate.current,requestId)
-   setTransferBusy(false)
-   if(receipt)clearAcceptedTransferAmount()
-   setTransferError(receipt?'Transfer accepted, but current balances could not be refreshed.':walletTransferFailureIsAmbiguous(value)?'Transfer result uncertain. Retry once to reuse the same Idempotency-Key safely.':describeWalletTransfer())
+   const cause=walletTransferPostChainFailureCause(value)
+   if(sessionFailureRequiresClear(cause)){walletTransferRetryRequest.current=null;handleSessionInvalidation(cause,sessionRef.current===activeSession);return}
+   if(confirmedReceipt){
+    const commit=invalidatedCommit??createWalletTransferInvalidatedCommit(confirmedReceipt)
+    controller.abort()
+    settleWalletTransferSubmit(walletTransferSubmitGate.current,requestId)
+    walletTransferAbortController.current=null
+    walletTransferRetryRequest.current=null
+    setTransferBusy(false)
+    walletTransferStatusTarget.current=commit.receipt.id
+    replaceAccounts([])
+    replaceSelectedAccount(null)
+    replaceAccountBalance(null)
+    clearWalletTransactions()
+    clearWalletBalanceSummary()
+    clearWalletOperations()
+    setTransferReceipt(commit.receipt)
+    clearAcceptedTransferAmount()
+    setTransferError('Transfer is confirmed, but the complete source, destination and customer transaction refresh failed. Wallet resources were safely cleared.')
+   }else if(walletTransferPostChainFailureIsAmbiguous(value)){
+    controller.abort()
+    settleWalletTransferSubmit(walletTransferSubmitGate.current,requestId)
+    walletTransferAbortController.current=null
+    walletTransferRetryRequest.current=request
+    replaceAccountBalance(null)
+    clearWalletTransactions()
+    clearWalletBalanceSummary()
+    clearWalletOperations()
+    setTransferBusy(false)
+    setTransferError(request.retry?'Transfer remains unconfirmed after the one same-key retry. Refresh the exact session before any new transfer.':'Transfer result is not confirmed. Retry manually once to reuse the exact Idempotency-Key; no automatic POST was sent.')
+   }else{
+    controller.abort()
+    settleWalletTransferSubmit(walletTransferSubmitGate.current,requestId)
+    walletTransferAbortController.current=null
+    walletTransferRetryRequest.current=null
+    setTransferBusy(false)
+    setTransferError(walletTransferFailureIsAmbiguous(cause)?'Transfer result uncertain. Retry once to reuse the same Idempotency-Key safely.':describeWalletTransfer())
+   }
   }finally{
    const current=isCurrent()
    const settled=settleWalletTransferSubmit(walletTransferSubmitGate.current,requestId)
-   if(current&&settled)setTransferBusy(false)
+   if(current&&settled){controller.abort();walletTransferAbortController.current=null;setTransferBusy(false)}
   }
  }
  const refreshTransferStatus=async()=>{if(!session||!selectedAccount||!transferReceipt||walletTransferStatusInFlight.current||transferStatusRefreshCount>=WALLET_TRANSFER_STATUS_REFRESH_LIMIT)return;const scope=walletTransferSessionScope(session,walletRuntime.environment);const accountId=selectedAccount.id;const previousReceipt=transferReceipt;const operationId=previousReceipt.id;if(!scope||scope!==walletScope.current||accountId!==walletAccountTarget.current||operationId!==walletTransferStatusTarget.current){setTransferError(describeWalletTransfer());return}const request={requestId:++walletTransferStatusRequestSequence.current,scopeKey:scope,accountId,operationId};walletTransferStatusTarget.current=operationId;const isCurrent=()=>walletRequestMounted.current&&walletTransferSessionScope(session,walletRuntime.environment)===scope&&walletTransferStatusRequestIsCurrent(request,walletTransferStatusRequestSequence.current,walletScope.current,walletAccountTarget.current,walletTransferStatusTarget.current);walletTransferStatusInFlight.current=true;setTransferStatusBusy(true);setTransferStatusRefreshCount(current=>current+1);setTransferError('');try{const receipt=await walletApi.walletTransferStatus(session,previousReceipt);if(!isCurrent())return;setTransferReceipt(receipt)}catch(value){if(!isCurrent())return;if(sessionFailureRequiresClear(value)){handleSessionInvalidation(value);return}setTransferError(describeWalletTransfer())}finally{if(isCurrent()){walletTransferStatusInFlight.current=false;setTransferStatusBusy(false)}}}
  const transferRetryPending=walletTransferRetryRequest.current!==null
- const refresh=async()=>{if(!session||sessionActionBusy||transferBusy||walletTransferRetryRequest.current)return;abortCardDetailRequest();setSessionActionBusy(true);setError('');try{const current=await walletApi.refresh();setSessionActionBusy(false);setBusy(true);try{await acceptSession(current)}catch(value){if(sessionFailureRequiresClear(value))handleSessionInvalidation(value);else setError(describe(value))}finally{setBusy(false)}}catch(value){if(sessionFailureRequiresClear(value))handleSessionInvalidation(value);else setError(describe(value))}finally{setSessionActionBusy(false)}}
+ const transferRetryExhausted=walletTransferRetryRequest.current?.retry===true
+ const refresh=async()=>{if(!session||sessionActionBusy||transferBusy||(walletTransferRetryRequest.current&&!walletTransferRetryRequest.current.retry))return;abortCardDetailRequest();setSessionActionBusy(true);setError('');try{const current=await walletApi.refresh();setSessionActionBusy(false);setBusy(true);try{await acceptSession(current)}catch(value){if(sessionFailureRequiresClear(value))handleSessionInvalidation(value);else setError(describe(value))}finally{setBusy(false)}}catch(value){if(sessionFailureRequiresClear(value))handleSessionInvalidation(value);else setError(describe(value))}finally{setSessionActionBusy(false)}}
  const logout=async()=>{if(sessionActionBusy||transferBusy||walletTransferRetryRequest.current)return;setSessionActionBusy(true);setError('');clear();try{await walletApi.logout()}catch(value){if(!(value instanceof WalletApiError&&value.status===401))setError(describe(value))}finally{setPassword('');setSessionActionBusy(false)}}
  return <main style={{maxWidth:980,margin:'40px auto',padding:24,fontFamily:'Inter,system-ui'}}>
-  <header><div><h1>FastLink Wallet</h1><p>Environment: <b>{walletRuntime.environment}</b> · Build: <b>{walletRuntime.buildSha}</b></p><p>API: <code>{walletRuntime.apiUrl}</code></p></div>{session&&<div className="session-actions"><button onClick={refresh} disabled={sessionActionBusy||transferBusy||transferRetryPending||cardReplacing||cardRenewing}><RefreshCw/> Refresh session</button><button onClick={logout} disabled={sessionActionBusy||transferBusy||transferRetryPending||cardReplacing||cardRenewing}><LogOut/> Sign out</button></div>}</header>
+  <header><div><h1>FastLink Wallet</h1><p>Environment: <b>{walletRuntime.environment}</b> · Build: <b>{walletRuntime.buildSha}</b></p><p>API: <code>{walletRuntime.apiUrl}</code></p></div>{session&&<div className="session-actions"><button onClick={refresh} disabled={sessionActionBusy||transferBusy||(transferRetryPending&&!transferRetryExhausted)||cardReplacing||cardRenewing}><RefreshCw/> Refresh session</button><button onClick={logout} disabled={sessionActionBusy||transferBusy||transferRetryPending||cardReplacing||cardRenewing}><LogOut/> Sign out</button></div>}</header>
   {!session&&<section className="panel auth-panel"><ShieldCheck/><h2>{mode==='login'?'Sign in to FastLink':'Create your FastLink account'}</h2><p>Authentication is handled by the FastLink Backend using a secure HttpOnly cookie. Browser storage and pasted bearer tokens are disabled.</p><form onSubmit={authenticate}><label>Workspace<input value={tenantId} onChange={event=>setTenantId(event.target.value)} placeholder="Tenant ID or slug" autoComplete="organization" required/></label><label>Email<input type="email" value={email} onChange={event=>setEmail(event.target.value)} placeholder="you@example.com" autoComplete="email" required/></label><label>Password<input type="password" value={password} onChange={event=>setPassword(event.target.value)} placeholder="Minimum 12 characters" autoComplete={mode==='login'?'current-password':'new-password'} minLength={12} required/></label><button disabled={busy||!tenantId.trim()||!email.trim()||password.length<12}>{busy?'Please wait…':mode==='login'?'Sign in':'Register'}</button></form><button className="mode-switch" onClick={()=>{setMode(current=>current==='login'?'register':'login');setError('')}}>{mode==='login'?'New to FastLink? Register':'Already registered? Sign in'}</button></section>}
   {error&&<section className="panel"><h3>API unavailable</h3><p>{error}</p><p>Unavailable · no stale data displayed.</p></section>}
   {session&&<div className="wallet-grid">
@@ -1547,9 +1632,11 @@ export default function App(){
     <div className="panel-row"><h2><Landmark/> Real wallet balances</h2>{selectedAccount&&<button onClick={()=>void reloadWallet()} disabled={busy||walletLoading||transferBusy}><RefreshCw/> Refresh</button>}</div>
     {accounts.length===0?<p>Unavailable · no wallet accounts returned by Backend.</p>:<select value={selectedAccount?.id||''} disabled={transferBusy||transferRetryPending} onChange={event=>{const account=accounts.find(row=>row.id===event.target.value);if(account)void selectWallet(account)}}>{accounts.map(account=><option key={account.id} value={account.id}>{account.assetCode} · {account.availableBalance} · {account.status}</option>)}</select>}
     {walletError&&<p className="inline-error">{walletError} · No unvalidated or cross-account response displayed.</p>}
+    {!selectedAccount&&transferError&&<div className="inline-error">{transferError} · No stale Wallet resource is displayed.</div>}
+    {!selectedAccount&&transferReceipt&&<div className="transfer-receipt"><div><span>Persisted transfer receipt</span><b>{transferReceipt.status}</b></div><p><span>{transferReceipt.amount} {transferReceipt.assetCode} · {transferReceipt.direction}</span><small>Operation {transferReceipt.id}</small><small>Updated {new Date(transferReceipt.updatedAt).toLocaleString()}</small></p></div>}
     {selectedAccount&&<>
      <div className="balance-record"><b>{walletLoading?'Loading…':accountBalance?`${accountBalance.assetCode} ${accountBalance.availableBalance}`:'Unavailable'}</b><small>Persisted Backend balance · Account {selectedAccount.id}</small></div>
-     <ConsumerTransferFlow title="Internal transfer" accounts={accounts} source={selectedAccount} destinationAccountId={destinationAccountId} amount={transferAmount} busy={transferBusy} retryPending={transferRetryPending} loading={busy||walletLoading||!accountBalance} error={transferError} receipt={transferReceipt} statusBusy={transferStatusBusy} statusRefreshCount={transferStatusRefreshCount} statusRefreshLimit={WALLET_TRANSFER_STATUS_REFRESH_LIMIT} onDestinationChange={updateTransferDestination} onAmountChange={updateTransferAmount} onSubmit={transfer} onRefreshStatus={refreshTransferStatus}/>
+     <ConsumerTransferFlow title="Internal transfer" accounts={accounts} source={selectedAccount} destinationAccountId={destinationAccountId} amount={transferAmount} busy={transferBusy} retryPending={transferRetryPending} retryExhausted={transferRetryExhausted} loading={busy||walletLoading||!accountBalance} error={transferError} receipt={transferReceipt} statusBusy={transferStatusBusy} statusRefreshCount={transferStatusRefreshCount} statusRefreshLimit={WALLET_TRANSFER_STATUS_REFRESH_LIMIT} onDestinationChange={updateTransferDestination} onAmountChange={updateTransferAmount} onSubmit={transfer} onRefreshStatus={refreshTransferStatus}/>
      <div className="record-list">
       <h3>Customer Wallet history · {selectedAccount.assetCode}</h3>
       <div className="wallet-history-filters">

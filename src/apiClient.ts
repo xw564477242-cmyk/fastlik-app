@@ -13,7 +13,7 @@ import type {CardStatusOperation,CardStatusTransportRequest} from './cardStatusA
 import {readCardActivationConfirmation} from './cardActivation'
 import {readCardStatusConfirmation} from './cardStatusPostChain'
 import type {WalletAccountRecord,WalletBalanceRecord,WalletTransferReceipt} from './walletData'
-import {readWalletAccountBalance} from './walletAccountBalance'
+import {WALLET_ACCOUNT_BALANCE_MAX_JSON_BYTES,readWalletAccountBalance} from './walletAccountBalance'
 import type {WalletAccountBalanceTransportRequest} from './walletAccountBalance'
 import {readWalletOperationActivity,readWalletOperationDetail} from './walletOperations'
 import type {WalletOperationFilterSelection,WalletOperationPage,WalletOperationRecord,WalletOperationTransportRequest} from './walletOperations'
@@ -32,7 +32,7 @@ import {WALLET_TRANSFER_ACCOUNTS_PATH,WALLET_TRANSFER_ACCOUNT_MAX_JSON_BYTES,WAL
 import type {WalletTransferInput,WalletTransferTransportRequest} from './walletTransfer'
 import {FX_QUOTE_RESPONSE_MAX_JSON_BYTES,readFxQuote} from './fxQuote'
 import type {FxQuoteInput,FxQuoteTransportRequest} from './fxQuote'
-import {readWalletTransactionDetail,readWalletTransactionHistory} from './walletTransactions'
+import {WALLET_TRANSACTION_MAX_JSON_BYTES,readWalletTransactionDetail,readWalletTransactionHistory} from './walletTransactions'
 import type {WalletTransactionFilters,WalletTransactionHistoryState,WalletTransactionRecord,WalletTransactionTransportRequest} from './walletTransactions'
 import {API_REQUEST_DEADLINE_MS} from './requestPolicy'
 import {sessionFailureRequiresClear} from './sessionLifecycle'
@@ -112,10 +112,12 @@ async function request<T>(path:string,method='GET',body?:unknown,idempotencyKey?
  }finally{window.clearTimeout(timeout);externalSignal?.removeEventListener('abort',cancel)}
 }
 
-const walletTransferTransport=({path,method,body,idempotencyKey}:WalletTransferTransportRequest)=>request<string>(path,method,body,idempotencyKey,'text',undefined,path===WALLET_TRANSFER_ACCOUNTS_PATH?WALLET_TRANSFER_ACCOUNT_MAX_JSON_BYTES:WALLET_TRANSFER_RESPONSE_MAX_JSON_BYTES,'caller')
+const walletTransferTransport=({path,method,body,idempotencyKey,signal}:WalletTransferTransportRequest)=>request<string>(path,method,body,idempotencyKey,'text',signal,path===WALLET_TRANSFER_ACCOUNTS_PATH?WALLET_TRANSFER_ACCOUNT_MAX_JSON_BYTES:WALLET_TRANSFER_RESPONSE_MAX_JSON_BYTES,'caller')
 const walletTransactionTransport=({path,method,signal}:WalletTransactionTransportRequest)=>request<string>(path,method,undefined,undefined,'text',signal)
+const walletTransferTransactionTransport=({path,method,signal}:WalletTransactionTransportRequest)=>request<string>(path,method,undefined,undefined,'text',signal,WALLET_TRANSACTION_MAX_JSON_BYTES,'caller')
 const walletBalanceSummaryTransport=({path,method,signal}:WalletBalanceSummaryTransportRequest)=>request<string>(path,method,undefined,undefined,'text',signal)
 const walletAccountBalanceTransport=({path,method,signal}:WalletAccountBalanceTransportRequest)=>request<string>(path,method,undefined,undefined,'text',signal)
+const walletTransferAccountBalanceTransport=({path,method,signal}:WalletAccountBalanceTransportRequest)=>request<string>(path,method,undefined,undefined,'text',signal,WALLET_ACCOUNT_BALANCE_MAX_JSON_BYTES,'caller')
 const cardListTransport=({path,method,signal}:CardListTransportRequest)=>request<string>(path,method,undefined,undefined,'text',signal,CARD_LIST_MAX_JSON_BYTES)
 const walletOperationTransport=({path,method,signal}:WalletOperationTransportRequest)=>request<unknown>(path,method,undefined,undefined,'json',signal)
 const cardTransactionDetailTransport=({path,method,signal}:CardTransactionDetailTransportRequest)=>request<unknown>(path,method,undefined,undefined,'json',signal)
@@ -137,15 +139,17 @@ export const walletApi={
  refresh:()=>request<WalletSession>('/v1/auth/refresh','POST'),
  logout:()=>request<void>('/v1/auth/logout','POST'),
  session:()=>request<WalletSession>('/v1/session'),
- walletAccounts:async(session:WalletSession):Promise<WalletAccountRecord[]>=>readWalletTransferAccounts(walletTransferTransport,session,walletRuntime.environment),
+ walletAccounts:async(session:WalletSession,signal?:AbortSignal):Promise<WalletAccountRecord[]>=>readWalletTransferAccounts(walletTransferTransport,session,walletRuntime.environment,signal),
  walletBalanceSummary:async(session:WalletSession,scopeKey:string,signal?:AbortSignal):Promise<WalletBalanceSummary>=>readWalletBalanceSummary(walletBalanceSummaryTransport,session,walletRuntime.environment,scopeKey,signal),
  walletBalance:async(session:WalletSession,scopeKey:string,account:WalletAccountRecord,signal?:AbortSignal):Promise<WalletBalanceRecord>=>readWalletAccountBalance(walletAccountBalanceTransport,session,walletRuntime.environment,scopeKey,account,signal),
  walletTransactions:async(session:WalletSession,filters:WalletTransactionFilters,previous:WalletTransactionHistoryState|null=null,signal?:AbortSignal):Promise<WalletTransactionHistoryState>=>readWalletTransactionHistory(walletTransactionTransport,session,walletRuntime.environment,filters,previous,signal),
  walletOperations:async(session:WalletSession,scopeKey:string,filters:WalletOperationFilterSelection,cursor:string|undefined,signal:AbortSignal):Promise<WalletOperationPage>=>readWalletOperationActivity(walletOperationTransport,session,walletRuntime.environment,scopeKey,filters,cursor,signal),
  walletOperationDetail:async(session:WalletSession,scopeKey:string,selected:WalletOperationRecord,signal:AbortSignal):Promise<WalletOperationRecord>=>readWalletOperationDetail(walletOperationTransport,session,walletRuntime.environment,scopeKey,selected,signal),
  walletTransactionDetail:async(session:WalletSession,selected:WalletTransactionRecord,signal?:AbortSignal):Promise<WalletTransactionRecord>=>readWalletTransactionDetail(walletTransactionTransport,session,walletRuntime.environment,selected,signal),
- internalTransfer:async(session:WalletSession,accounts:readonly WalletAccountRecord[],input:InternalTransferInput,idempotencyKey:string):Promise<WalletTransferReceipt>=>submitWalletTransfer(walletTransferTransport,session,walletRuntime.environment,accounts,input,idempotencyKey),
- walletTransferStatus:async(session:WalletSession,previous:WalletTransferReceipt):Promise<WalletTransferReceipt>=>readWalletTransferStatus(walletTransferTransport,session,walletRuntime.environment,previous),
+ internalTransfer:async(session:WalletSession,accounts:readonly WalletAccountRecord[],input:InternalTransferInput,idempotencyKey:string,signal?:AbortSignal):Promise<WalletTransferReceipt>=>submitWalletTransfer(walletTransferTransport,session,walletRuntime.environment,accounts,input,idempotencyKey,signal),
+ walletTransferStatus:async(session:WalletSession,previous:WalletTransferReceipt,signal?:AbortSignal):Promise<WalletTransferReceipt>=>readWalletTransferStatus(walletTransferTransport,session,walletRuntime.environment,previous,signal),
+ walletTransferBalance:async(session:WalletSession,scopeKey:string,account:WalletAccountRecord,signal?:AbortSignal):Promise<WalletBalanceRecord>=>readWalletAccountBalance(walletTransferAccountBalanceTransport,session,walletRuntime.environment,scopeKey,account,signal),
+ walletTransferTransactions:async(session:WalletSession,filters:WalletTransactionFilters,signal?:AbortSignal):Promise<WalletTransactionHistoryState>=>readWalletTransactionHistory(walletTransferTransactionTransport,session,walletRuntime.environment,filters,null,signal),
  fxQuote:async(session:WalletSession,input:FxQuoteInput,signal:AbortSignal)=>readFxQuote(fxQuoteTransport,session,walletRuntime.environment,input,signal),
  cards:async(session:WalletSession,scopeKey:string,cursor:string|null=null,previousCards:readonly CardRecord[]=[],signal?:AbortSignal):Promise<CardPage>=>readCardListPage(cardListTransport,session,walletRuntime.environment,scopeKey,cursor,previousCards,signal),
  card:async(id:string,signal?:AbortSignal)=>parseCardRecord(await request<unknown>(`/v1/cards/${encodeURIComponent(id)}`,'GET',undefined,undefined,'json',signal)),
