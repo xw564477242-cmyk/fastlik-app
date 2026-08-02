@@ -3,6 +3,7 @@ import test from "node:test";
 import {
   KYC_STATUS_PATH,
   createKycStatusRequestIdentity,
+  kycStatusFailureCanInvalidateSession,
   kycStatusRequestIsCurrent,
   parseKycStatus,
   parseKycStatusJson,
@@ -136,4 +137,15 @@ test("a 408, 5xx or contract failure cannot replace a retained same-scope snapsh
   }
   snapshot = parseKycStatus({ status: "APPROVED", reviewedAt: "2026-08-02T00:30:00Z" });
   assert.equal(snapshot.status, "APPROVED");
+});
+
+test("only a current non-aborted explicit 401 may invalidate the session", () => {
+  const controller = new AbortController();
+  const explicit401 = Object.create(null) as Record<string, unknown>;
+  Object.defineProperty(explicit401, "status", { value: 401, enumerable: true });
+  assert.equal(kycStatusFailureCanInvalidateSession(explicit401, true, controller.signal), true);
+  assert.equal(kycStatusFailureCanInvalidateSession(explicit401, false, controller.signal), false);
+  assert.equal(kycStatusFailureCanInvalidateSession({ status: 403 }, true, controller.signal), false);
+  controller.abort();
+  assert.equal(kycStatusFailureCanInvalidateSession(explicit401, true, controller.signal), false);
 });

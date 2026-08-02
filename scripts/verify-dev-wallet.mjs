@@ -27,6 +27,9 @@ const walletOperations = readFileSync(join(root, "src/walletOperations.ts"), "ut
 const virtualCardCreate = readFileSync(join(root, "src/virtualCardCreate.ts"), "utf8");
 const cardReplacement = readFileSync(join(root, "src/cardReplacement.ts"), "utf8");
 const cardRenewal = readFileSync(join(root, "src/cardRenewal.ts"), "utf8");
+const kycStatus = readFileSync(join(root, "src/kycStatus.ts"), "utf8");
+const kycStatusPanel = readFileSync(join(root, "src/KycStatusPanel.tsx"), "utf8");
+const kycStatusTests = readFileSync(join(root, "tests/kycStatus.mounted.integration.test.ts"), "utf8");
 const index = readFileSync(join(root, "index.html"), "utf8");
 const vite = readFileSync(join(root, "vite.config.ts"), "utf8");
 const runtimeTemplate = readFileSync(join(root, "runtime-config.template.js"), "utf8");
@@ -54,6 +57,10 @@ assert(entrypoint.includes("SANDBOX Wallet must use the same-origin /api proxy")
 assert(dockerfile.includes("/docker-entrypoint.d/40-fastlink-runtime.sh"), "runtime generation must execute before nginx starts");
 assert(apiClient.includes("credentials:'include'"), "Wallet API must include Cookie credentials");
 assert(apiClient.includes("sessionFailureRequiresClear(error)") && apiClient.includes("fastlink:session-invalid"), "Only explicit authentication failures may broadcast global session invalidation");
+assert(kycStatus.includes("kycStatusFailureCanInvalidateSession") && kycStatus.includes('status.value === 401'), "KYC session invalidation must require an explicit own-data 401");
+assert(kycStatusPanel.includes("kycStatusFailureCanInvalidateSession(value, current, controller.signal)") && kycStatusPanel.includes('fastlink:session-invalid'), "Only a current non-aborted KYC 401 may clear the snapshot and join global session invalidation");
+assert(kycStatusPanel.includes("setSnapshot(null)") && kycStatusPanel.includes("!controller.signal.aborted"), "KYC current 401 and stale completion handling must prevent old state leakage");
+assert(kycStatusTests.includes("current explicit 401") && kycStatusTests.includes("stale 401") && kycStatusTests.includes("late 401, error and finally") && kycStatusTests.includes("sessionInvalid: 0"), "KYC mounted tests must prove current 401 handling and zero stale writes");
 assert(sessionLifecycle.includes("error?.status === 401") && sessionLifecycle.includes("SESSION_INVALIDATION_MESSAGE"), "Session invalidation must remain restricted to explicit authentication failure evidence");
 assert(app.includes("setSession(current)") && app.includes("runSessionInitializationModule"), "A validated session must be committed before independent business initialization modules settle");
 assert(app.includes("sessionInitializationRequestIsCurrent") && app.includes("sessionInitializationSequence.current+=1"), "Late initialization work must be generation and scope bound");

@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import {
   createKycStatusRequestIdentity,
+  kycStatusFailureCanInvalidateSession,
   kycStatusRequestIsCurrent,
   kycStatusRequestWasAborted,
   readKycStatus,
@@ -77,6 +78,7 @@ export function KycStatusPanel({ session, runtimeEnvironment }: Props) {
     const request = createKycStatusRequestIdentity(++requestSequence.current, expectedScope);
     const isCurrent = () =>
       controllerRef.current === controller &&
+      !controller.signal.aborted &&
       walletTransferSessionScope(sessionRef.current, runtimeEnvironment) === expectedScope &&
       kycStatusRequestIsCurrent(
         request,
@@ -97,8 +99,19 @@ export function KycStatusPanel({ session, runtimeEnvironment }: Props) {
       );
       if (isCurrent()) setSnapshot(Object.freeze({ scopeKey: expectedScope, record }));
     } catch (value) {
-      if (isCurrent() && !kycStatusRequestWasAborted(value))
+      const current = isCurrent();
+      if (current && !kycStatusRequestWasAborted(value)) {
+        if (kycStatusFailureCanInvalidateSession(value, current, controller.signal)) {
+          controllerRef.current = null;
+          inFlightRef.current = false;
+          setSnapshot(null);
+          setRefreshing(false);
+          setError("");
+          window.dispatchEvent(new CustomEvent("fastlink:session-invalid", { detail: value }));
+          return;
+        }
         setError("KYC status is temporarily unavailable for this session.");
+      }
     } finally {
       if (isCurrent()) {
         controllerRef.current = null;

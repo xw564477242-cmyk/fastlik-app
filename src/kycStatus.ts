@@ -161,6 +161,16 @@ export function kycStatusRequestWasAborted(value: unknown): boolean {
   return value instanceof DOMException && value.name === "AbortError";
 }
 
+export function kycStatusFailureCanInvalidateSession(
+  value: unknown,
+  isCurrent: boolean,
+  signal: AbortSignal,
+): boolean {
+  if (!isCurrent || signal.aborted || !value || typeof value !== "object") return false;
+  const status = Object.getOwnPropertyDescriptor(value, "status");
+  return Boolean(status && "value" in status && status.value === 401);
+}
+
 export async function readKycStatus(
   transport: KycStatusTransport,
   session: WalletTransferSession,
