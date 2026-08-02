@@ -11,6 +11,7 @@ import type {CardLimitsUpdateInput,CardLimitsUpdateTransportRequest} from './car
 import {submitCardStatusAction} from './cardStatusAction'
 import type {CardStatusOperation,CardStatusTransportRequest} from './cardStatusAction'
 import {readCardActivationConfirmation} from './cardActivation'
+import {readCardStatusConfirmation} from './cardStatusPostChain'
 import type {WalletAccountRecord,WalletBalanceRecord,WalletTransferReceipt} from './walletData'
 import {readWalletAccountBalance} from './walletAccountBalance'
 import type {WalletAccountBalanceTransportRequest} from './walletAccountBalance'
@@ -158,4 +159,8 @@ export const walletApi={
   card:async(id,readSignal)=>parseCardRecordRaw(await request<string>(`/v1/cards/${encodeURIComponent(id)}`,'GET',undefined,undefined,'text',readSignal,CARD_LIST_MAX_JSON_BYTES,'caller')),
   cards:(cursor,previousCards,readSignal)=>readCardListPage(cardActivationListTransport,session,walletRuntime.environment,scopeKey,cursor,previousCards,readSignal),
  },card,signal),
+ confirmCardStatus:async(session:WalletSession,scopeKey:string,selected:import('./cardList').CardRecord,submitted:import('./cardList').CardRecord,operation:Extract<CardStatusOperation,'freeze'|'unfreeze'>,signal?:AbortSignal)=>readCardStatusConfirmation({
+  card:async(id,readSignal)=>parseCardRecordRaw(await request<string>(`/v1/cards/${encodeURIComponent(id)}`,'GET',undefined,undefined,'text',readSignal,CARD_LIST_MAX_JSON_BYTES,'caller')),
+  cards:(cursor,previousCards,readSignal)=>readCardListPage(cardActivationListTransport,session,walletRuntime.environment,scopeKey,cursor,previousCards,readSignal),
+ },selected,submitted,operation,signal),
 }
