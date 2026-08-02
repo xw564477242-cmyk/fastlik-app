@@ -64,15 +64,18 @@ mounted(`Card replacement exact mounted consumer (${environment ?? "ENVIRONMENT_
   const scope = cardReplacementSessionScope(activeSession, runtime, now);
   if (!scope) throw new Error("mounted scope required");
   const calls: unknown[] = [];
+  const controller = new AbortController();
   const replacement = await submitCardReplacement(
     async request => { calls.push(request); return replacementResponse(); },
     activeSession, runtime, scope, oldCard().id, oldCard(), { reason: "DAMAGED" }, keyA, now,
+    controller.signal,
   );
   assert.deepEqual(calls, [{
     path: "/v1/cards/card%3Amounted.old/replace",
     method: "POST",
     body: { reason: "DAMAGED" },
     idempotencyKey: keyA,
+    signal: controller.signal,
   }]);
   assert.deepEqual(Object.keys(replacement).sort(), [
     "alias", "capabilities", "createdAt", "currency", "expiryMonth", "expiryYear", "id", "last4", "status", "type",
