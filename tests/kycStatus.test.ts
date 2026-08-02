@@ -4,6 +4,7 @@ import {
   KYC_STATUS_PATH,
   createKycStatusRequestIdentity,
   kycStatusFailureCanInvalidateSession,
+  kycStatusFailureClearsSnapshot,
   kycStatusRequestIsCurrent,
   parseKycStatus,
   parseKycStatusJson,
@@ -93,11 +94,13 @@ test("drops late results after session, tenant, customer, environment, generatio
   const active = session();
   const scope = walletTransferSessionScope(active, "SANDBOX", now);
   assert.ok(scope);
-  const request = createKycStatusRequestIdentity(7, scope);
-  assert.equal(kycStatusRequestIsCurrent(request, 7, scope, true), true);
-  assert.equal(kycStatusRequestIsCurrent(request, 8, scope, true), false);
-  assert.equal(kycStatusRequestIsCurrent(request, 7, `${scope}:changed`, true), false);
-  assert.equal(kycStatusRequestIsCurrent(request, 7, scope, false), false);
+  const request = createKycStatusRequestIdentity(7, scope, 3);
+  assert.equal(kycStatusRequestIsCurrent(request, 7, scope, 3, true), true);
+  assert.equal(kycStatusRequestIsCurrent(request, 8, scope, 3, true), false);
+  assert.equal(kycStatusRequestIsCurrent(request, 7, `${scope}:changed`, 3, true), false);
+  assert.equal(kycStatusRequestIsCurrent(request, 7, scope, 4, true), false);
+  assert.equal(kycStatusRequestIsCurrent(request, 7, scope, 3, false), false);
+  assert.throws(() => createKycStatusRequestIdentity(8, scope, 0), /generation/);
   for (const changed of [
     { ...active, actorId: "actor-other" },
     { ...active, tenantId: "tenant-other" },
@@ -146,6 +149,44 @@ test("only a current non-aborted explicit 401 may invalidate the session", () =>
   assert.equal(kycStatusFailureCanInvalidateSession(explicit401, true, controller.signal), true);
   assert.equal(kycStatusFailureCanInvalidateSession(explicit401, false, controller.signal), false);
   assert.equal(kycStatusFailureCanInvalidateSession({ status: 403 }, true, controller.signal), false);
+  for (const status of [401, 403, 404])
+    assert.equal(kycStatusFailureClearsSnapshot({ status }, true, controller.signal), true);
+  for (const status of [0, 400, 408, 409, 429, 500, 502, 503, 504])
+    assert.equal(kycStatusFailureClearsSnapshot({ status }, true, controller.signal), false);
+  assert.equal(kycStatusFailureClearsSnapshot({ status: 404 }, false, controller.signal), false);
+
+  let getterCalls = 0;
+  const hostile = {};
+  Object.defineProperty(hostile, "status", { get() { getterCalls += 1; return 401; } });
+  assert.equal(kycStatusFailureCanInvalidateSession(hostile, true, controller.signal), false);
+  assert.equal(kycStatusFailureClearsSnapshot(hostile, true, controller.signal), false);
+  assert.equal(getterCalls, 0);
   controller.abort();
   assert.equal(kycStatusFailureCanInvalidateSession(explicit401, true, controller.signal), false);
+  assert.equal(kycStatusFailureClearsSnapshot(explicit401, true, controller.signal), false);
+});
+
+test("pre-cancel and cancellation after transport both reject without accepting a result", async () => {
+  const active = session();
+  const scope = walletTransferSessionScope(active, "SANDBOX", now);
+  assert.ok(scope);
+  const before = new AbortController();
+  before.abort();
+  let calls = 0;
+  await assert.rejects(
+    readKycStatus(async () => { calls += 1; return { status: "PENDING", reviewedAt: null }; }, active, "SANDBOX", scope, before.signal, () => now),
+    value => value instanceof DOMException && value.name === "AbortError",
+  );
+  assert.equal(calls, 0);
+
+  const after = new AbortController();
+  await assert.rejects(
+    readKycStatus(async () => {
+      calls += 1;
+      after.abort();
+      return { status: "APPROVED", reviewedAt: "2026-08-02T00:30:00Z" };
+    }, active, "SANDBOX", scope, after.signal, () => now),
+    value => value instanceof DOMException && value.name === "AbortError",
+  );
+  assert.equal(calls, 1);
 });

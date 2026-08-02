@@ -29,6 +29,7 @@ export type KycStatusTransport = (
 export type KycStatusRequestIdentity = Readonly<{
   requestId: number;
   scopeKey: string;
+  sessionGeneration: number;
 }>;
 
 export class KycStatusError extends Error {
@@ -136,24 +137,29 @@ export function parseKycStatus(value: unknown): KycStatusRecord {
 export function createKycStatusRequestIdentity(
   requestId: number,
   scopeKey: string,
+  sessionGeneration: number,
 ): KycStatusRequestIdentity {
   if (!Number.isSafeInteger(requestId) || requestId < 1)
     throw new KycStatusError("Invalid KYC status request id");
   if (typeof scopeKey !== "string" || scopeKey.length === 0 || scopeKey.length > 4_096)
     throw new KycStatusError("Invalid KYC status scope");
-  return Object.freeze({ requestId, scopeKey });
+  if (!Number.isSafeInteger(sessionGeneration) || sessionGeneration < 1)
+    throw new KycStatusError("Invalid KYC status session generation");
+  return Object.freeze({ requestId, scopeKey, sessionGeneration });
 }
 
 export function kycStatusRequestIsCurrent(
   request: KycStatusRequestIdentity,
   currentRequestId: number,
   currentScopeKey: string | null,
+  currentSessionGeneration: number,
   mounted: boolean,
 ): boolean {
   return (
     mounted &&
     request.requestId === currentRequestId &&
-    request.scopeKey === currentScopeKey
+    request.scopeKey === currentScopeKey &&
+    request.sessionGeneration === currentSessionGeneration
   );
 }
 
@@ -161,14 +167,38 @@ export function kycStatusRequestWasAborted(value: unknown): boolean {
   return value instanceof DOMException && value.name === "AbortError";
 }
 
+function kycStatusFailureStatus(value: unknown): number | null {
+  if (!value || typeof value !== "object") return null;
+  try {
+    const status = Object.getOwnPropertyDescriptor(value, "status");
+    return status && "value" in status && typeof status.value === "number"
+      ? status.value
+      : null;
+  } catch {
+    return null;
+  }
+}
+
+export function kycStatusFailureClearsSnapshot(
+  value: unknown,
+  isCurrent: boolean,
+  signal: AbortSignal,
+): boolean {
+  if (!isCurrent || signal.aborted) return false;
+  const status = kycStatusFailureStatus(value);
+  return status === 401 || status === 403 || status === 404;
+}
+
 export function kycStatusFailureCanInvalidateSession(
   value: unknown,
   isCurrent: boolean,
   signal: AbortSignal,
 ): boolean {
-  if (!isCurrent || signal.aborted || !value || typeof value !== "object") return false;
-  const status = Object.getOwnPropertyDescriptor(value, "status");
-  return Boolean(status && "value" in status && status.value === 401);
+  return isCurrent && !signal.aborted && kycStatusFailureStatus(value) === 401;
+}
+
+function throwIfKycStatusRequestAborted(signal: AbortSignal): void {
+  if (signal.aborted) throw new DOMException("KYC status request cancelled", "AbortError");
 }
 
 export async function readKycStatus(
@@ -181,12 +211,14 @@ export async function readKycStatus(
 ): Promise<KycStatusRecord> {
   if (walletTransferSessionScope(session, runtimeEnvironment, now()) !== expectedScopeKey)
     throw new KycStatusError("KYC status is unavailable for this session");
+  throwIfKycStatusRequestAborted(signal);
   const value = await transport({
     path: KYC_STATUS_PATH,
     method: "GET",
     credentials: "include",
     signal,
   });
+  throwIfKycStatusRequestAborted(signal);
   if (walletTransferSessionScope(session, runtimeEnvironment, now()) !== expectedScopeKey)
     throw new KycStatusError("KYC status session changed before completion");
   return parseKycStatus(value);
