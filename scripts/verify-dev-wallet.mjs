@@ -107,7 +107,7 @@ assert(app.includes("walletRequestMounted.current&&") && app.includes("cardStatu
 assert(app.includes("Manual SANDBOX/TEST action · one bodyless POST per click · no automatic retries."), "Card status UI must state its manual non-production no-retry boundary");
 assert(apiClient.includes("internalTransfer:async") && apiClient.includes("Promise<WalletTransferReceipt>"), "Internal transfer must expose only the typed public receipt");
 assert(apiClient.includes("submitWalletTransfer(walletTransferTransport,session,walletRuntime.environment,accounts,input,idempotencyKey)"), "Transfer responses must pass through the bounded exact consumer");
-assert(app.includes("const idempotencyKey=crypto.randomUUID()") && app.includes("const request=createWalletTransferRequestIdentity(requestId,scope,account,input,idempotencyKey)"), "Each user transfer submission must generate one caller-owned idempotency key");
+assert(app.includes("const idempotencyKey=retryKey??crypto.randomUUID()") && app.includes("const request=createWalletTransferRequestIdentity(requestId,scope,account,input,idempotencyKey)"), "Each new transfer must generate one caller-owned idempotency key while an exact ambiguous retry reuses its original key");
 assert(apiClient.includes("walletTransferStatus:async"), "Wallet must consume the existing safe operation status endpoint");
 assert(walletTransfer.includes("WALLET_TRANSFER_ACCOUNT_MAX_JSON_BYTES = 65_536") && walletTransfer.includes("WALLET_TRANSFER_RESPONSE_MAX_JSON_BYTES = 16_384"), "Wallet transfer raw JSON responses must remain bounded");
 assert(walletTransfer.includes("walletTransferSessionScope") && walletTransfer.includes("session.expiresAt"), "Wallet transfer scope must bind identity, environment, and session expiry");

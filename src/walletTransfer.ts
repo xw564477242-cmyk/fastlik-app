@@ -395,7 +395,12 @@ export function validateWalletTransferIdempotencyKey(value: unknown): string {
 
 export function walletTransferFailureIsAmbiguous(value: unknown): boolean {
   if (!value || typeof value !== "object") return false;
-  const descriptor = Object.getOwnPropertyDescriptor(value, "status");
+  let descriptor: PropertyDescriptor | undefined;
+  try {
+    descriptor = Object.getOwnPropertyDescriptor(value, "status");
+  } catch {
+    return false;
+  }
   if (!descriptor || !("value" in descriptor) || typeof descriptor.value !== "number")
     return false;
   return descriptor.value === 0 || descriptor.value === 408 ||

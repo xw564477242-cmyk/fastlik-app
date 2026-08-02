@@ -267,6 +267,12 @@ test("classifies only network, timeout and 5xx transfer failures as ambiguous wi
   const accessor = Object.defineProperty({}, "status", { get() { reads += 1; return 500; } });
   assert.equal(walletTransferFailureIsAmbiguous(accessor), false);
   assert.equal(reads, 0);
+  const trapped = new Proxy({}, {
+    getOwnPropertyDescriptor() {
+      throw new Error("untrusted proxy trap");
+    },
+  });
+  assert.equal(walletTransferFailureIsAmbiguous(trapped), false);
 });
 
 test("accepts only the exact bounded public receipt and rejects internal fields", () => {
