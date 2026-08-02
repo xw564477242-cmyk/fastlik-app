@@ -2,11 +2,15 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import {
   CARD_LIST_PAGE_SIZE,
+  CARD_LIST_MAX_JSON_BYTES,
+  cardListRequestIsCurrent,
   cardRequestIsCurrent,
   cardStatusActionDecision,
   cardListPath,
+  createCardListRequestIdentity,
   mergeCardPages,
   parseCardPage,
+  parseCardPageRaw,
   parseCardRecord,
   type CardRecord,
 } from "../src/cardList.ts";
@@ -31,19 +35,29 @@ const rawCard = (id: string): Record<string, unknown> => ({
   },
 });
 
+const cursor = (value: string): string => Buffer.from(value).toString("base64url");
+
+const fullPage = (): Record<string, unknown>[] =>
+  Array.from({ length: CARD_LIST_PAGE_SIZE }, (_, index) => ({
+    ...rawCard(`card-${String(CARD_LIST_PAGE_SIZE - index).padStart(2, "0")}`),
+    createdAt: new Date(Date.parse("2026-07-31T00:00:00.000Z") - index * 1_000).toISOString(),
+  }));
+
 test("builds the canonical bounded card list request", () => {
   assert.equal(CARD_LIST_PAGE_SIZE, 20);
   assert.equal(cardListPath(), "/v1/cards?limit=20");
-  assert.equal(cardListPath("opaque cursor/+"), "/v1/cards?limit=20&cursor=opaque+cursor%2F%2B");
+  const next = cursor("opaque-cursor");
+  assert.equal(cardListPath(next), `/v1/cards?limit=20&cursor=${next}`);
+  assert.throws(() => cardListPath("opaque cursor/+"), /cursor/);
 });
 
-test("normalizes a card page and exposes only public fields", () => {
+test("normalizes an exact public card page", () => {
   const page = parseCardPage({
-    cards: [{ ...rawCard("card-1"), providerPublicToken: "must-not-leak", pan: "4111111111111111" }],
-    nextCursor: "next-page",
+    cards: [rawCard("card-1")],
+    nextCursor: null,
   });
 
-  assert.equal(page.nextCursor, "next-page");
+  assert.equal(page.nextCursor, null);
   assert.deepEqual(Object.keys(page.cards[0]).sort(), [
     "alias",
     "availableBalanceMinor",
@@ -57,22 +71,50 @@ test("normalizes a card page and exposes only public fields", () => {
     "status",
     "type",
   ]);
-  assert.equal("providerPublicToken" in page.cards[0], false);
-  assert.equal("pan" in page.cards[0], false);
 });
 
 test("accepts an empty terminal page", () => {
   assert.deepEqual(parseCardPage({ cards: [], nextCursor: null }), { cards: [], nextCursor: null });
 });
 
-test("fails safely for malformed records and cursors", () => {
+test("fails closed for extra, malformed, duplicated, unordered, or oversized data", () => {
   assert.throws(() => parseCardPage([]), /Invalid card page/);
   assert.throws(() => parseCardPage({ cards: [rawCard("card-1")], nextCursor: "" }), /cursor/);
+  assert.throws(
+    () => parseCardPage({ cards: [{ ...rawCard("card-1"), pan: "4111111111111111" }], nextCursor: null }),
+    /fields/,
+  );
+  assert.throws(
+    () => parseCardPage({ cards: [rawCard("card-1"), rawCard("card-1")], nextCursor: null }),
+    /Duplicate card id/,
+  );
+  assert.throws(
+    () => parseCardPage({ cards: [rawCard("card-1"), rawCard("card-2")], nextCursor: null }),
+    /monotonic/,
+  );
+  assert.throws(
+    () => parseCardPage({ cards: [rawCard("card-1")], nextCursor: cursor("next") }),
+    /full page/,
+  );
   assert.throws(() => parseCardRecord({ ...rawCard("card-1"), last4: "4111111111111111" }), /last4/);
   assert.throws(
     () => parseCardRecord({ ...rawCard("card-1"), availableBalanceMinor: 100 }),
     /balance/,
   );
+  assert.throws(
+    () => parseCardPageRaw('{"cards":[],"cards":[],"nextCursor":null}'),
+    /Duplicate Card list JSON object key/,
+  );
+  assert.throws(
+    () => parseCardPageRaw(`{"cards":[],"nextCursor":null,"padding":"${"x".repeat(CARD_LIST_MAX_JSON_BYTES)}"}`),
+    /exceeds the consumer limit/,
+  );
+});
+
+test("accepts a full ordered page only with a canonical bounded cursor", () => {
+  const page = parseCardPage({ cards: fullPage(), nextCursor: cursor("next-page") });
+  assert.equal(page.cards.length, CARD_LIST_PAGE_SIZE);
+  assert.equal(page.nextCursor, cursor("next-page"));
 });
 
 test("appends pages without duplicating a card id", () => {
@@ -100,6 +142,15 @@ test("rejects success, error and completion work after the session scope changes
 
   assert.equal(cardRequestIsCurrent(oldSessionRequest, 20, "scope-new", "card-a"), false);
   assert.equal(cardRequestIsCurrent(oldSessionRequest, 20, "scope-old", "card-a"), true);
+});
+
+test("rejects late Card list work after cursor, scope, generation, or mount changes", () => {
+  const request = createCardListRequestIdentity(7, "scope-a", cursor("page-2"));
+  assert.equal(cardListRequestIsCurrent(request, 7, "scope-a", cursor("page-2"), true), true);
+  assert.equal(cardListRequestIsCurrent(request, 8, "scope-a", cursor("page-2"), true), false);
+  assert.equal(cardListRequestIsCurrent(request, 7, "scope-b", cursor("page-2"), true), false);
+  assert.equal(cardListRequestIsCurrent(request, 7, "scope-a", cursor("page-3"), true), false);
+  assert.equal(cardListRequestIsCurrent(request, 7, "scope-a", cursor("page-2"), false), false);
 });
 
 test("authorizes only the capability matching the current card status", () => {

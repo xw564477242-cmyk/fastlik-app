@@ -1,4 +1,5 @@
-import {cardListPath,parseCardPage,parseCardRecord} from './cardList'
+import {CARD_LIST_MAX_JSON_BYTES,parseCardRecord,readCardListPage} from './cardList'
+import type {CardListTransportRequest,CardPage,CardRecord} from './cardList'
 import {cardBalancePath,parseCardBalance} from './cardBalance'
 import {cardTransactionPath,parseCardTransactionPage} from './cardTransactions'
 import type {CardTransactionQuery} from './cardTransactions'
@@ -59,7 +60,15 @@ export class WalletApiError extends Error{constructor(public status:number,publi
 const trace=()=>crypto.randomUUID()
 const csrfToken=()=>document.cookie.split(';').map(value=>value.trim()).find(value=>value.startsWith('fastlink_csrf='))?.slice('fastlink_csrf='.length)
 
-async function request<T>(path:string,method='GET',body?:unknown,idempotencyKey?:string,responseMode:'json'|'text'='json',externalSignal?:AbortSignal):Promise<T>{
+async function boundedResponseText(response:Response,maximumBytes:number):Promise<string>{
+ const declared=response.headers.get('content-length')
+ if(declared!==null){const length=Number(declared);if(Number.isFinite(length)&&length>maximumBytes){await response.body?.cancel();throw new Error('API response exceeds the consumer limit')}}
+ if(!response.body){const value=await response.text();if(new TextEncoder().encode(value).byteLength>maximumBytes)throw new Error('API response exceeds the consumer limit');return value}
+ const reader=response.body.getReader();const decoder=new TextDecoder();let received=0;let value=''
+ try{for(;;){const chunk=await reader.read();if(chunk.done)break;received+=chunk.value.byteLength;if(received>maximumBytes){await reader.cancel();throw new Error('API response exceeds the consumer limit')}value+=decoder.decode(chunk.value,{stream:true})}return value+decoder.decode()}finally{reader.releaseLock()}
+}
+
+async function request<T>(path:string,method='GET',body?:unknown,idempotencyKey?:string,responseMode:'json'|'text'='json',externalSignal?:AbortSignal,maximumResponseBytes?:number):Promise<T>{
  const id=trace();const controller=new AbortController();let timedOut=false;const cancel=()=>controller.abort();if(externalSignal?.aborted)cancel();else externalSignal?.addEventListener('abort',cancel,{once:true});const timeout=window.setTimeout(()=>{timedOut=true;controller.abort()},API_REQUEST_DEADLINE_MS)
  try{
   const csrf=csrfToken()
@@ -78,11 +87,11 @@ async function request<T>(path:string,method='GET',body?:unknown,idempotencyKey?
   const returned=response.headers.get('x-trace-id')||id
   if(!response.ok){
    let message=`HTTP ${response.status}`
-   try{const payload=await response.json();message=Array.isArray(payload.message)?payload.message.join(', '):(payload.message||message)}catch{}
+   try{const payload=maximumResponseBytes===undefined?await response.json():JSON.parse(await boundedResponseText(response,Math.min(maximumResponseBytes,16_384)));message=Array.isArray(payload.message)?payload.message.join(', '):(payload.message||message)}catch{}
    throw new WalletApiError(response.status,returned,`${message} · HTTP ${response.status} · Trace ${returned}`)
   }
   if(response.status===204)return undefined as T
-  return (responseMode==='text'?response.text():response.json()) as Promise<T>
+  return (responseMode==='text'?(maximumResponseBytes===undefined?response.text():boundedResponseText(response,maximumResponseBytes)):response.json()) as Promise<T>
  }catch(error){
   if(error instanceof WalletApiError){if(sessionFailureRequiresClear(error))window.dispatchEvent(new CustomEvent('fastlink:session-invalid',{detail:error}));throw error}
   if(error instanceof DOMException&&error.name==='AbortError'&&timedOut)throw new WalletApiError(408,id,`API timeout · HTTP 408 · Trace ${id}`)
@@ -96,6 +105,7 @@ const walletTransferTransport=({path,method,body,idempotencyKey}:WalletTransferT
 const walletTransactionTransport=({path,method,signal}:WalletTransactionTransportRequest)=>request<string>(path,method,undefined,undefined,'text',signal)
 const walletBalanceSummaryTransport=({path,method,signal}:WalletBalanceSummaryTransportRequest)=>request<string>(path,method,undefined,undefined,'text',signal)
 const walletAccountBalanceTransport=({path,method,signal}:WalletAccountBalanceTransportRequest)=>request<string>(path,method,undefined,undefined,'text',signal)
+const cardListTransport=({path,method,signal}:CardListTransportRequest)=>request<string>(path,method,undefined,undefined,'text',signal,CARD_LIST_MAX_JSON_BYTES)
 const walletOperationTransport=({path,method,signal}:WalletOperationTransportRequest)=>request<unknown>(path,method,undefined,undefined,'json',signal)
 const cardTransactionDetailTransport=({path,method,signal}:CardTransactionDetailTransportRequest)=>request<unknown>(path,method,undefined,undefined,'json',signal)
 const cardLimitsUpdateTransport=({path,method,body,idempotencyKey}:CardLimitsUpdateTransportRequest)=>request<unknown>(path,method,body,idempotencyKey)
@@ -118,7 +128,7 @@ export const walletApi={
  walletTransactionDetail:async(session:WalletSession,selected:WalletTransactionRecord,signal?:AbortSignal):Promise<WalletTransactionRecord>=>readWalletTransactionDetail(walletTransactionTransport,session,walletRuntime.environment,selected,signal),
  internalTransfer:async(session:WalletSession,accounts:readonly WalletAccountRecord[],input:InternalTransferInput,idempotencyKey:string):Promise<WalletTransferReceipt>=>submitWalletTransfer(walletTransferTransport,session,walletRuntime.environment,accounts,input,idempotencyKey),
  walletTransferStatus:async(session:WalletSession,previous:WalletTransferReceipt):Promise<WalletTransferReceipt>=>readWalletTransferStatus(walletTransferTransport,session,walletRuntime.environment,previous),
- cards:async(cursor?:string)=>parseCardPage(await request<unknown>(cardListPath(cursor))),
+ cards:async(session:WalletSession,scopeKey:string,cursor:string|null=null,previousCards:readonly CardRecord[]=[],signal?:AbortSignal):Promise<CardPage>=>readCardListPage(cardListTransport,session,walletRuntime.environment,scopeKey,cursor,previousCards,signal),
  card:async(id:string,signal?:AbortSignal)=>parseCardRecord(await request<unknown>(`/v1/cards/${encodeURIComponent(id)}`,'GET',undefined,undefined,'json',signal)),
  balance:async(id:string,signal?:AbortSignal)=>parseCardBalance(await request<unknown>(cardBalancePath(id),'GET',undefined,undefined,'json',signal),id),
  limits:async(id:string,signal?:AbortSignal)=>parseCardLimits(await request<unknown>(cardLimitsPath(id),'GET',undefined,undefined,'json',signal),id),
