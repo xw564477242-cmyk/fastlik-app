@@ -19,8 +19,8 @@ import {submitCardReplacement} from './cardReplacement'
 import type {CardReplacementInput,CardReplacementTransportRequest} from './cardReplacement'
 import {submitCardRenewal} from './cardRenewal'
 import type {CardRenewalTransportRequest} from './cardRenewal'
-import {parseWalletBalanceSummary,WALLET_BALANCE_SUMMARY_PATH,walletBalanceSummaryReadAllowed} from './walletBalanceSummary'
-import type {WalletBalanceSummary} from './walletBalanceSummary'
+import {readWalletBalanceSummary} from './walletBalanceSummary'
+import type {WalletBalanceSummary,WalletBalanceSummaryTransportRequest} from './walletBalanceSummary'
 import {readWalletTransferAccounts,readWalletTransferStatus,submitWalletTransfer} from './walletTransfer'
 import type {WalletTransferInput,WalletTransferTransportRequest} from './walletTransfer'
 import {readWalletTransactionDetail,readWalletTransactionHistory} from './walletTransactions'
@@ -93,6 +93,7 @@ async function request<T>(path:string,method='GET',body?:unknown,idempotencyKey?
 
 const walletTransferTransport=({path,method,body,idempotencyKey}:WalletTransferTransportRequest)=>request<string>(path,method,body,idempotencyKey,'text')
 const walletTransactionTransport=({path,method,signal}:WalletTransactionTransportRequest)=>request<string>(path,method,undefined,undefined,'text',signal)
+const walletBalanceSummaryTransport=({path,method,signal}:WalletBalanceSummaryTransportRequest)=>request<string>(path,method,undefined,undefined,'text',signal)
 const walletOperationTransport=({path,method,signal}:WalletOperationTransportRequest)=>request<unknown>(path,method,undefined,undefined,'json',signal)
 const cardTransactionDetailTransport=({path,method,signal}:CardTransactionDetailTransportRequest)=>request<unknown>(path,method,undefined,undefined,'json',signal)
 const cardLimitsUpdateTransport=({path,method,body,idempotencyKey}:CardLimitsUpdateTransportRequest)=>request<unknown>(path,method,body,idempotencyKey)
@@ -107,7 +108,7 @@ export const walletApi={
  logout:()=>request<void>('/v1/auth/logout','POST'),
  session:()=>request<WalletSession>('/v1/session'),
  walletAccounts:async(session:WalletSession):Promise<WalletAccountRecord[]>=>readWalletTransferAccounts(walletTransferTransport,session,walletRuntime.environment),
- walletBalanceSummary:async(sessionEnvironment:FastLinkEnvironment):Promise<WalletBalanceSummary>=>{if(!walletBalanceSummaryReadAllowed(sessionEnvironment,walletRuntime.environment))throw new Error('Wallet balance summary is available only in the matching SANDBOX or TEST session');return parseWalletBalanceSummary(await request<string>(WALLET_BALANCE_SUMMARY_PATH,'GET',undefined,undefined,'text'))},
+ walletBalanceSummary:async(session:WalletSession,scopeKey:string,signal?:AbortSignal):Promise<WalletBalanceSummary>=>readWalletBalanceSummary(walletBalanceSummaryTransport,session,walletRuntime.environment,scopeKey,signal),
  walletBalance:async(accountId:string):Promise<WalletBalanceRecord>=>{const balance=parseWalletBalance(await request<unknown>(`/v1/wallet/accounts/${encodeURIComponent(accountId)}/balance`));if(balance.accountId!==accountId)throw new Error('Wallet balance account does not match the requested account');return balance},
  walletTransactions:async(session:WalletSession,filters:WalletTransactionFilters,previous:WalletTransactionHistoryState|null=null,signal?:AbortSignal):Promise<WalletTransactionHistoryState>=>readWalletTransactionHistory(walletTransactionTransport,session,walletRuntime.environment,filters,previous,signal),
  walletOperations:async(session:WalletSession,scopeKey:string,filters:WalletOperationFilterSelection,cursor:string|undefined,signal:AbortSignal):Promise<WalletOperationPage>=>readWalletOperationActivity(walletOperationTransport,session,walletRuntime.environment,scopeKey,filters,cursor,signal),
