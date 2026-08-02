@@ -5,6 +5,7 @@ import {CardDetailRefreshError,cardDetailRefreshCanRetainSnapshot,cardDetailRefr
 import {CARD_LIMIT_UPDATE_FIELDS,CARD_LIMIT_UPDATE_MAX_MINOR,beginCardLimitsUpdate,cardLimitsUpdateDecision,cardLimitsUpdateDraft,cardLimitsUpdateInputFromDraft,cardLimitsUpdateRequestIsCurrent,createCardLimitsUpdateRequestIdentity,settleCardLimitsUpdate,type CardLimitUpdateField,type CardLimitsUpdateDraft} from './cardLimitsUpdate'
 import {beginCardStatusAction,cardStatusConflictIsCurrent,cardStatusDecision,cardStatusFailureIsAmbiguous,cardStatusFailureIsExplicit401,cardStatusFailureKind,cardStatusRequestIsCurrent,cardStatusRetryKey,createCardStatusIdempotencyKey,createCardStatusRequestIdentity,settleCardStatusAction,type CardStatusRequestIdentity} from './cardStatusAction'
 import {cardActivationFailureIsAmbiguous,createCardActivationInvalidatedCommit,runCardActivationPostChain,type CardActivationCommit,type CardActivationInvalidatedCommit} from './cardActivation'
+import {cardStatusPostChainFailureIsAmbiguous,createCardStatusInvalidatedCommit,runCardStatusPostChain,type CardStatusCommit,type CardStatusConfirmation,type CardStatusInvalidatedCommit} from './cardStatusPostChain'
 import {CardRecord,cardListRequestIsCurrent,cardListRequestWasAborted,cardRequestIsCurrent,createCardListRequestIdentity,mergeCardPages} from './cardList'
 import {CARD_TRANSACTION_FILTERS,CardTransactionFilter,CardTransactionRecord,cardTransactionLifecycleType,parseCardTransactionFilter} from './cardTransactions'
 import {CardTransactionDetailSelection,createCardTransactionDetailSelection,reconcileCardTransactionDetailSelection} from './cardTransactionDetail'
@@ -845,47 +846,42 @@ export default function App(){
   cardActionTarget.current=card.id
   const controller=new AbortController()
   cardStatusAbortController.current=controller
-  if(request.operation==='activate'){
-   abortCardListRequest()
-   cardRequestSequence.current+=1
-   cardListCursorTarget.current=null
-   setCardListLoadingMore(false)
-   abortCardDetailRequest()
-   abortCardTransactionRequest()
-   abortCardTransactionDetailRequest()
-   abortCardTimelineRequest()
-  }
-  const activationDetailRequest=request.operation==='activate'?createCardDetailRefreshRequestIdentity(++cardDetailRequestSequence.current,request.scopeKey,card.id):null
+  abortCardListRequest()
+  cardRequestSequence.current+=1
+  cardListCursorTarget.current=null
+  setCardListLoadingMore(false)
+  abortCardDetailRequest()
+  abortCardTransactionRequest()
+  abortCardTransactionDetailRequest()
+  abortCardTimelineRequest()
+  const activationDetailRequest=createCardDetailRefreshRequestIdentity(++cardDetailRequestSequence.current,request.scopeKey,card.id)
   const activationTransactionFilter=cardTransactionFilterRef.current
-  const activationTransactionRequest=request.operation==='activate'?createCardTransactionHistoryRequestIdentity(++cardTransactionRequestSequence.current,request.scopeKey,card.id,activationTransactionFilter,null):null
-  const activationTimelineRequest=request.operation==='activate'?createCardTimelineRequestIdentity(++cardTimelineRequestSequence.current,request.scopeKey,card.id,null):null
-  if(activationDetailRequest&&activationTransactionRequest&&activationTimelineRequest){
-   cardDetailAbortController.current=controller
-   cardDetailTarget.current=card.id
-   cardSnapshotTarget.current=null
-   cardBalanceRequestSequence.current+=1
-   cardBalanceTarget.current=card.id
-   cardLimitsRequestSequence.current+=1
-   cardLimitsTarget.current=card.id
-   cardTransactionTarget.current=card.id
-   cardTransactionCursorTarget.current=null
-   cardTransactionDetailRequestSequence.current+=1
-   cardTimelineTarget.current=card.id
-   cardTimelineCursorTarget.current=null
-   setCardBalanceLoading(true)
-   setCardLimitsLoading(true)
-   setCardTransactionLoadingMore(false)
-   setCardTimelineLoadingMore(false)
-   resetCardTransactionRefresh()
-   resetCardTimelineRefresh()
-   setCardRefreshError('')
-   setCardBalanceError('')
-   setCardLimitsError('')
-   setCardTransactionError('')
-   setCardTimelineError('')
-  }
-  const activationReadsAreCurrent=()=>request.operation!=='activate'||Boolean(
-   activationDetailRequest&&activationTransactionRequest&&activationTimelineRequest&&
+  const activationTransactionRequest=createCardTransactionHistoryRequestIdentity(++cardTransactionRequestSequence.current,request.scopeKey,card.id,activationTransactionFilter,null)
+  const activationTimelineRequest=createCardTimelineRequestIdentity(++cardTimelineRequestSequence.current,request.scopeKey,card.id,null)
+  cardDetailAbortController.current=controller
+  cardDetailTarget.current=card.id
+  cardSnapshotTarget.current=null
+  cardBalanceRequestSequence.current+=1
+  cardBalanceTarget.current=card.id
+  cardLimitsRequestSequence.current+=1
+  cardLimitsTarget.current=card.id
+  cardTransactionTarget.current=card.id
+  cardTransactionCursorTarget.current=null
+  cardTransactionDetailRequestSequence.current+=1
+  cardTimelineTarget.current=card.id
+  cardTimelineCursorTarget.current=null
+  setCardBalanceLoading(true)
+  setCardLimitsLoading(true)
+  setCardTransactionLoadingMore(false)
+  setCardTimelineLoadingMore(false)
+  resetCardTransactionRefresh()
+  resetCardTimelineRefresh()
+  setCardRefreshError('')
+  setCardBalanceError('')
+  setCardLimitsError('')
+  setCardTransactionError('')
+  setCardTimelineError('')
+  const activationReadsAreCurrent=()=>Boolean(
    cardDetailAbortController.current===controller&&
    cardDetailRefreshRequestIsCurrent(activationDetailRequest,cardDetailRequestSequence.current,cardScope.current,selectedCardRef.current?.id??null,walletRequestMounted.current)&&
    cardDetailTarget.current===card.id&&cardBalanceTarget.current===card.id&&cardLimitsTarget.current===card.id&&
@@ -906,9 +902,11 @@ export default function App(){
   setError('')
   let confirmedActivation:Awaited<ReturnType<typeof walletApi.confirmCardActivation>>|null=null
   let invalidatedActivationCommit:CardActivationInvalidatedCommit|null=null
+  let confirmedStatus:CardStatusConfirmation|null=null
+  let invalidatedStatusCommit:CardStatusInvalidatedCommit|null=null
   try{
    let updated:CardRecord
-   let activationCommit:CardActivationCommit|null=null
+   let activationCommit:CardActivationCommit|CardStatusCommit|null=null
    if(request.operation==='activate'){
     const outcome=await runCardActivationPostChain({
      selected:card,
@@ -933,8 +931,30 @@ export default function App(){
     activationCommit=outcome.commit
     updated=activationCommit.card
    }else{
-    updated=await walletApi.setCardStatus(activeSession,card,request.operation,request.idempotencyKey,cardScope.current,cardDetailTarget.current,controller.signal)
-    if(!isCurrent())return
+    const statusOperation=request.operation as Extract<typeof request.operation,'freeze'|'unfreeze'>
+    const outcome=await runCardStatusPostChain({
+     selected:card,
+     operation:statusOperation,
+     submit:signal=>walletApi.setCardStatus(activeSession,card,statusOperation,request.idempotencyKey,cardScope.current,cardDetailTarget.current,signal??controller.signal),
+     confirm:(submitted,signal)=>walletApi.confirmCardStatus(activeSession,request.scopeKey,card,submitted,statusOperation,signal??controller.signal),
+     refresh:{
+      card:(id,signal)=>walletApi.card(id,signal),
+      balance:(id,signal)=>walletApi.balance(id,signal),
+      limits:(id,signal)=>walletApi.limits(id,signal),
+      transactions:(id,signal)=>walletApi.transactions(id,{filter:activationTransactionFilter},signal),
+      timeline:(id,signal)=>walletApi.timeline(activeSession,request.scopeKey,id,null,signal??controller.signal),
+     },
+     isCurrent,
+     signal:controller.signal,
+    })
+    if(!outcome||!isCurrent())return
+    confirmedStatus=outcome.confirmation
+    if(outcome.status==='CONFIRMED_REFRESH_FAILED'){
+     invalidatedStatusCommit=outcome.commit
+     throw outcome.failure
+    }
+    activationCommit=outcome.commit
+    updated=activationCommit.card
    }
    cardStatusRetryRequest.current=null
    cardStatusConflictRequest.current=null
@@ -945,7 +965,7 @@ export default function App(){
    if(cardDetailAbortController.current===controller)cardDetailAbortController.current=null
    setBusy(false)
    setSelectedCard(updated)
-   if(activationCommit&&activationTransactionRequest&&activationTimelineRequest){
+   if(activationCommit){
     setCards([...activationCommit.cards])
     setCardNextCursor(activationCommit.nextCursor)
     setCardListError('')
@@ -960,10 +980,12 @@ export default function App(){
   }catch(value){
    if(isCurrent()){
     const kind=cardStatusFailureKind(value)
-    const ambiguous=cardStatusFailureIsAmbiguous(value)||cardActivationFailureIsAmbiguous(value)
+    const ambiguous=cardStatusFailureIsAmbiguous(value)||cardActivationFailureIsAmbiguous(value)||cardStatusPostChainFailureIsAmbiguous(value)
     if(sessionFailureRequiresClear(value))handleSessionInvalidation(value,sessionRef.current===activeSession)
-    else if(confirmedActivation){
-     const confirmed=invalidatedActivationCommit??createCardActivationInvalidatedCommit(confirmedActivation)
+    else if(confirmedActivation||confirmedStatus){
+     const confirmed=confirmedActivation
+      ? invalidatedActivationCommit??createCardActivationInvalidatedCommit(confirmedActivation)
+      : invalidatedStatusCommit??createCardStatusInvalidatedCommit(confirmedStatus as CardStatusConfirmation)
      controller.abort()
      settleCardStatusAction(cardStatusSubmitGate.current,requestId)
      cardStatusRetryRequest.current=null
@@ -983,14 +1005,15 @@ export default function App(){
      clearCardLimits()
      clearCardTransactions()
      clearCardTimeline()
-     setCardRefreshError('Card activation was confirmed, but the complete Card screen refresh failed. Refresh the Card before another action.')
-     setError('Card activation is confirmed. Associated Card data was safely cleared; refresh the real Card before another action.')
+     const confirmedLabel=confirmedActivation?'activation':'status change'
+     setCardRefreshError(`Card ${confirmedLabel} was confirmed, but the complete Card screen refresh failed. Refresh the Card before another action.`)
+     setError(`Card ${confirmedLabel} is confirmed. Associated Card data was safely cleared; refresh the real Card before another action.`)
     }
     else if(cardStatusFailureIsExplicit401(value))handleSessionInvalidation(value,sessionRef.current===activeSession)
     else if(kind==='FORBIDDEN'){cardStatusRetryRequest.current=null;cardStatusConflictRequest.current=null;setError('Card action forbidden by the current Origin or CSRF scope. The verified Card remains unchanged.')}
     else if(kind==='NOT_FOUND'){cardStatusRetryRequest.current=null;cardStatusConflictRequest.current=null;setError('Card is not visible in this customer scope. The verified Card remains unchanged.')}
     else if(kind==='CONFLICT'&&!request.retry){cardStatusRetryRequest.current=request;setError('Card action is in progress or uncertain. Retry once to reuse the same operation-bound Idempotency-Key.')}
-    else if(ambiguous&&!request.retry){cardStatusRetryRequest.current=request;setError(request.operation==='activate'&&cardActivationFailureIsAmbiguous(value)?'Activation was not confirmed by both real Card reads. Retry once with the same operation-bound Idempotency-Key.':'Card action timed out or is temporarily unavailable. Retry once with the same operation-bound Idempotency-Key.')}
+    else if(ambiguous&&!request.retry){cardStatusRetryRequest.current=request;setError(request.operation==='activate'&&cardActivationFailureIsAmbiguous(value)?'Activation was not confirmed by both real Card reads. Retry once with the same operation-bound Idempotency-Key.':cardStatusPostChainFailureIsAmbiguous(value)?'Card status was not confirmed by both real Card reads. Retry once with the same operation-bound Idempotency-Key.':'Card action timed out or is temporarily unavailable. Retry once with the same operation-bound Idempotency-Key.')}
     else if((kind==='CONFLICT'||ambiguous)&&request.retry){cardStatusConflictRequest.current=request;setError('Card status remains uncertain after the same-key retry. Refresh the real Card before another action.')}
     else{cardStatusRetryRequest.current=null;cardStatusConflictRequest.current=null;setError('Card status action unavailable for this session. The verified Card remains unchanged.')}
    }
@@ -1110,7 +1133,7 @@ export default function App(){
      <div className="balance-record"><CreditCard/><b>{selectedCard.last4?`Card •••• ${selectedCard.last4}`:selectedCard.id}</b><small>Status: {selectedCard.status}</small><small>{cardBalanceLoading?'Loading Card balance…':cardBalance?`Available: ${cardBalance.availableBalanceMinor} minor ${cardBalance.currency}`:'Balance unavailable'}</small>{cardBalance&&<><small>Current: {cardBalance.currentBalanceMinor} minor · Pending: {cardBalance.pendingAmountMinor} minor</small><small>Updated: {new Date(cardBalance.updatedAt).toLocaleString()}</small></>}</div>
      {cardBalanceError&&<div className="inline-error">{cardBalanceError} · No unvalidated or cross-card balance displayed.</div>}
      <button onClick={toggle} disabled={busy||virtualCardCreating||cardReplacing||cardRenewing||cardStatusConflictPending||!toggleDecision?.allowed} title={cardStatusConflictPending?'Refresh the real Card before another status action':toggleDecision?.reason??undefined}>{toggleDecision?.operation==='activate'?<ShieldCheck/>:<Snowflake/>} {cardStatusConflictPending?'Refresh Card first':cardStatusRetryPending?`Retry ${toggleDecision?.label??'Card action'}`:toggleDecision?.label??'Card action unavailable'}</button>
-     <p className="card-action-note">Manual SANDBOX/TEST action · browser Cookie, CSRF and same-origin Origin · one bodyless POST · one explicit same-key retry only · activation commits Card, list, balance, limits, transactions and timeline only after all persisted reads agree on ACTIVE.</p>
+     <p className="card-action-note">Manual SANDBOX/TEST action · browser Cookie, CSRF and same-origin Origin · one bodyless POST · one explicit same-key retry only · activation, freeze and unfreeze commit Card, list, balance, limits, transactions and timeline only after exact persisted reads agree.</p>
      {toggleDecision?.reason&&<p className="card-action-note">{toggleDecision.reason}</p>}
      {replacementDecision?.allowed&&<form className="transfer-form" onSubmit={replaceSelectedCard}><h3><RefreshCw/> Replace selected Card · {session?.environment}</h3><select value={cardReplacementReason} onChange={event=>updateCardReplacementReason(event.target.value as CardReplacementReason)} disabled={cardReplacing||virtualCardCreating||cardRenewing}>{CARD_REPLACEMENT_REASONS.map(reason=><option key={reason} value={reason}>{reason}</option>)}</select><button disabled={busy||cardReplacing||virtualCardCreating||cardRenewing}>{cardReplacing?'Replacing once…':'Replace selected Card'}</button>{cardReplacementError&&<div className="inline-error">{cardReplacementError} · No Provider or internal error details displayed.</div>}<p className="card-action-note">Manual SANDBOX/TEST only · one canonical UUIDv4 Idempotency-Key · at most one POST · no automatic retries.</p></form>}
      {renewalDecision?.allowed&&<form className="transfer-form" onSubmit={renewSelectedCard}><h3><RefreshCw/> Renew selected Card · {session?.environment}</h3><button disabled={busy||cardRenewing||virtualCardCreating||cardReplacing}>{cardRenewing?'Renewing once…':'Renew selected Card'}</button>{cardRenewalError&&<div className="inline-error">{cardRenewalError} · No Provider or internal error details displayed.</div>}<p className="card-action-note">Manual SANDBOX/TEST only · one canonical UUIDv4 Idempotency-Key · at most one bodyless POST · no automatic retries.</p></form>}
