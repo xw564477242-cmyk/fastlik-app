@@ -24,6 +24,7 @@ import type {CardReplacementInput,CardReplacementTransportRequest} from './cardR
 import {readCardReplacementConfirmation} from './cardReplacementPostChain'
 import {submitCardRenewal} from './cardRenewal'
 import type {CardRenewalTransportRequest} from './cardRenewal'
+import {confirmCardRenewalPredecessor,readCardRenewalConfirmation} from './cardRenewalPostChain'
 import {readWalletBalanceSummary} from './walletBalanceSummary'
 import type {WalletBalanceSummary,WalletBalanceSummaryTransportRequest} from './walletBalanceSummary'
 import {WALLET_TRANSFER_ACCOUNTS_PATH,WALLET_TRANSFER_ACCOUNT_MAX_JSON_BYTES,WALLET_TRANSFER_RESPONSE_MAX_JSON_BYTES,readWalletTransferAccounts,readWalletTransferStatus,submitWalletTransfer} from './walletTransfer'
@@ -124,7 +125,7 @@ const cardStatusTransport=({path,method,idempotencyKey,signal}:CardStatusTranspo
 }
 const cardActivationListTransport=({path,method,signal}:CardListTransportRequest)=>request<string>(path,method,undefined,undefined,'text',signal,CARD_LIST_MAX_JSON_BYTES,'caller')
 const cardReplacementTransport=({path,method,body,idempotencyKey,signal}:CardReplacementTransportRequest)=>request<unknown>(path,method,body,idempotencyKey,'json',signal,undefined,'caller')
-const cardRenewalTransport=({path,method,idempotencyKey}:CardRenewalTransportRequest)=>request<unknown>(path,method,undefined,idempotencyKey)
+const cardRenewalTransport=({path,method,idempotencyKey,signal}:CardRenewalTransportRequest)=>request<unknown>(path,method,undefined,idempotencyKey,'json',signal,undefined,'caller')
 const fxQuoteTransport=({path,method,body,signal}:FxQuoteTransportRequest)=>request<string>(path,method,body,undefined,'text',signal,FX_QUOTE_RESPONSE_MAX_JSON_BYTES,'caller')
 const cardTimelineTransport=({path,method,signal}:CardTimelineTransportRequest)=>request<unknown>(path,method,undefined,undefined,'json',signal,undefined,'caller')
 
@@ -154,7 +155,7 @@ export const walletApi={
  cardTransactionDetail:async(session:WalletSession,cardId:string,selected:import('./cardTransactions').CardTransactionRecord,scopeKey:string,signal:AbortSignal)=>readCardTransactionDetailRefresh(cardTransactionDetailTransport,session,walletRuntime.environment,scopeKey,cardId,selected,signal),
  createVirtualCard:async(input:VirtualCardCreateInput,idempotencyKey:string,sessionEnvironment:FastLinkEnvironment)=>{const decision=virtualCardCreateDecision(sessionEnvironment,walletRuntime.environment);if(!decision.allowed)throw new Error(decision.reason??'Virtual card creation is unavailable');const normalized=parseVirtualCardCreateInput(input);return parseVirtualCardCreateResponse(await request<unknown>(virtualCardCreatePath(),'POST',normalized,validateVirtualCardIdempotencyKey(idempotencyKey)),normalized)},
  replaceCard:async(session:WalletSession,card:import('./cardList').CardRecord,input:CardReplacementInput,idempotencyKey:string,currentScopeKey:string|null,currentCardId:string|null,signal?:AbortSignal)=>submitCardReplacement(cardReplacementTransport,session,walletRuntime.environment,currentScopeKey,currentCardId,card,input,idempotencyKey,Date.now(),signal),
- renewCard:async(session:WalletSession,card:import('./cardList').CardRecord,idempotencyKey:string,currentScopeKey:string|null,currentCardId:string|null)=>submitCardRenewal(cardRenewalTransport,session,walletRuntime.environment,currentScopeKey,currentCardId,card,idempotencyKey),
+ renewCard:async(session:WalletSession,card:import('./cardList').CardRecord,idempotencyKey:string,currentScopeKey:string|null,currentCardId:string|null,signal?:AbortSignal)=>submitCardRenewal(cardRenewalTransport,session,walletRuntime.environment,currentScopeKey,currentCardId,card,idempotencyKey,Date.now(),signal),
  setCardStatus:async(session:WalletSession,card:import('./cardList').CardRecord,operation:CardStatusOperation,idempotencyKey:string,currentScopeKey:string|null,currentCardId:string|null,signal?:AbortSignal)=>submitCardStatusAction(cardStatusTransport,session,walletRuntime.environment,currentScopeKey,currentCardId,card,operation,idempotencyKey,Date.now(),signal),
  confirmCardActivation:async(session:WalletSession,scopeKey:string,card:import('./cardList').CardRecord,signal?:AbortSignal)=>readCardActivationConfirmation({
   card:async(id,readSignal)=>parseCardRecordRaw(await request<string>(`/v1/cards/${encodeURIComponent(id)}`,'GET',undefined,undefined,'text',readSignal,CARD_LIST_MAX_JSON_BYTES,'caller')),
@@ -168,4 +169,9 @@ export const walletApi={
   card:async(id,readSignal)=>parseCardRecordRaw(await request<string>(`/v1/cards/${encodeURIComponent(id)}`,'GET',undefined,undefined,'text',readSignal,CARD_LIST_MAX_JSON_BYTES,'caller')),
   cards:(cursor,previousCards,readSignal)=>readCardListPage(cardActivationListTransport,session,walletRuntime.environment,scopeKey,cursor,previousCards,readSignal),
  },selected,submitted,signal),
+ confirmCardRenewalPredecessor:async(selected:import('./cardList').CardRecord,signal?:AbortSignal)=>confirmCardRenewalPredecessor(selected,parseCardRecordRaw(await request<string>(`/v1/cards/${encodeURIComponent(selected.id)}`,'GET',undefined,undefined,'text',signal,CARD_LIST_MAX_JSON_BYTES,'caller'))),
+ confirmCardRenewal:async(session:WalletSession,scopeKey:string,predecessor:import('./cardList').CardRecord,submitted:import('./cardList').CardRecord,signal?:AbortSignal)=>readCardRenewalConfirmation({
+  card:async(id,readSignal)=>parseCardRecordRaw(await request<string>(`/v1/cards/${encodeURIComponent(id)}`,'GET',undefined,undefined,'text',readSignal,CARD_LIST_MAX_JSON_BYTES,'caller')),
+  cards:(cursor,previousCards,readSignal)=>readCardListPage(cardActivationListTransport,session,walletRuntime.environment,scopeKey,cursor,previousCards,readSignal),
+ },predecessor,submitted,signal),
 }
