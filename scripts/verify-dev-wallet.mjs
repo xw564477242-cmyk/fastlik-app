@@ -11,6 +11,8 @@ const cardTransactionHistory = readFileSync(join(root, "src/cardTransactionHisto
 const cardTransactionRefresh = readFileSync(join(root, "src/cardTransactionRefresh.ts"), "utf8");
 const cardTransactionDetail = readFileSync(join(root, "src/cardTransactionDetail.ts"), "utf8");
 const cardTransactionDetailRefresh = readFileSync(join(root, "src/cardTransactionDetailRefresh.ts"), "utf8");
+const cardTimeline = readFileSync(join(root, "src/cardTimeline.ts"), "utf8");
+const cardTimelineRefresh = readFileSync(join(root, "src/cardTimelineRefresh.ts"), "utf8");
 const cardBalance = readFileSync(join(root, "src/cardBalance.ts"), "utf8");
 const cardLimits = readFileSync(join(root, "src/cardLimits.ts"), "utf8");
 const cardLimitsUpdate = readFileSync(join(root, "src/cardLimitsUpdate.ts"), "utf8");
@@ -247,14 +249,23 @@ assert(
   cardDetailRefresh.includes("readers.card(selectedCardId, signal)") &&
     cardDetailRefresh.includes("readers.balance(selectedCardId, signal)") &&
     cardDetailRefresh.includes("readers.limits(selectedCardId, signal)") &&
-    cardDetailRefresh.includes("readers.transactions(selectedCardId, signal)"),
-  "One shared active AbortSignal must reach all four atomic Card detail readers",
+    cardDetailRefresh.includes("readers.transactions(selectedCardId, signal)") &&
+    cardDetailRefresh.includes("readers.timeline(selectedCardId, signal)"),
+  "One shared active AbortSignal must reach all five atomic Card detail readers",
 );
 assert(
   app.includes("cardDetailAbortController.current===detailController") &&
     app.includes("},card.id,detailController.signal)"),
   "Card detail completion must remain bound to the active cancellation domain",
 );
+assert(cardTimeline.includes('EVENT_FIELDS = ["id", "type", "fromStatus", "toStatus", "occurredAt"]') && cardTimeline.includes("ownExact(value, EVENT_FIELDS"), "Card timeline must reconstruct exactly five public event fields");
+assert(cardTimeline.includes("CARD_TIMELINE_PAGE_SIZE = 25") && cardTimeline.includes("CARD_TIMELINE_MAX_PAGES = 10") && cardTimeline.includes("CARD_TIMELINE_MAX_EVENTS"), "Card timeline pagination must remain bounded to 10 pages and 250 events");
+assert(cardTimeline.includes("CARD_TIMELINE_CURSOR_MAX_BYTES = 2_048") && cardTimeline.includes("Repeated Card timeline cursor"), "Card timeline must treat signed cursors as bounded opaque history");
+assert(cardTimeline.includes("walletTransferSessionScope(session, runtimeEnvironment, now()) !== expectedScopeKey") && cardTimeline.includes('method: "GET"'), "Card timeline transport must be GET-only and revalidate the live actor session before and after transport");
+assert(cardTimelineRefresh.includes('sessionEnvironment === "SANDBOX" || sessionEnvironment === "TEST"') && cardTimelineRefresh.includes("CARD_TIMELINE_REFRESH_MAX_ATTEMPTS = 3"), "Card timeline manual refresh must remain SANDBOX/TEST-only and bounded without automatic retries");
+assert(apiClient.includes("readCardTimelinePage(cardTimelineTransport,session,walletRuntime.environment,scopeKey,id,cursor,signal)"), "Wallet API must consume the exact scoped Card timeline contract");
+assert(app.includes("walletApi.timeline(activeSession,expectedScope,id,null") && app.includes("walletTransferSessionScope(activeSession,walletRuntime.environment)===expectedScope"), "Atomic Card detail timeline completion must bind the current unexpired session");
+assert(app.includes("Card lifecycle timeline · read only") && app.includes("signed opaque cursor") && app.includes("no automatic retries"), "Card timeline UI must state its read-only bounded manual contract");
 assert(app.includes("refreshSelectedWalletTransaction") && app.includes("Manual only · one GET per click · no automatic retries."), "Wallet selected transaction detail must expose an explicit one-GET manual refresh with no retries");
 assert(app.includes("resetWalletTransactionDetailRequest();const request=createWalletTransactionDetailRequestIdentity") && app.includes("walletTransactionDetailAbortController.current===detailController"), "Each detail refresh must cancel its predecessor before creating one newly bound request");
 assert(app.includes("selectedWalletTransactionRef.current") && app.includes("walletTransactionDetailRequestIsCurrent(request,walletTransactionDetailRequestSequence.current,walletScope.current,currentAccount.id,currentFilters,walletTransactionsRef.current,selectedWalletTransactionRef.current)"), "Wallet detail refresh must reject stale session, account, filter, selection and generation completions");

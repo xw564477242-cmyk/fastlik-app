@@ -61,16 +61,27 @@ const transactions = () => ({
   }],
   nextCursor: null,
 });
+const timeline = () => ({
+  events: [{
+    id: "timeline_mounted_01",
+    type: "CREATED",
+    fromStatus: null,
+    toStatus: "PENDING",
+    occurredAt: "2026-08-01T00:00:00.000Z",
+  }],
+  nextCursor: null,
+});
 
-mounted(`one mounted manual refresh reads all four resources once (${environment ?? "ENVIRONMENT_REQUIRED"})`, async () => {
-  const calls = { card: 0, balance: 0, limits: 0, transactions: 0 };
+mounted(`one mounted manual refresh reads all five resources once (${environment ?? "ENVIRONMENT_REQUIRED"})`, async () => {
+  const calls = { card: 0, balance: 0, limits: 0, transactions: 0, timeline: 0 };
   const snapshot = await readCardDetailRefresh({
     card: async () => { calls.card += 1; return card(); },
     balance: async () => { calls.balance += 1; return balance(); },
     limits: async () => { calls.limits += 1; return limits(); },
     transactions: async () => { calls.transactions += 1; return transactions(); },
+    timeline: async () => { calls.timeline += 1; return timeline(); },
   }, cardId);
-  assert.deepEqual(calls, { card: 1, balance: 1, limits: 1, transactions: 1 });
+  assert.deepEqual(calls, { card: 1, balance: 1, limits: 1, transactions: 1, timeline: 1 });
   assert.equal(snapshot.card.id, cardId);
   assert.equal(snapshot.transactions.transactions.length, 1);
 });
@@ -95,7 +106,7 @@ const pendingReaders = (signals: AbortSignal[]) => {
       );
     });
   };
-  return { card: pending, balance: pending, limits: pending, transactions: pending };
+  return { card: pending, balance: pending, limits: pending, transactions: pending, timeline: pending };
 };
 
 const runCancelledRefresh = async (
@@ -128,12 +139,12 @@ const runCancelledRefresh = async (
   invalidate(context);
   await operation;
 
-  assert.equal(signals.length, 4);
+  assert.equal(signals.length, 5);
   assert.ok(signals.every(signal => signal === controller.signal && signal.aborted));
   assert.deepEqual(writes, { success: 0, error: 0, finally: 0 });
 };
 
-mounted("repeated refresh aborts the old four-read domain and only the replacement can commit", async () => {
+mounted("repeated refresh aborts the old five-read domain and only the replacement can commit", async () => {
   await runCancelledRefresh(context => {
     context.activeController?.abort();
     context.activeController = new AbortController();
@@ -145,6 +156,7 @@ mounted("repeated refresh aborts the old four-read domain and only the replaceme
     balance: async () => balance(),
     limits: async () => limits(),
     transactions: async () => transactions(),
+    timeline: async () => timeline(),
   }, cardId, new AbortController().signal);
   assert.equal(replacement.card.id, cardId);
 });
@@ -183,6 +195,7 @@ mounted("one failed component preserves the prior complete snapshot and exposes 
     balance: async () => balance(),
     limits: async () => limits(),
     transactions: async () => transactions(),
+    timeline: async () => timeline(),
   }, cardId);
   let displayed: CardDetailRefreshSnapshot = prior;
   let publicError = "";
@@ -193,6 +206,7 @@ mounted("one failed component preserves the prior complete snapshot and exposes 
       balance: async () => ({ ...balance(), availableBalanceMinor: "2000" }),
       limits: async () => { throw new Error("providerSecret=must-not-leak"); },
       transactions: async () => ({ ...transactions(), transactions: [] }),
+      timeline: async () => timeline(),
     }, cardId);
     displayed = next;
   } catch {
@@ -211,6 +225,7 @@ mounted("the existing 20-second deadline fails atomically and preserves the prio
     balance: async () => balance(),
     limits: async () => limits(),
     transactions: async () => transactions(),
+    timeline: async () => timeline(),
   }, cardId);
   let displayed: CardDetailRefreshSnapshot = prior;
   let publicError = "";
@@ -221,6 +236,7 @@ mounted("the existing 20-second deadline fails atomically and preserves the prio
       balance: async () => { throw new Error("API timeout · private trace must not leak"); },
       limits: async () => limits(),
       transactions: async () => transactions(),
+      timeline: async () => timeline(),
     }, cardId);
   } catch {
     publicError = "Card refresh unavailable for this session";
@@ -241,6 +257,7 @@ mounted("a different Card can never inherit the prior Card complete snapshot", a
     balance: async () => ({ ...balance(), cardId: requestedCardId }),
     limits: async () => ({ ...limits(), cardId: requestedCardId }),
     transactions: async () => transactions(),
+    timeline: async () => timeline(),
   }, requestedCardId));
 
   assert.equal(displayedCardId, null, "the old Card snapshot must be cleared before another Card refresh");
