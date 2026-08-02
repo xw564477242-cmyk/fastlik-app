@@ -250,8 +250,11 @@ test("reuses an ambiguous retry key only for the exact session, source version a
   );
   const scope = walletTransferSessionScope(session(), "SANDBOX")!;
   const key = "123e4567-e89b-42d3-a456-426614174000";
-  const retry = createWalletTransferRequestIdentity(1, scope, accounts[0], input, key);
+  const retry = createWalletTransferRequestIdentity(1, scope, accounts[0], accounts[1], input, key);
   assert.equal(walletTransferRetryKey(retry, scope, accounts, accounts[0], input), key);
+  const exhausted = createWalletTransferRequestIdentity(2, scope, accounts[0], accounts[1], input, key, true);
+  assert.equal(exhausted.retry, true);
+  assert.equal(walletTransferRetryKey(exhausted, scope, accounts, accounts[0], input), null);
   assert.equal(walletTransferRetryKey(retry, "replacement-session", accounts, accounts[0], input), null);
   assert.equal(walletTransferRetryKey(retry, scope, [{ ...accounts[0], updatedAt: future }, accounts[1]], { ...accounts[0], updatedAt: future }, input), null);
   assert.equal(walletTransferRetryKey(retry, scope, accounts, accounts[0], { ...input, destinationAccountId: accounts[0].id }), null);
@@ -371,6 +374,7 @@ test("rejects stale success, error, and finally after every source scope version
     1,
     scope,
     accounts[0],
+    accounts[1],
     input,
     "123e4567-e89b-42d3-a456-426614174000",
   );
@@ -388,5 +392,20 @@ test("rejects stale success, error, and finally after every source scope version
     false,
   );
   assert.equal(walletTransferRequestIsCurrent(request, 1, scope, [accounts[0]], accounts[0]), false);
+  assert.equal(
+    walletTransferRequestIsCurrent(
+      request,
+      1,
+      scope,
+      [accounts[0], { ...accounts[1], updatedAt: future }],
+      accounts[0],
+      input,
+    ),
+    false,
+  );
+  assert.equal(
+    walletTransferRequestIsCurrent(request, 1, scope, accounts, accounts[0], { ...input, amount: "26" }),
+    false,
+  );
   assert.equal(walletTransferRequestIsCurrent(request, 1, scope, accounts, null), false);
 });
