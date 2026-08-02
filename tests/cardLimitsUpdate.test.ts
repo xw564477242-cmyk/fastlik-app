@@ -135,7 +135,7 @@ test("synchronously rejects duplicate submits and validates a fresh UUIDv4", () 
   assert.equal(beginCardLimitsUpdate(gate, 2), true);
   assert.equal(validateCardLimitsUpdateIdempotencyKey(keyA), keyA);
   assert.equal(validateCardLimitsUpdateIdempotencyKey(keyB), keyB);
-  for (const value of [keyA.toUpperCase(), "not-a-key", crypto.randomUUID().replace(/-4/, "-5")])
+  for (const value of [keyA.toUpperCase(), "not-a-key", "a7777777-aaaa-5aaa-8aaa-aaaaaaaaaaaa"])
     assert.throws(() => validateCardLimitsUpdateIdempotencyKey(value));
 });
 
