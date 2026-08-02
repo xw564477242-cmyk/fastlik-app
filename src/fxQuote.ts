@@ -111,7 +111,10 @@ function assetCode(value: unknown, name: string): string {
   return value;
 }
 
-function positiveDecimal(value: unknown, name: string): string {
+function positiveDecimalParts(value: unknown, name: string): {
+  canonical: string;
+  scaled: bigint;
+} {
   if (
     typeof value !== "string" ||
     value.length > 37 ||
@@ -123,7 +126,11 @@ function positiveDecimal(value: unknown, name: string): string {
   const canonical = fraction ? `${whole}.${fraction}` : whole;
   const scaled = BigInt(`${whole}${rawFraction.padEnd(18, "0")}`);
   if (scaled <= 0n) throw new Error(`Invalid ${name}`);
-  return canonical;
+  return { canonical, scaled };
+}
+
+function positiveDecimal(value: unknown, name: string): string {
+  return positiveDecimalParts(value, name).canonical;
 }
 
 function strictRfc3339(value: unknown, name: string): string {
@@ -328,7 +335,11 @@ export function parseFxQuoteRaw(
     throw new Error("FX quote environment does not match the session");
   const sourceAssetCode = assetCode(record.sourceAssetCode, "FX quote source asset");
   const targetAssetCode = assetCode(record.targetAssetCode, "FX quote target asset");
-  const sourceAmount = positiveDecimal(record.sourceAmount, "FX quote source amount");
+  const sourceAmountParts = positiveDecimalParts(
+    record.sourceAmount,
+    "FX quote source amount",
+  );
+  const sourceAmount = sourceAmountParts.canonical;
   if (
     sourceAssetCode !== input.sourceAssetCode ||
     targetAssetCode !== input.targetAssetCode ||
@@ -340,14 +351,19 @@ export function parseFxQuoteRaw(
   if (expiry <= now) throw new Error("FX quote is already expired");
   if (expiry - now > FX_QUOTE_MAX_VALIDITY_MS)
     throw new Error("FX quote validity exceeds the consumer limit");
+  const targetAmount = positiveDecimalParts(record.targetAmount, "FX quote target amount");
+  const rate = positiveDecimalParts(record.rate, "FX quote rate");
+  const decimalScale = 10n ** 18n;
+  if (targetAmount.scaled !== (sourceAmountParts.scaled * rate.scaled) / decimalScale)
+    throw new Error("FX quote target amount does not match source amount and rate");
   return Object.freeze({
     quoteId: publicId(record.quoteId, "FX quote id"),
     environment: expectedEnvironment,
     sourceAssetCode,
     targetAssetCode,
     sourceAmount,
-    targetAmount: positiveDecimal(record.targetAmount, "FX quote target amount"),
-    rate: positiveDecimal(record.rate, "FX quote rate"),
+    targetAmount: targetAmount.canonical,
+    rate: rate.canonical,
     expiresAt,
   });
 }

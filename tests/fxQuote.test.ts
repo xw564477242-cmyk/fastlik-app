@@ -127,6 +127,33 @@ test("binds environment, source, target, amount and expiry to the active request
     assert.throws(() => parseFxQuoteRaw(rawQuote(unsafe), input(), "TEST"), /FX quote/);
 });
 
+test("verifies target = source times rate with exact 18-decimal truncation", () => {
+  const truncationInput = {
+    sourceAssetCode: "USD",
+    targetAssetCode: "SGD",
+    sourceAmount: "0.1",
+  };
+  const parsed = parseFxQuoteRaw(
+    rawQuote({
+      sourceAmount: "0.1",
+      targetAmount: "0.112345678901234567",
+      rate: "1.123456789012345678",
+    }),
+    truncationInput,
+    "TEST",
+  );
+  assert.equal(parsed.targetAmount, "0.112345678901234567");
+
+  assert.throws(
+    () => parseFxQuoteRaw(rawQuote({ targetAmount: "16.874999999999999999" }), input(), "TEST"),
+    /does not match source amount and rate/,
+  );
+  assert.throws(
+    () => parseFxQuoteRaw(rawQuote({ rate: "1.350000000000000001" }), input(), "TEST"),
+    /does not match source amount and rate/,
+  );
+});
+
 test("fails closed outside a matching unexpired SANDBOX or TEST actor scope before transport", async () => {
   let calls = 0;
   const transport = async () => {
