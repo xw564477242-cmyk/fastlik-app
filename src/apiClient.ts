@@ -25,7 +25,7 @@ import {readWalletBalanceSummary} from './walletBalanceSummary'
 import type {WalletBalanceSummary,WalletBalanceSummaryTransportRequest} from './walletBalanceSummary'
 import {readWalletTransferAccounts,readWalletTransferStatus,submitWalletTransfer} from './walletTransfer'
 import type {WalletTransferInput,WalletTransferTransportRequest} from './walletTransfer'
-import {readFxQuote} from './fxQuote'
+import {FX_QUOTE_RESPONSE_MAX_JSON_BYTES,readFxQuote} from './fxQuote'
 import type {FxQuoteInput,FxQuoteTransportRequest} from './fxQuote'
 import {readWalletTransactionDetail,readWalletTransactionHistory} from './walletTransactions'
 import type {WalletTransactionFilters,WalletTransactionHistoryState,WalletTransactionRecord,WalletTransactionTransportRequest} from './walletTransactions'
@@ -71,7 +71,7 @@ async function boundedResponseText(response:Response,maximumBytes:number):Promis
  try{for(;;){const chunk=await reader.read();if(chunk.done)break;received+=chunk.value.byteLength;if(received>maximumBytes){await reader.cancel();throw new Error('API response exceeds the consumer limit')}value+=decoder.decode(chunk.value,{stream:true})}return value+decoder.decode()}finally{reader.releaseLock()}
 }
 
-async function request<T>(path:string,method='GET',body?:unknown,idempotencyKey?:string,responseMode:'json'|'text'='json',externalSignal?:AbortSignal,maximumResponseBytes?:number):Promise<T>{
+async function request<T>(path:string,method='GET',body?:unknown,idempotencyKey?:string,responseMode:'json'|'text'='json',externalSignal?:AbortSignal,maximumResponseBytes?:number,sessionInvalidation:'broadcast'|'caller'='broadcast'):Promise<T>{
  const id=trace();const controller=new AbortController();let timedOut=false;const cancel=()=>controller.abort();if(externalSignal?.aborted)cancel();else externalSignal?.addEventListener('abort',cancel,{once:true});const timeout=window.setTimeout(()=>{timedOut=true;controller.abort()},API_REQUEST_DEADLINE_MS)
  try{
   const csrf=csrfToken()
@@ -96,7 +96,7 @@ async function request<T>(path:string,method='GET',body?:unknown,idempotencyKey?
   if(response.status===204)return undefined as T
   return (responseMode==='text'?(maximumResponseBytes===undefined?response.text():boundedResponseText(response,maximumResponseBytes)):response.json()) as Promise<T>
  }catch(error){
-  if(error instanceof WalletApiError){if(sessionFailureRequiresClear(error))window.dispatchEvent(new CustomEvent('fastlink:session-invalid',{detail:error}));throw error}
+  if(error instanceof WalletApiError){if(externalSignal?.aborted)throw new DOMException('Wallet request cancelled','AbortError');if(sessionInvalidation==='broadcast'&&sessionFailureRequiresClear(error))window.dispatchEvent(new CustomEvent('fastlink:session-invalid',{detail:error}));throw error}
   if(error instanceof DOMException&&error.name==='AbortError'&&timedOut)throw new WalletApiError(408,id,`API timeout · HTTP 408 · Trace ${id}`)
   if(error instanceof DOMException&&error.name==='AbortError'&&externalSignal?.aborted)throw new DOMException('Wallet transaction request cancelled','AbortError')
   const message=error instanceof Error?error.message:'Network failure'
@@ -115,7 +115,7 @@ const cardLimitsUpdateTransport=({path,method,body,idempotencyKey}:CardLimitsUpd
 const cardStatusTransport=({path,method,idempotencyKey}:CardStatusTransportRequest)=>request<unknown>(path,method,undefined,idempotencyKey)
 const cardReplacementTransport=({path,method,body,idempotencyKey}:CardReplacementTransportRequest)=>request<unknown>(path,method,body,idempotencyKey)
 const cardRenewalTransport=({path,method,idempotencyKey}:CardRenewalTransportRequest)=>request<unknown>(path,method,undefined,idempotencyKey)
-const fxQuoteTransport=({path,method,body}:FxQuoteTransportRequest)=>request<string>(path,method,body,undefined,'text')
+const fxQuoteTransport=({path,method,body,signal}:FxQuoteTransportRequest)=>request<string>(path,method,body,undefined,'text',signal,FX_QUOTE_RESPONSE_MAX_JSON_BYTES,'caller')
 
 export const walletApi={
  register:(credentials:WalletCredentials)=>request<WalletSession>('/v1/auth/register','POST',credentials),
@@ -132,7 +132,7 @@ export const walletApi={
  walletTransactionDetail:async(session:WalletSession,selected:WalletTransactionRecord,signal?:AbortSignal):Promise<WalletTransactionRecord>=>readWalletTransactionDetail(walletTransactionTransport,session,walletRuntime.environment,selected,signal),
  internalTransfer:async(session:WalletSession,accounts:readonly WalletAccountRecord[],input:InternalTransferInput,idempotencyKey:string):Promise<WalletTransferReceipt>=>submitWalletTransfer(walletTransferTransport,session,walletRuntime.environment,accounts,input,idempotencyKey),
  walletTransferStatus:async(session:WalletSession,previous:WalletTransferReceipt):Promise<WalletTransferReceipt>=>readWalletTransferStatus(walletTransferTransport,session,walletRuntime.environment,previous),
- fxQuote:async(session:WalletSession,input:FxQuoteInput)=>readFxQuote(fxQuoteTransport,session,walletRuntime.environment,input),
+ fxQuote:async(session:WalletSession,input:FxQuoteInput,signal:AbortSignal)=>readFxQuote(fxQuoteTransport,session,walletRuntime.environment,input,signal),
  cards:async(session:WalletSession,scopeKey:string,cursor:string|null=null,previousCards:readonly CardRecord[]=[],signal?:AbortSignal):Promise<CardPage>=>readCardListPage(cardListTransport,session,walletRuntime.environment,scopeKey,cursor,previousCards,signal),
  card:async(id:string,signal?:AbortSignal)=>parseCardRecord(await request<unknown>(`/v1/cards/${encodeURIComponent(id)}`,'GET',undefined,undefined,'json',signal)),
  balance:async(id:string,signal?:AbortSignal)=>parseCardBalance(await request<unknown>(cardBalancePath(id),'GET',undefined,undefined,'json',signal),id),

@@ -39,6 +39,7 @@ export type FxQuoteTransportRequest = Readonly<{
   path: typeof FX_QUOTE_PATH;
   method: "POST";
   body: FxQuoteInput;
+  signal: AbortSignal;
 }>;
 
 export type FxQuoteTransport = (
@@ -54,6 +55,26 @@ export type FxQuoteRequestIdentity = Readonly<{
 }>;
 
 export type FxQuoteSubmitGate = { activeRequestId: number | null };
+
+const throwIfFxQuoteRequestAborted = (signal: AbortSignal): void => {
+  if (signal.aborted)
+    throw new DOMException("FX quote request cancelled", "AbortError");
+};
+
+export function fxQuoteRequestWasAborted(value: unknown): boolean {
+  return value instanceof DOMException && value.name === "AbortError";
+}
+
+export function fxQuoteFailureCanInvalidateSession(
+  value: unknown,
+  isCurrent: boolean,
+  signal: AbortSignal,
+): boolean {
+  if (!isCurrent || signal.aborted || !value || typeof value !== "object")
+    return false;
+  const descriptor = Object.getOwnPropertyDescriptor(value, "status");
+  return Boolean(descriptor && "value" in descriptor && descriptor.value === 401);
+}
 
 const inputFields = [
   "sourceAssetCode",
@@ -373,19 +394,23 @@ export async function readFxQuote(
   session: FxQuoteSession,
   runtimeEnvironment: FxQuoteEnvironment,
   input: unknown,
-  now = Date.now(),
+  signal: AbortSignal,
+  now: () => number = Date.now,
 ): Promise<FxQuote> {
-  const scope = fxQuoteSessionScope(session, runtimeEnvironment, now);
+  const scope = fxQuoteSessionScope(session, runtimeEnvironment, now());
   if (!scope) throw new Error("FX quote is unavailable for this session");
+  throwIfFxQuoteRequestAborted(signal);
   const normalized = normalizeFxQuoteInput(input);
   const raw = await transport({
     path: FX_QUOTE_PATH,
     method: "POST",
     body: normalized,
+    signal,
   });
-  if (fxQuoteSessionScope(session, runtimeEnvironment) !== scope)
+  throwIfFxQuoteRequestAborted(signal);
+  if (fxQuoteSessionScope(session, runtimeEnvironment, now()) !== scope)
     throw new Error("FX quote session expired before completion");
-  return parseFxQuoteRaw(raw, normalized, runtimeEnvironment as "SANDBOX" | "TEST");
+  return parseFxQuoteRaw(raw, normalized, runtimeEnvironment as "SANDBOX" | "TEST", now());
 }
 
 export function createFxQuoteRequestIdentity(

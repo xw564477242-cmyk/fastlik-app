@@ -4,8 +4,10 @@ import {
   FX_QUOTE_PATH,
   beginFxQuoteSubmit,
   createFxQuoteRequestIdentity,
+  fxQuoteFailureCanInvalidateSession,
   fxQuoteFailureRetainsVerifiedQuote,
   fxQuoteRequestIsCurrent,
+  fxQuoteRequestWasAborted,
   fxQuoteSessionScope,
   normalizeFxQuoteInput,
   parseFxQuoteRaw,
@@ -29,6 +31,7 @@ const input = () => ({
   targetAssetCode: "SGD",
   sourceAmount: "12.5",
 });
+const activeSignal = () => new AbortController().signal;
 const rawQuote = (overrides: Record<string, unknown> = {}) =>
   JSON.stringify({
     quoteId: "quote-public-01",
@@ -44,6 +47,7 @@ const rawQuote = (overrides: Record<string, unknown> = {}) =>
 
 test("issues exactly one POST to the exact FX quote path with the exact request body", async () => {
   const calls: FxQuoteTransportRequest[] = [];
+  const signal = activeSignal();
   const quote = await readFxQuote(
     async (request) => {
       calls.push(request);
@@ -52,12 +56,17 @@ test("issues exactly one POST to the exact FX quote path with the exact request 
     session(),
     "TEST",
     input(),
+    signal,
   );
 
   assert.equal(FX_QUOTE_PATH, "/v1/wallet/fx/quotes");
-  assert.deepEqual(calls, [
-    { path: FX_QUOTE_PATH, method: "POST", body: input() },
-  ]);
+  assert.equal(calls.length, 1);
+  assert.deepEqual(calls[0], {
+    path: FX_QUOTE_PATH,
+    method: "POST",
+    body: input(),
+    signal,
+  });
   assert.deepEqual(Object.keys(quote).sort(), [
     "environment",
     "expiresAt",
@@ -169,7 +178,7 @@ test("fails closed outside a matching unexpired SANDBOX or TEST actor scope befo
     [session({ tenantId: "" }), "TEST"],
   ] as const)
     await assert.rejects(
-      readFxQuote(transport, currentSession, runtime, input()),
+      readFxQuote(transport, currentSession, runtime, input(), activeSignal()),
       /unavailable/,
     );
   assert.equal(calls, 0);
@@ -181,7 +190,7 @@ test("rejects a response when the actor scope changes while the request is in fl
   const pending = new Promise<string>((resolve) => {
     release = resolve;
   });
-  const result = readFxQuote(async () => pending, mutable, "TEST", input());
+  const result = readFxQuote(async () => pending, mutable, "TEST", input(), activeSignal());
   mutable.customerId = "customer-other";
   release(rawQuote());
   await assert.rejects(result, /expired before completion/);
@@ -225,6 +234,7 @@ test("synchronous gate allows one request and no automatic retry", async () => {
       session(),
       "TEST",
       input(),
+      activeSignal(),
     ),
     /network/,
   );
@@ -236,4 +246,35 @@ test("only retryable, network and server statuses retain a same-input verified q
     assert.equal(fxQuoteFailureRetainsVerifiedQuote(status), true);
   for (const status of [200, 400, 401, 403, 404, 422, Number.NaN, "500"])
     assert.equal(fxQuoteFailureRetainsVerifiedQuote(status), false);
+});
+
+test("caller cancellation reaches transport and rejects before parsing", async () => {
+  const controller = new AbortController();
+  let transportSignal: AbortSignal | null = null;
+  let resolve!: (value: string) => void;
+  const pending = readFxQuote(
+    request => {
+      transportSignal = request.signal;
+      return new Promise(done => { resolve = done; });
+    },
+    session(),
+    "TEST",
+    input(),
+    controller.signal,
+  );
+  controller.abort();
+  resolve(rawQuote());
+  await assert.rejects(pending, value => fxQuoteRequestWasAborted(value));
+  assert.equal(transportSignal, controller.signal);
+});
+
+test("only a current non-aborted explicit 401 may invalidate the session", () => {
+  const controller = new AbortController();
+  const explicit401 = Object.create(null) as Record<string, unknown>;
+  Object.defineProperty(explicit401, "status", {value: 401, enumerable: true});
+  assert.equal(fxQuoteFailureCanInvalidateSession(explicit401, true, controller.signal), true);
+  assert.equal(fxQuoteFailureCanInvalidateSession(explicit401, false, controller.signal), false);
+  controller.abort();
+  assert.equal(fxQuoteFailureCanInvalidateSession(explicit401, true, controller.signal), false);
+  assert.equal(fxQuoteFailureCanInvalidateSession({status: 403}, true, activeSignal()), false);
 });

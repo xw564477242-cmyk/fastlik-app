@@ -44,6 +44,7 @@ const response = () =>
 
 integration(`FX quote exact consumer (${environment ?? "ENVIRONMENT_REQUIRED"})`, async () => {
   const calls: FxQuoteTransportRequest[] = [];
+  const signal = new AbortController().signal;
   const result = await readFxQuote(
     async (request) => {
       calls.push(request);
@@ -52,8 +53,9 @@ integration(`FX quote exact consumer (${environment ?? "ENVIRONMENT_REQUIRED"})`
     session(),
     environment!,
     input,
+    signal,
   );
-  assert.deepEqual(calls, [{ path: FX_QUOTE_PATH, method: "POST", body: input }]);
+  assert.deepEqual(calls, [{ path: FX_QUOTE_PATH, method: "POST", body: input, signal }]);
   assert.equal(result.environment, environment);
   assert.equal(result.targetAmount, "135");
 });
@@ -71,6 +73,7 @@ integration("does not retry a failed quote and preserves a valid actor scope", a
       currentSession,
       environment!,
       input,
+      new AbortController().signal,
     ),
     /503/,
   );
@@ -89,6 +92,7 @@ integration("denies Production before transport and rejects stale completion wri
       { ...session(), environment: "PRODUCTION" },
       "PRODUCTION",
       input,
+      new AbortController().signal,
     ),
     /unavailable/,
   );

@@ -1,7 +1,7 @@
 import {FormEvent,useEffect,useRef,useState} from 'react'
 import {ArrowRightLeft} from 'lucide-react'
 import {WalletAccountRecord,walletApi,walletRuntime,WalletApiError,WalletSession} from './apiClient'
-import {FxQuote,FxQuoteInput,beginFxQuoteSubmit,createFxQuoteRequestIdentity,fxQuoteFailureRetainsVerifiedQuote,fxQuoteRequestIsCurrent,fxQuoteSessionScope,normalizeFxQuoteInput,settleFxQuoteSubmit} from './fxQuote'
+import {FxQuote,FxQuoteInput,beginFxQuoteSubmit,createFxQuoteRequestIdentity,fxQuoteFailureCanInvalidateSession,fxQuoteFailureRetainsVerifiedQuote,fxQuoteRequestIsCurrent,fxQuoteRequestWasAborted,fxQuoteSessionScope,normalizeFxQuoteInput,settleFxQuoteSubmit} from './fxQuote'
 
 type Props={session:WalletSession;accounts:readonly WalletAccountRecord[]}
 
@@ -27,18 +27,21 @@ export default function FxQuotePreview({session,accounts}:Props){
  const requestGeneration=useRef(0)
  const requestSequence=useRef(0)
  const submitGate=useRef<{activeRequestId:number|null}>({activeRequestId:null})
+ const requestAbortController=useRef<AbortController|null>(null)
  scopeRef.current=currentScope
 
  const replaceQuote=(value:FxQuote|null)=>{quoteRef.current=value;setQuoteState(value)}
- const invalidateRequest=()=>{requestGeneration.current+=1;submitGate.current.activeRequestId=null}
+ const abortRequest=()=>{requestAbortController.current?.abort();requestAbortController.current=null}
+ const invalidateRequest=()=>{abortRequest();requestGeneration.current+=1;submitGate.current.activeRequestId=null}
  const clearForInputChange=()=>{inputGeneration.current+=1;invalidateRequest();replaceQuote(null);setBusy(false);setError('')}
  const setSourceAssetCode=(value:string)=>{if(value===sourceAssetRef.current)return;clearForInputChange();sourceAssetRef.current=value;setSourceAssetCodeState(value)}
  const setTargetAssetCode=(value:string)=>{if(value===targetAssetRef.current)return;clearForInputChange();targetAssetRef.current=value;setTargetAssetCodeState(value)}
  const setSourceAmount=(value:string)=>{if(value===sourceAmountRef.current)return;clearForInputChange();sourceAmountRef.current=value;setSourceAmountState(value)}
  const currentInput=():FxQuoteInput|null=>{try{return normalizeFxQuoteInput({sourceAssetCode:sourceAssetRef.current,targetAssetCode:targetAssetRef.current,sourceAmount:sourceAmountRef.current})}catch{return null}}
 
- useEffect(()=>{mounted.current=true;return()=>{mounted.current=false;requestGeneration.current+=1;submitGate.current.activeRequestId=null}},[])
+ useEffect(()=>{mounted.current=true;return()=>{mounted.current=false;invalidateRequest()}},[])
  useEffect(()=>{
+  abortRequest()
   inputGeneration.current+=1
   requestGeneration.current+=1
   submitGate.current.activeRequestId=null
@@ -63,11 +66,15 @@ export default function FxQuotePreview({session,accounts}:Props){
   if(!expectedScope||expectedScope!==scopeRef.current||!input){setError('Use two different active assets and a positive amount.');return}
   const requestId=++requestSequence.current
   if(!beginFxQuoteSubmit(submitGate.current,requestId))return
+  const controller=new AbortController()
+  requestAbortController.current=controller
   const generation=++requestGeneration.current
   const inputVersion=inputGeneration.current
   const identity=createFxQuoteRequestIdentity(requestId,generation,inputVersion,expectedScope,input)
   const isCurrent=()=>Boolean(
    submitGate.current.activeRequestId===requestId&&
+   requestAbortController.current===controller&&
+   !controller.signal.aborted&&
    fxQuoteSessionScope(session,walletRuntime.environment)===expectedScope&&
    scopeRef.current===expectedScope&&
    fxQuoteRequestIsCurrent(identity,requestGeneration.current,inputGeneration.current,scopeRef.current,currentInput(),mounted.current)
@@ -75,17 +82,25 @@ export default function FxQuotePreview({session,accounts}:Props){
   setBusy(true)
   setError('')
   try{
-   const result=await walletApi.fxQuote(session,input)
+   const result=await walletApi.fxQuote(session,input,controller.signal)
    if(isCurrent())replaceQuote(result)
   }catch(value){
-   if(isCurrent()){
+   const current=isCurrent()
+   if(current&&!fxQuoteRequestWasAborted(value)){
+    if(fxQuoteFailureCanInvalidateSession(value,current,controller.signal)){
+     requestAbortController.current=null
+     settleFxQuoteSubmit(submitGate.current,requestId)
+     setBusy(false)
+     window.dispatchEvent(new CustomEvent('fastlink:session-invalid',{detail:value}))
+     return
+    }
     if(!retryable(value))replaceQuote(null)
     setError('FX quote unavailable for this session. No conversion was performed.')
    }
   }finally{
    const current=isCurrent()
    const settled=settleFxQuoteSubmit(submitGate.current,requestId)
-   if(current&&settled)setBusy(false)
+   if(current&&settled){requestAbortController.current=null;setBusy(false)}
   }
  }
 
