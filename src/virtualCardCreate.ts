@@ -1,3 +1,5 @@
+import type { CardRecord } from "./cardList";
+
 export type VirtualCardCreateEnvironment = "LOCAL" | "SANDBOX" | "TEST" | "UAT" | "PRODUCTION";
 
 export type VirtualCardCreateInput = {
@@ -5,10 +7,32 @@ export type VirtualCardCreateInput = {
   alias?: string;
 };
 
-export type VirtualCardCreateRequestIdentity = {
+export type VirtualCardCreateSession = Readonly<{
+  actorId: string;
+  tenantId: string;
+  customerId: string;
+  environment: VirtualCardCreateEnvironment;
+  expiresAt?: string;
+}>;
+
+export type VirtualCardCreateTransportRequest = Readonly<{
+  path: string;
+  method: "POST";
+  body: VirtualCardCreateInput;
+  idempotencyKey: string;
+  signal?: AbortSignal;
+}>;
+
+export type VirtualCardCreateTransport = (request: VirtualCardCreateTransportRequest) => Promise<unknown>;
+export type VirtualCardCreateSubmitGate = { activeRequestId: number | null };
+
+export type VirtualCardCreateRequestIdentity = Readonly<{
   requestId: number;
-  scopeKey: string | null;
-};
+  scopeKey: string;
+  inputVersion: string;
+  cardGeneration: string;
+  idempotencyKey: string;
+}>;
 
 export type VirtualCardCreatedRecord = {
   id: string;
@@ -62,8 +86,19 @@ const alias = (value: unknown): string | undefined => {
 };
 
 const idempotencyKey = (value: unknown): string => {
-  if (typeof value !== "string" || !/^[A-Za-z0-9._:-]{8,128}$/.test(value))
+  if (typeof value !== "string" || !/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/.test(value))
     throw new Error("Invalid virtual card idempotency key");
+  return value;
+};
+
+const boundedScopeText = (value: unknown, name: string): string => {
+  if (
+    typeof value !== "string" ||
+    value.length < 1 ||
+    value.length > 128 ||
+    value !== value.trim() ||
+    /[\u0000-\u001f\u007f]/.test(value)
+  ) throw new Error(`Invalid virtual card ${name}`);
   return value;
 };
 
@@ -152,6 +187,104 @@ export function validateVirtualCardIdempotencyKey(value: unknown): string {
   return idempotencyKey(value);
 }
 
+export function virtualCardCreateSessionScope(
+  session: VirtualCardCreateSession | null,
+  runtimeEnvironment: VirtualCardCreateEnvironment,
+  now = Date.now(),
+): string | null {
+  if (
+    !session ||
+    session.environment !== runtimeEnvironment ||
+    (runtimeEnvironment !== "SANDBOX" && runtimeEnvironment !== "TEST") ||
+    typeof session.expiresAt !== "string"
+  ) return null;
+  try {
+    const expiresAt = strictRfc3339(session.expiresAt);
+    if (Date.parse(expiresAt) <= now) return null;
+    return JSON.stringify([
+      boundedScopeText(session.actorId, "actor"),
+      boundedScopeText(session.tenantId, "tenant"),
+      boundedScopeText(session.customerId, "customer"),
+      session.environment,
+      expiresAt,
+    ]);
+  } catch {
+    return null;
+  }
+}
+
+function publicCardVersion(card: CardRecord): readonly unknown[] {
+  return [
+    card.id,
+    card.type,
+    card.status,
+    card.last4,
+    card.expiryMonth,
+    card.expiryYear,
+    card.currency,
+    card.alias,
+    Object.prototype.hasOwnProperty.call(card, "availableBalanceMinor"),
+    card.availableBalanceMinor,
+    card.createdAt,
+    card.capabilities.freeze,
+    card.capabilities.unfreeze,
+    card.capabilities.replace,
+    card.capabilities.renew,
+    card.capabilities.updateLimits,
+  ];
+}
+
+export function captureVirtualCardGeneration(
+  cards: readonly CardRecord[],
+  nextCursor: string | null,
+  selectedCard: CardRecord | null,
+): string {
+  if (nextCursor !== null && (typeof nextCursor !== "string" || nextCursor.length < 1 || nextCursor.length > 4096))
+    throw new Error("Invalid virtual card list cursor generation");
+  return JSON.stringify([
+    cards.map(publicCardVersion),
+    nextCursor,
+    selectedCard === null ? null : publicCardVersion(selectedCard),
+  ]);
+}
+
+function virtualCardInputVersion(input: VirtualCardCreateInput): string {
+  const normalized = parseVirtualCardCreateInput(input);
+  return JSON.stringify([normalized.currency, normalized.alias ?? null]);
+}
+
+export function beginVirtualCardCreate(gate: VirtualCardCreateSubmitGate, requestId: number): boolean {
+  if (!Number.isSafeInteger(requestId) || requestId < 1 || gate.activeRequestId !== null) return false;
+  gate.activeRequestId = requestId;
+  return true;
+}
+
+export function settleVirtualCardCreate(gate: VirtualCardCreateSubmitGate, requestId: number): boolean {
+  if (gate.activeRequestId !== requestId) return false;
+  gate.activeRequestId = null;
+  return true;
+}
+
+export function createVirtualCardCreateRequestIdentity(
+  requestId: number,
+  scopeKey: string,
+  input: VirtualCardCreateInput,
+  cards: readonly CardRecord[],
+  nextCursor: string | null,
+  selectedCard: CardRecord | null,
+  requestIdempotencyKey: string,
+): VirtualCardCreateRequestIdentity {
+  if (!Number.isSafeInteger(requestId) || requestId < 1 || scopeKey.length < 1 || scopeKey.length > 4096)
+    throw new Error("Invalid virtual card create request identity");
+  return Object.freeze({
+    requestId,
+    scopeKey,
+    inputVersion: virtualCardInputVersion(input),
+    cardGeneration: captureVirtualCardGeneration(cards, nextCursor, selectedCard),
+    idempotencyKey: validateVirtualCardIdempotencyKey(requestIdempotencyKey),
+  });
+}
+
 export function parseVirtualCardCreateResponse(
   value: unknown,
   expected: VirtualCardCreateInput,
@@ -227,7 +360,48 @@ export function parseVirtualCardCreateResponse(
 export function virtualCardCreateRequestIsCurrent(
   request: VirtualCardCreateRequestIdentity,
   currentRequestId: number,
+  currentSession: VirtualCardCreateSession | null,
+  runtimeEnvironment: VirtualCardCreateEnvironment,
   currentScopeKey: string | null,
+  currentInput: VirtualCardCreateInput,
+  currentCards: readonly CardRecord[],
+  currentNextCursor: string | null,
+  currentSelectedCard: CardRecord | null,
+  mounted: boolean,
+  now = Date.now(),
 ): boolean {
-  return request.requestId === currentRequestId && request.scopeKey === currentScopeKey;
+  if (!mounted || request.requestId !== currentRequestId || request.scopeKey !== currentScopeKey) return false;
+  try {
+    return (
+      virtualCardCreateSessionScope(currentSession, runtimeEnvironment, now) === request.scopeKey &&
+      virtualCardInputVersion(currentInput) === request.inputVersion &&
+      captureVirtualCardGeneration(currentCards, currentNextCursor, currentSelectedCard) === request.cardGeneration
+    );
+  } catch {
+    return false;
+  }
+}
+
+export async function submitVirtualCardCreate(
+  transport: VirtualCardCreateTransport,
+  session: VirtualCardCreateSession,
+  runtimeEnvironment: VirtualCardCreateEnvironment,
+  currentScopeKey: string | null,
+  input: VirtualCardCreateInput,
+  requestIdempotencyKey: string,
+  now = Date.now(),
+  signal?: AbortSignal,
+): Promise<VirtualCardCreatedRecord> {
+  const scopeKey = virtualCardCreateSessionScope(session, runtimeEnvironment, now);
+  if (scopeKey === null || scopeKey !== currentScopeKey)
+    throw new Error("Virtual card creation requires an unexpired matching SANDBOX or TEST session");
+  const normalized = parseVirtualCardCreateInput(input);
+  const response = await transport({
+    path: virtualCardCreatePath(),
+    method: "POST",
+    body: normalized,
+    idempotencyKey: validateVirtualCardIdempotencyKey(requestIdempotencyKey),
+    ...(signal ? { signal } : {}),
+  });
+  return parseVirtualCardCreateResponse(response, normalized);
 }

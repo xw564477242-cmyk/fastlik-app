@@ -1,13 +1,47 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import {
+  beginVirtualCardCreate,
+  captureVirtualCardGeneration,
+  createVirtualCardCreateRequestIdentity,
   parseVirtualCardCreateInput,
   parseVirtualCardCreateResponse,
+  settleVirtualCardCreate,
+  submitVirtualCardCreate,
   validateVirtualCardIdempotencyKey,
   virtualCardCreateDecision,
   virtualCardCreatePath,
   virtualCardCreateRequestIsCurrent,
+  virtualCardCreateSessionScope,
+  type VirtualCardCreateSession,
 } from "../src/virtualCardCreate.ts";
+import type { CardRecord } from "../src/cardList.ts";
+
+const now = Date.parse("2026-08-01T00:00:00Z");
+const key = "123e4567-e89b-42d3-a456-426614174000";
+
+const session = (overrides: Partial<VirtualCardCreateSession> = {}): VirtualCardCreateSession => ({
+  actorId: "actor-create",
+  tenantId: "tenant-create",
+  customerId: "customer-create",
+  environment: "TEST",
+  expiresAt: "2026-08-01T01:00:00Z",
+  ...overrides,
+});
+
+const existingCard = (overrides: Partial<CardRecord> = {}): CardRecord => ({
+  id: "card_existing-1",
+  type: "PHYSICAL",
+  status: "ACTIVE",
+  last4: "1111",
+  expiryMonth: 1,
+  expiryYear: 2030,
+  currency: "USD",
+  alias: "Existing",
+  createdAt: "2026-01-01T00:00:00Z",
+  capabilities: { freeze: true, unfreeze: false, replace: true, renew: true, updateLimits: true },
+  ...overrides,
+});
 
 const rawCreatedCard = (): Record<string, unknown> => ({
   id: "card_created-1",
@@ -47,8 +81,8 @@ test("constructs only the strict public virtual card request fields", () => {
 
 test("uses the existing virtual-card route and validates one caller-provided idempotency key", () => {
   assert.equal(virtualCardCreatePath(), "/v1/cards/virtual");
-  const key = "123e4567-e89b-12d3-a456-426614174000";
   assert.equal(validateVirtualCardIdempotencyKey(key), key);
+  assert.throws(() => validateVirtualCardIdempotencyKey("123e4567-e89b-12d3-a456-426614174000"), /idempotency key/);
   assert.throws(() => validateVirtualCardIdempotencyKey("short"), /idempotency key/);
   assert.throws(() => validateVirtualCardIdempotencyKey("bad/key-value"), /idempotency key/);
 });
@@ -218,12 +252,89 @@ test("requires the created response to match the virtual-card request", () => {
   assert.throws(() => parseVirtualCardCreateResponse({ ...rawCreatedCard(), createdAt: "2026-02-30T00:00:00Z" }, { currency: "USD", alias: "Daily" }), /createdAt/);
 });
 
-test("rejects stale create success, error and finally after actor, tenant, customer, environment or generation changes", () => {
-  const request = { requestId: 7, scopeKey: "actor|tenant|customer|TEST" };
-  assert.equal(virtualCardCreateRequestIsCurrent(request, 7, request.scopeKey), true);
-  assert.equal(virtualCardCreateRequestIsCurrent(request, 8, request.scopeKey), false);
-  assert.equal(virtualCardCreateRequestIsCurrent(request, 7, "other|tenant|customer|TEST"), false);
-  assert.equal(virtualCardCreateRequestIsCurrent(request, 7, "actor|other|customer|TEST"), false);
-  assert.equal(virtualCardCreateRequestIsCurrent(request, 7, "actor|tenant|other|TEST"), false);
-  assert.equal(virtualCardCreateRequestIsCurrent(request, 7, "actor|tenant|customer|SANDBOX"), false);
+test("requires one unexpired exact actor, tenant, customer and environment scope", () => {
+  const activeSession = session();
+  const scope = virtualCardCreateSessionScope(activeSession, "TEST", now);
+  assert.ok(scope);
+  assert.equal(virtualCardCreateSessionScope(session({ actorId: "" }), "TEST", now), null);
+  assert.equal(virtualCardCreateSessionScope(session({ customerId: "other" }), "TEST", now), JSON.stringify([
+    "actor-create", "tenant-create", "other", "TEST", "2026-08-01T01:00:00Z",
+  ]));
+  assert.equal(virtualCardCreateSessionScope(session({ expiresAt: "2026-08-01T00:00:00Z" }), "TEST", now), null);
+  assert.equal(virtualCardCreateSessionScope(session({ environment: "SANDBOX" }), "TEST", now), null);
+  assert.equal(virtualCardCreateSessionScope(session({ environment: "PRODUCTION" }), "PRODUCTION", now), null);
+});
+
+test("one accepted action owns one caller-cancelled POST and rejects pretransport mismatch", async () => {
+  const activeSession = session();
+  const scope = virtualCardCreateSessionScope(activeSession, "TEST", now);
+  assert.ok(scope);
+  const controller = new AbortController();
+  const calls: unknown[] = [];
+  const created = await submitVirtualCardCreate(
+    async request => { calls.push(request); return rawCreatedCard(); },
+    activeSession,
+    "TEST",
+    scope,
+    { currency: "USD", alias: "Daily" },
+    key,
+    now,
+    controller.signal,
+  );
+  assert.equal(created.id, "card_created-1");
+  assert.deepEqual(calls, [{
+    path: "/v1/cards/virtual",
+    method: "POST",
+    body: { currency: "USD", alias: "Daily" },
+    idempotencyKey: key,
+    signal: controller.signal,
+  }]);
+  await assert.rejects(() => submitVirtualCardCreate(
+    async () => { calls.push("unexpected"); return rawCreatedCard(); },
+    session({ expiresAt: "2026-08-01T00:00:00Z" }),
+    "TEST",
+    scope,
+    { currency: "USD", alias: "Daily" },
+    key,
+    now,
+  ));
+  assert.equal(calls.length, 1);
+});
+
+test("submit gate and exact input, session, list, selection and mounted generations reject stale writes", () => {
+  const activeSession = session();
+  const scope = virtualCardCreateSessionScope(activeSession, "TEST", now);
+  assert.ok(scope);
+  const cards = [existingCard()];
+  const selected = cards[0];
+  const input = { currency: "USD", alias: "Daily" };
+  const gate = { activeRequestId: null as number | null };
+  assert.equal(beginVirtualCardCreate(gate, 7), true);
+  assert.equal(beginVirtualCardCreate(gate, 8), false);
+  assert.equal(settleVirtualCardCreate(gate, 8), false);
+  assert.equal(settleVirtualCardCreate(gate, 7), true);
+  const request = createVirtualCardCreateRequestIdentity(7, scope, input, cards, "next", selected, key);
+  const current = (
+    requestId = 7,
+    currentSession: VirtualCardCreateSession | null = activeSession,
+    currentScope: string | null = scope,
+    currentInput = input,
+    currentCards: readonly CardRecord[] = cards,
+    nextCursor: string | null = "next",
+    currentSelected: CardRecord | null = selected,
+    mounted = true,
+  ) => virtualCardCreateRequestIsCurrent(
+    request, requestId, currentSession, "TEST", currentScope, currentInput,
+    currentCards, nextCursor, currentSelected, mounted, now,
+  );
+  assert.equal(current(), true);
+  assert.equal(current(8), false);
+  assert.equal(current(7, session({ tenantId: "other" })), false);
+  assert.equal(current(7, activeSession, `${scope}-old`), false);
+  assert.equal(current(7, activeSession, scope, { currency: "EUR", alias: "Daily" }), false);
+  assert.equal(current(7, activeSession, scope, input, [existingCard({ alias: "changed" })]), false);
+  assert.equal(current(7, activeSession, scope, input, cards, null), false);
+  assert.equal(current(7, activeSession, scope, input, cards, "next", null), false);
+  assert.equal(current(7, activeSession, scope, input, cards, "next", selected, false), false);
+  assert.equal(captureVirtualCardGeneration(cards, "next", selected), request.cardGeneration);
 });

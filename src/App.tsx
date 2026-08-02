@@ -16,8 +16,9 @@ import {CARD_TIMELINE_MAX_PAGES,CardTimelineHistory,cardTimelineFailureCanInvali
 import {CARD_TIMELINE_REFRESH_MAX_ATTEMPTS,cardTimelineRefreshAllowed,cardTimelineRefreshRequestIsCurrent,commitCardTimelineRefreshPage,createCardTimelineRefreshRequestIdentity} from './cardTimelineRefresh'
 import {WALLET_TRANSFER_STATUS_REFRESH_LIMIT,walletRequestIsCurrent,walletTransferStatusRequestIsCurrent} from './walletData'
 import {DEFAULT_WALLET_OPERATION_FILTERS,WALLET_OPERATION_STATUSES,WALLET_OPERATION_TYPES,appendWalletOperationPage,createWalletOperationActivityRequestIdentity,createWalletOperationDetailRequestIdentity,walletOperationActivityRequestIsCurrent,walletOperationDetailRequestIsCurrent,walletOperationFilterKey,walletOperationRequestWasAborted,type WalletOperationFilterSelection} from './walletOperations'
-import {parseVirtualCardCreateInput,virtualCardCreateDecision,virtualCardCreateRequestIsCurrent} from './virtualCardCreate'
+import {beginVirtualCardCreate,createVirtualCardCreateRequestIdentity,parseVirtualCardCreateInput,settleVirtualCardCreate,virtualCardCreateDecision,virtualCardCreateRequestIsCurrent,virtualCardCreateSessionScope} from './virtualCardCreate'
 import type {VirtualCardCreateInput} from './virtualCardCreate'
+import {createVirtualCardCreateInvalidatedCommit,runVirtualCardCreatePostChain,virtualCardCreatePostChainFailureCause,virtualCardCreatePostChainFailureIsAmbiguous,type VirtualCardCreateConfirmation,type VirtualCardCreateInvalidatedCommit} from './virtualCardCreatePostChain'
 import {CARD_REPLACEMENT_REASONS,beginCardReplacement,captureCardReplacementVersion,cardReplacementDecision,cardReplacementRequestIsCurrent,cardReplacementVersionMatches,createCardReplacementRequestIdentity,parseCardReplacementInput,settleCardReplacement} from './cardReplacement'
 import {cardReplacementPostChainFailureIsAmbiguous,createCardReplacementInvalidatedCommit,runCardReplacementPostChain,type CardReplacementConfirmation,type CardReplacementInvalidatedCommit} from './cardReplacementPostChain'
 import {beginCardRenewal,captureCardRenewalVersion,cardRenewalDecision,cardRenewalRequestIsCurrent,cardRenewalVersionMatches,createCardRenewalRequestIdentity,settleCardRenewal} from './cardRenewal'
@@ -111,6 +112,7 @@ export default function App(){
  const[virtualCardAlias,setVirtualCardAlias]=useState('')
  const[virtualCardCreating,setVirtualCardCreating]=useState(false)
  const[virtualCardCreateError,setVirtualCardCreateError]=useState('')
+ const[virtualCardCreateBlocked,setVirtualCardCreateBlocked]=useState(false)
  const[cardReplacementReason,setCardReplacementReasonState]=useState<CardReplacementReason>('LOST')
  const[cardReplacing,setCardReplacing]=useState(false)
  const[cardReplacementError,setCardReplacementError]=useState('')
@@ -124,6 +126,7 @@ export default function App(){
  const cardRequestSequence=useRef(0)
  const cardScope=useRef<string|null>(null)
  const cardListCursorTarget=useRef<string|null>(null)
+ const cardNextCursorRef=useRef<string|null>(null)
  const cardListAbortController=useRef<AbortController|null>(null)
  const cardDetailRequestSequence=useRef(0)
  const cardDetailTarget=useRef<string|null>(null)
@@ -163,7 +166,12 @@ export default function App(){
  const cardTimelineHistoryRef=useRef<CardTimelineHistory|null>(null)
  const cardTimelineRefreshAttemptRef=useRef(0)
  const virtualCardCreateRequestSequence=useRef(0)
+ const virtualCardCreateSubmitGate=useRef<{activeRequestId:number|null}>({activeRequestId:null})
+ const virtualCardCreateAbortController=useRef<AbortController|null>(null)
  const virtualCardCreateInFlight=useRef(false)
+ const virtualCardCreateBlockedRef=useRef(false)
+ const virtualCardCurrencyRef=useRef('USD')
+ const virtualCardAliasRef=useRef('')
  const cardReplacementRequestSequence=useRef(0)
  const cardReplacementTarget=useRef<string|null>(null)
  const cardReplacementSubmitGate=useRef<{activeRequestId:number|null}>({activeRequestId:null})
@@ -265,7 +273,7 @@ export default function App(){
  const resetCardTimelineRefresh=()=>{cardTimelineRefreshAttemptRef.current=0;setCardTimelineRefreshAttempt(0);setCardTimelineRefreshing(false)}
  const clearCardTimeline=()=>{abortCardTimelineRequest();cardTimelineRequestSequence.current+=1;cardTimelineTarget.current=null;cardTimelineCursorTarget.current=null;replaceCardTimelineHistory(null);setCardTimelineLoadingMore(false);resetCardTimelineRefresh();setCardTimelineError('')}
  const resetCardTransactionFilter=()=>{cardTransactionFilterRef.current='ALL';setCardTransactionFilterState('ALL')}
- const clearVirtualCardCreate=()=>{virtualCardCreateRequestSequence.current+=1;virtualCardCreateInFlight.current=false;setVirtualCardCreating(false);setVirtualCardCreateError('');setVirtualCardCurrency('USD');setVirtualCardAlias('')}
+ const clearVirtualCardCreate=()=>{virtualCardCreateAbortController.current?.abort();virtualCardCreateAbortController.current=null;virtualCardCreateRequestSequence.current+=1;virtualCardCreateSubmitGate.current.activeRequestId=null;virtualCardCreateInFlight.current=false;virtualCardCreateBlockedRef.current=false;virtualCardCurrencyRef.current='USD';virtualCardAliasRef.current='';setVirtualCardCreating(false);setVirtualCardCreateBlocked(false);setVirtualCardCreateError('');setVirtualCardCurrency('USD');setVirtualCardAlias('')}
  const clearCardReplacement=()=>{cardReplacementAbortController.current?.abort();cardReplacementAbortController.current=null;cardReplacementRequestSequence.current+=1;cardReplacementTarget.current=null;cardReplacementSubmitGate.current.activeRequestId=null;cardReplacementInFlight.current=false;cardReplacementReasonRef.current='LOST';setCardReplacing(false);setCardReplacementError('');setCardReplacementReasonState('LOST')}
  const clearCardRenewal=()=>{cardRenewalAbortController.current?.abort();cardRenewalAbortController.current=null;cardRenewalRequestSequence.current+=1;cardRenewalTarget.current=null;cardRenewalSubmitGate.current.activeRequestId=null;cardRenewalInFlight.current=false;setCardRenewing(false);setCardRenewalError('')}
  const replaceAccounts=(rows:WalletAccountRecord[])=>{accountsRef.current=rows;setAccounts(rows)}
@@ -280,6 +288,8 @@ export default function App(){
  const updateTransferAmount=(value:string)=>{if(walletTransferRetryRequest.current||value===transferAmountRef.current)return;walletTransferInputGeneration.current+=1;transferAmountRef.current=value;invalidateTransferForInputChange();setTransferAmount(value)}
  const clearAcceptedTransferAmount=()=>{walletTransferRetryRequest.current=null;transferAmountRef.current='';walletTransferInputGeneration.current+=1;setTransferAmount('')}
  const updateCardReplacementReason=(reason:CardReplacementReason)=>{if(cardReplacementInFlight.current&&cardReplacementReasonRef.current!==reason)clearCardReplacement();cardReplacementReasonRef.current=reason;setCardReplacementReasonState(reason)}
+ const updateVirtualCardCurrency=(value:string)=>{const next=value.toUpperCase();if(virtualCardCreateInFlight.current&&virtualCardCurrencyRef.current!==next)clearVirtualCardCreate();virtualCardCurrencyRef.current=next;setVirtualCardCurrency(next)}
+ const updateVirtualCardAlias=(value:string)=>{if(virtualCardCreateInFlight.current&&virtualCardAliasRef.current!==value)clearVirtualCardCreate();virtualCardAliasRef.current=value;setVirtualCardAlias(value)}
  const setSelectedCard=(card:CardRecord|null)=>{const previous=selectedCardRef.current;const versionChanged=Boolean(previous&&!cardReplacementVersionMatches(captureCardReplacementVersion(previous),card));if(cardReplacementInFlight.current&&versionChanged)clearCardReplacement();if(cardRenewalInFlight.current&&previous&&!cardRenewalVersionMatches(captureCardRenewalVersion(previous),card))clearCardRenewal();if(cardLimitsUpdateInFlight.current&&versionChanged)clearCardLimitsUpdate();if((cardStatusInFlight.current||cardStatusRetryRequest.current||cardStatusConflictRequest.current)&&previous!==card)clearCardStatusAction();selectedCardRef.current=card;setSelectedCardState(card)}
  const invalidateWalletDetail=()=>{abortWalletHistoryRequest();abortWalletTransactionDetailRequest();abortWalletAccountBalanceRequest();abortWalletBalanceSummaryRequest();walletAccountRequestSequence.current+=1;walletAccountTarget.current=null;walletHistoryRequestSequence.current+=1;walletHistoryAssetTarget.current=null;walletHistoryFilterTarget.current=null;walletHistoryCursorTarget.current=null;walletHistoryInFlight.current=false;walletTransactionDetailRequestSequence.current+=1;walletTransactionDetailAssetTarget.current=null;walletTransactionDetailTarget.current=null;walletTransferRequestSequence.current+=1;walletTransferTarget.current=null;walletTransferSubmitGate.current.activeRequestId=null;walletTransferStatusRequestSequence.current+=1;walletTransferStatusTarget.current=null;walletTransferStatusInFlight.current=false;walletBalanceSummaryRequestSequence.current+=1}
  const replaceSelectedWalletTransaction=(transaction:WalletTransactionRecord|null)=>{selectedWalletTransactionRef.current=transaction;setSelectedWalletTransaction(transaction)}
@@ -668,14 +678,194 @@ export default function App(){
  const selectWalletTransaction=async(transaction:WalletTransactionRecord)=>{replaceSelectedWalletTransaction(transaction);await loadWalletTransactionDetail(transaction)}
  const refreshSelectedWalletTransaction=()=>{const transaction=selectedWalletTransactionRef.current;if(transaction)void loadWalletTransactionDetail(transaction)}
  useEffect(()=>{cardsRef.current=cards},[cards])
- useEffect(()=>{walletRequestMounted.current=true;return()=>{walletRequestMounted.current=false;sessionRef.current=null;selectedCardTransactionDetailRef.current=null;cardRequestSequence.current+=1;abortCardListRequest();cardListCursorTarget.current=null;cardDetailRequestSequence.current+=1;abortCardDetailRequest();abortCardTransactionRequest();abortCardTransactionDetailRequest();abortCardTimelineRequest();cardTransactionRequestSequence.current+=1;cardTransactionDetailRequestSequence.current+=1;cardTimelineRequestSequence.current+=1;cardTransactionTarget.current=null;cardTransactionCursorTarget.current=null;cardTimelineTarget.current=null;cardTimelineCursorTarget.current=null;walletOperationRequestSequence.current+=1;walletOperationDetailRequestSequence.current+=1;walletOperationInFlight.current=false;abortWalletOperationRequest();abortWalletOperationDetailRequest();walletHistoryRequestSequence.current+=1;walletTransactionDetailRequestSequence.current+=1;walletTransferRequestSequence.current+=1;walletTransferTarget.current=null;walletTransferSubmitGate.current.activeRequestId=null;walletTransferStatusRequestSequence.current+=1;walletTransferStatusTarget.current=null;walletTransferStatusInFlight.current=false;walletTransferInputGeneration.current+=1;cardLimitsUpdateRequestSequence.current+=1;cardLimitsUpdateSubmitGate.current.activeRequestId=null;cardLimitsUpdateInFlight.current=false;cardActionRequestSequence.current+=1;cardActionTarget.current=null;cardStatusAbortController.current?.abort();cardStatusAbortController.current=null;cardStatusSubmitGate.current.activeRequestId=null;cardStatusInFlight.current=false;cardStatusRetryRequest.current=null;cardStatusConflictRequest.current=null;cardReplacementAbortController.current?.abort();cardReplacementAbortController.current=null;cardReplacementRequestSequence.current+=1;cardReplacementTarget.current=null;cardReplacementSubmitGate.current.activeRequestId=null;cardReplacementInFlight.current=false;cardRenewalAbortController.current?.abort();cardRenewalAbortController.current=null;cardRenewalRequestSequence.current+=1;cardRenewalTarget.current=null;cardRenewalSubmitGate.current.activeRequestId=null;cardRenewalInFlight.current=false;abortWalletAccountBalanceRequest();abortWalletHistoryRequest();abortWalletTransactionDetailRequest();abortWalletBalanceSummaryRequest()}},[])
+ useEffect(()=>{cardNextCursorRef.current=cardNextCursor},[cardNextCursor])
+ useEffect(()=>{walletRequestMounted.current=true;return()=>{walletRequestMounted.current=false;sessionRef.current=null;selectedCardTransactionDetailRef.current=null;cardRequestSequence.current+=1;abortCardListRequest();cardListCursorTarget.current=null;cardDetailRequestSequence.current+=1;abortCardDetailRequest();abortCardTransactionRequest();abortCardTransactionDetailRequest();abortCardTimelineRequest();cardTransactionRequestSequence.current+=1;cardTransactionDetailRequestSequence.current+=1;cardTimelineRequestSequence.current+=1;cardTransactionTarget.current=null;cardTransactionCursorTarget.current=null;cardTimelineTarget.current=null;cardTimelineCursorTarget.current=null;walletOperationRequestSequence.current+=1;walletOperationDetailRequestSequence.current+=1;walletOperationInFlight.current=false;abortWalletOperationRequest();abortWalletOperationDetailRequest();walletHistoryRequestSequence.current+=1;walletTransactionDetailRequestSequence.current+=1;walletTransferRequestSequence.current+=1;walletTransferTarget.current=null;walletTransferSubmitGate.current.activeRequestId=null;walletTransferStatusRequestSequence.current+=1;walletTransferStatusTarget.current=null;walletTransferStatusInFlight.current=false;walletTransferInputGeneration.current+=1;cardLimitsUpdateRequestSequence.current+=1;cardLimitsUpdateSubmitGate.current.activeRequestId=null;cardLimitsUpdateInFlight.current=false;cardActionRequestSequence.current+=1;cardActionTarget.current=null;cardStatusAbortController.current?.abort();cardStatusAbortController.current=null;cardStatusSubmitGate.current.activeRequestId=null;cardStatusInFlight.current=false;cardStatusRetryRequest.current=null;cardStatusConflictRequest.current=null;virtualCardCreateAbortController.current?.abort();virtualCardCreateAbortController.current=null;virtualCardCreateRequestSequence.current+=1;virtualCardCreateSubmitGate.current.activeRequestId=null;virtualCardCreateInFlight.current=false;cardReplacementAbortController.current?.abort();cardReplacementAbortController.current=null;cardReplacementRequestSequence.current+=1;cardReplacementTarget.current=null;cardReplacementSubmitGate.current.activeRequestId=null;cardReplacementInFlight.current=false;cardRenewalAbortController.current?.abort();cardRenewalAbortController.current=null;cardRenewalRequestSequence.current+=1;cardRenewalTarget.current=null;cardRenewalSubmitGate.current.activeRequestId=null;cardRenewalInFlight.current=false;abortWalletAccountBalanceRequest();abortWalletHistoryRequest();abortWalletTransactionDetailRequest();abortWalletBalanceSummaryRequest()}},[])
  useEffect(()=>{const invalidate=(event:Event)=>{const value=event instanceof CustomEvent?event.detail:null;if(sessionFailureRequiresClear(value)){if(walletScope.current)handleSessionInvalidation(value);else clear()}};window.addEventListener('fastlink:session-invalid',invalidate);void (async()=>{try{await acceptSession(await walletApi.session())}catch(value){if(sessionFailureRequiresClear(value)){if(value instanceof SessionValidationError||walletScope.current)handleSessionInvalidation(value)}else setError(describe(value))}finally{if(walletRequestMounted.current)setBusy(false)}})();return()=>window.removeEventListener('fastlink:session-invalid',invalidate)},[])
  useEffect(()=>{if(!session)return;const expiresAt=typeof session.expiresAt==='string'?Date.parse(session.expiresAt):Number.NaN;const remaining=expiresAt-Date.now();if(!Number.isFinite(remaining)||remaining<=0){clear();return}const timeout=window.setTimeout(()=>clear(),Math.min(remaining,2_147_483_647));return()=>window.clearTimeout(timeout)},[session])
  const authenticate=async(event:FormEvent)=>{event.preventDefault();setBusy(true);setError('');clear();try{const credentials:WalletCredentials={tenantId:tenantId.trim(),email:email.trim(),password};const current=mode==='login'?await walletApi.login(credentials):await walletApi.register(credentials);await acceptSession(current);setPassword('')}catch(value){if(sessionFailureRequiresClear(value))handleSessionInvalidation(value);else setError(describe(value))}finally{setBusy(false)}}
  const detailCallbacks={onError:()=>setCardRefreshError('Card refresh unavailable for this session'),onSettled:()=>setBusy(false)}
  const selectCard=async(card:CardRecord)=>{if(!session||cardReplacementInFlight.current||cardRenewalInFlight.current||cardLimitsUpdateInFlight.current||cardStatusInFlight.current)return;clearCardReplacement();clearCardRenewal();clearCardLimitsUpdate();clearCardStatusAction();setBusy(true);setError('');setSelectedCard(card);clearCardBalance();clearCardLimits();clearCardTransactions();clearCardTimeline();await loadCard(card,sessionScope(session),session,detailCallbacks)}
  const reloadCard=async()=>{if(!session||!selectedCard||cardReplacementInFlight.current||cardRenewalInFlight.current||cardLimitsUpdateInFlight.current||cardStatusInFlight.current)return;setBusy(true);setError('');await loadCard(selectedCard,sessionScope(session),session,detailCallbacks)}
- const createVirtualCard=async(event:FormEvent)=>{event.preventDefault();if(!session||virtualCardCreateInFlight.current||cardReplacementInFlight.current||cardRenewalInFlight.current)return;const scope=sessionScope(session);const decision=virtualCardCreateDecision(session.environment,walletRuntime.environment);if(!decision.allowed||scope!==cardScope.current){setVirtualCardCreateError('Virtual card creation unavailable for this session');return}let input:VirtualCardCreateInput;try{input=parseVirtualCardCreateInput({currency:virtualCardCurrency,alias:virtualCardAlias})}catch{setVirtualCardCreateError('Use a valid ISO currency and an optional alias of 30 characters or fewer.');return}const request={requestId:++virtualCardCreateRequestSequence.current,scopeKey:scope};const isCurrent=()=>virtualCardCreateRequestIsCurrent(request,virtualCardCreateRequestSequence.current,cardScope.current);virtualCardCreateInFlight.current=true;setVirtualCardCreating(true);setVirtualCardCreateError('');const idempotencyKey=crypto.randomUUID();try{const created=await walletApi.createVirtualCard(input,idempotencyKey,session.environment);if(!isCurrent())return;const page=await reloadCardListFirstPage(session,scope,isCurrent);if(!page)return;setCards(mergeCardPages(page.cards,[created]));setCardNextCursor(page.nextCursor);setCardListError('');setSelectedCard(created);setVirtualCardAlias('');await loadCard(created,scope,session,{onError:()=>{if(isCurrent())setVirtualCardCreateError('Virtual card created, but refreshed card detail is unavailable for this session.')}})}catch(value){if(isCurrent()&&!cardListRequestWasAborted(value))setVirtualCardCreateError(describeVirtualCardCreate(value))}finally{if(isCurrent()){virtualCardCreateInFlight.current=false;setVirtualCardCreating(false)}}}
+ const createVirtualCard=async(event:FormEvent)=>{
+  event.preventDefault()
+  const activeSession=session
+  if(!activeSession||virtualCardCreateInFlight.current||virtualCardCreateBlockedRef.current||cardReplacementInFlight.current||cardRenewalInFlight.current||cardLimitsUpdateInFlight.current||cardStatusInFlight.current){if(virtualCardCreateBlockedRef.current)setVirtualCardCreateError('Refresh the exact session and Card list before another Virtual Card creation.');return}
+  const scope=virtualCardCreateSessionScope(activeSession,walletRuntime.environment)
+  const decision=virtualCardCreateDecision(activeSession.environment,walletRuntime.environment)
+  if(!decision.allowed||!scope||scope!==cardScope.current){setVirtualCardCreateError('Virtual card creation unavailable for this session');return}
+  let input:VirtualCardCreateInput
+  try{input=parseVirtualCardCreateInput({currency:virtualCardCurrencyRef.current,alias:virtualCardAliasRef.current})}
+  catch{setVirtualCardCreateError('Use a valid ISO currency and an optional alias of 30 characters or fewer.');return}
+  const existingCards=[...cardsRef.current]
+  const existingNextCursor=cardNextCursorRef.current
+  const existingSelectedCard=selectedCardRef.current
+  const requestId=++virtualCardCreateRequestSequence.current
+  if(!beginVirtualCardCreate(virtualCardCreateSubmitGate.current,requestId))return
+  let request
+  try{request=createVirtualCardCreateRequestIdentity(requestId,scope,input,existingCards,existingNextCursor,existingSelectedCard,crypto.randomUUID())}
+  catch{settleVirtualCardCreate(virtualCardCreateSubmitGate.current,requestId);setVirtualCardCreateError('Secure Virtual Card creation is unavailable');return}
+  abortCardListRequest()
+  abortCardDetailRequest()
+  abortCardTransactionRequest()
+  abortCardTransactionDetailRequest()
+  abortCardTimelineRequest()
+  const controller=new AbortController()
+  virtualCardCreateAbortController.current=controller
+  const isCurrent=()=>{
+   let currentInput:VirtualCardCreateInput
+   try{currentInput=parseVirtualCardCreateInput({currency:virtualCardCurrencyRef.current,alias:virtualCardAliasRef.current})}
+   catch{return false}
+   return Boolean(
+    walletRequestMounted.current&&
+    virtualCardCreateAbortController.current===controller&&
+    virtualCardCreateSubmitGate.current.activeRequestId===requestId&&
+    !controller.signal.aborted&&
+    virtualCardCreateRequestIsCurrent(request,virtualCardCreateRequestSequence.current,sessionRef.current,walletRuntime.environment,cardScope.current,currentInput,cardsRef.current,cardNextCursorRef.current,selectedCardRef.current,walletRequestMounted.current)
+   )
+  }
+  virtualCardCreateInFlight.current=true
+  setVirtualCardCreating(true)
+  setVirtualCardCreateError('')
+  const transactionFilter=cardTransactionFilterRef.current
+  let createdDetailRequest:ReturnType<typeof createCardDetailRefreshRequestIdentity>|null=null
+  let createdTransactionRequest:ReturnType<typeof createCardTransactionHistoryRequestIdentity>|null=null
+  let createdTimelineRequest:ReturnType<typeof createCardTimelineRequestIdentity>|null=null
+  let createdId:string|null=null
+  const createdReadsAreCurrent=()=>Boolean(
+   createdId===null||(
+    createdDetailRequest&&createdTransactionRequest&&createdTimelineRequest&&
+    cardDetailAbortController.current===controller&&
+    cardDetailRefreshRequestIsCurrent(createdDetailRequest,cardDetailRequestSequence.current,cardScope.current,createdId,walletRequestMounted.current)&&
+    cardDetailTarget.current===createdId&&cardBalanceTarget.current===createdId&&cardLimitsTarget.current===createdId&&
+    cardTransactionTarget.current===createdId&&cardTimelineTarget.current===createdId&&
+    cardTransactionHistoryRequestIsCurrent(createdTransactionRequest,cardTransactionRequestSequence.current,cardScope.current,createdId,cardTransactionFilterRef.current,cardTransactionCursorTarget.current,walletRequestMounted.current)&&
+    cardTimelineRequestIsCurrent(createdTimelineRequest,cardTimelineRequestSequence.current,cardScope.current,createdId,cardTimelineCursorTarget.current,walletRequestMounted.current)
+   )
+  )
+  const chainIsCurrent=()=>Boolean(isCurrent()&&createdReadsAreCurrent())
+  let confirmed:VirtualCardCreateConfirmation|null=null
+  let invalidatedCommit:VirtualCardCreateInvalidatedCommit|null=null
+  try{
+   const outcome=await runVirtualCardCreatePostChain({
+    existingCards,
+    submit:signal=>walletApi.createVirtualCard(activeSession,input,request.idempotencyKey,request.scopeKey,signal??controller.signal),
+    confirm:(submitted,signal)=>{
+     if(createdId!==null)throw new Error('Duplicate Virtual Card creation confirmation')
+     createdId=submitted.id
+     createdDetailRequest=createCardDetailRefreshRequestIdentity(++cardDetailRequestSequence.current,request.scopeKey,submitted.id)
+     createdTransactionRequest=createCardTransactionHistoryRequestIdentity(++cardTransactionRequestSequence.current,request.scopeKey,submitted.id,transactionFilter,null)
+     createdTimelineRequest=createCardTimelineRequestIdentity(++cardTimelineRequestSequence.current,request.scopeKey,submitted.id,null)
+     cardDetailAbortController.current=controller
+     cardDetailTarget.current=submitted.id
+     cardSnapshotTarget.current=null
+     cardBalanceRequestSequence.current+=1
+     cardBalanceTarget.current=submitted.id
+     cardLimitsRequestSequence.current+=1
+     cardLimitsTarget.current=submitted.id
+     cardTransactionTarget.current=submitted.id
+     cardTransactionCursorTarget.current=null
+     cardTimelineTarget.current=submitted.id
+     cardTimelineCursorTarget.current=null
+     setCardBalanceLoading(true)
+     setCardLimitsLoading(true)
+     setCardTransactionLoadingMore(false)
+     setCardTimelineLoadingMore(false)
+     resetCardTransactionRefresh()
+     resetCardTimelineRefresh()
+     setCardRefreshError('')
+     setCardBalanceError('')
+     setCardLimitsError('')
+     setCardTransactionError('')
+     setCardTimelineError('')
+     return walletApi.confirmVirtualCardCreate(activeSession,request.scopeKey,submitted,signal??controller.signal)
+    },
+    refresh:{
+     card:(id,signal)=>walletApi.virtualCardCreateCardRefresh(id,signal),
+     balance:(id,signal)=>walletApi.virtualCardCreateBalanceRefresh(id,signal),
+     limits:(id,signal)=>walletApi.virtualCardCreateLimitsRefresh(id,signal),
+     transactions:(id,signal)=>walletApi.virtualCardCreateTransactionsRefresh(id,{filter:transactionFilter},signal),
+     timeline:(id,signal)=>walletApi.timeline(activeSession,request.scopeKey,id,null,signal??controller.signal),
+    },
+    isCurrent:chainIsCurrent,
+    signal:controller.signal,
+   })
+   if(!outcome||!chainIsCurrent())return
+   confirmed=outcome.confirmation
+   if(outcome.status==='CONFIRMED_REFRESH_FAILED'){invalidatedCommit=outcome.commit;throw outcome.failure}
+   if(!createdTransactionRequest||!createdTimelineRequest)throw new Error('Created Virtual Card refresh identity is unavailable')
+   const commit=outcome.commit
+   settleVirtualCardCreate(virtualCardCreateSubmitGate.current,requestId)
+   virtualCardCreateInFlight.current=false
+   virtualCardCreateAbortController.current=null
+   if(cardDetailAbortController.current===controller)cardDetailAbortController.current=null
+   setVirtualCardCreating(false)
+   setCards([...commit.cards])
+   setCardNextCursor(commit.nextCursor)
+   setCardListError('')
+   setSelectedCard(commit.card)
+   setCardBalance(commit.balance)
+   replaceCardLimits(commit.limits)
+   replaceCardTransactionHistory(commitCardTransactionHistoryPage(null,createdTransactionRequest,commit.transactions))
+   replaceCardTimelineHistory(commitCardTimelinePage(null,createdTimelineRequest,commit.timeline))
+   cardSnapshotTarget.current=commit.card.id
+   setCardBalanceLoading(false)
+   setCardLimitsLoading(false)
+   virtualCardAliasRef.current=''
+   setVirtualCardAlias('')
+  }catch(value){
+   if(chainIsCurrent()){
+    const cause=virtualCardCreatePostChainFailureCause(value)
+    if(sessionFailureRequiresClear(cause))handleSessionInvalidation(cause,sessionRef.current===activeSession)
+    else if(confirmed){
+     const commit=invalidatedCommit??createVirtualCardCreateInvalidatedCommit(confirmed)
+     controller.abort()
+     settleVirtualCardCreate(virtualCardCreateSubmitGate.current,requestId)
+     virtualCardCreateInFlight.current=false
+     virtualCardCreateAbortController.current=null
+     if(cardDetailAbortController.current===controller)cardDetailAbortController.current=null
+     setVirtualCardCreating(false)
+     setCards([...commit.cards])
+     setCardNextCursor(commit.nextCursor)
+     setCardListError('')
+     setSelectedCard(commit.card)
+     cardDetailTarget.current=null
+     cardSnapshotTarget.current=null
+     clearCardBalance()
+     clearCardLimits()
+     clearCardTransactions()
+     clearCardTimeline()
+     virtualCardAliasRef.current=''
+     setVirtualCardAlias('')
+     setCardRefreshError('Virtual Card creation is confirmed, but the complete created Card refresh failed. Refresh the Card before another action.')
+     setVirtualCardCreateError('Virtual Card creation is confirmed. Associated Card data was safely cleared; refresh the real Card before another action.')
+    }else if(virtualCardCreatePostChainFailureIsAmbiguous(value)){
+     controller.abort()
+     settleVirtualCardCreate(virtualCardCreateSubmitGate.current,requestId)
+     virtualCardCreateInFlight.current=false
+     virtualCardCreateAbortController.current=null
+     if(cardDetailAbortController.current===controller)cardDetailAbortController.current=null
+     virtualCardCreateBlockedRef.current=true
+     setVirtualCardCreateBlocked(true)
+     setVirtualCardCreating(false)
+     setCards([])
+     setCardNextCursor(null)
+     setSelectedCard(null)
+     cardDetailTarget.current=null
+     cardSnapshotTarget.current=null
+     clearCardBalance()
+     clearCardLimits()
+     clearCardTransactions()
+     clearCardTimeline()
+     setCardListError('Virtual Card creation may have been accepted but its exact persisted result is not confirmed. Refresh the exact session and Card list; do not submit another create request.')
+     setVirtualCardCreateError('Virtual Card creation result is unconfirmed. Another create request is blocked until exact refresh.')
+    }else setVirtualCardCreateError(describeVirtualCardCreate(cause))
+   }
+  }finally{
+   const currentRequest=chainIsCurrent()
+   const settled=settleVirtualCardCreate(virtualCardCreateSubmitGate.current,requestId)
+   if(currentRequest&&settled){controller.abort();virtualCardCreateInFlight.current=false;virtualCardCreateAbortController.current=null;if(cardDetailAbortController.current===controller)cardDetailAbortController.current=null;setVirtualCardCreating(false);setCardBalanceLoading(false);setCardLimitsLoading(false)}
+  }
+ }
  const replaceSelectedCard=async(event:FormEvent)=>{
   event.preventDefault()
   const activeSession=session
@@ -1376,7 +1566,7 @@ export default function App(){
    </section>
    <section id="wallet-cards" className="panel">
     <div className="panel-row"><h2><WalletCards/> Real cards</h2><button onClick={reloadCard} disabled={busy||!selectedCard||virtualCardCreating||cardReplacing||cardRenewing}><RefreshCw/> Refresh</button></div>
-    {virtualCardDecision.allowed&&<form className="transfer-form" onSubmit={createVirtualCard}><h3><CreditCard/> Create virtual card · {session?.environment}</h3><input value={virtualCardCurrency} onChange={event=>setVirtualCardCurrency(event.target.value.toUpperCase())} placeholder="ISO currency, e.g. USD" pattern="^[A-Z]{3}$" minLength={3} maxLength={3} disabled={virtualCardCreating||cardReplacing||cardRenewing} required/><input value={virtualCardAlias} onChange={event=>setVirtualCardAlias(event.target.value)} placeholder="Alias (optional, max 30 characters)" maxLength={30} disabled={virtualCardCreating||cardReplacing||cardRenewing}/><button disabled={busy||virtualCardCreating||cardReplacing||cardRenewing}>{virtualCardCreating?'Creating once…':'Create virtual card'}</button>{virtualCardCreateError&&<div className="inline-error">{virtualCardCreateError} · No Provider or internal error details displayed.</div>}<p className="card-action-note">One submission, one idempotency key. Automatic retries are disabled.</p></form>}
+    {virtualCardDecision.allowed&&<form className="transfer-form" onSubmit={createVirtualCard}><h3><CreditCard/> Create virtual card · {session?.environment}</h3><input value={virtualCardCurrency} onChange={event=>updateVirtualCardCurrency(event.target.value)} placeholder="ISO currency, e.g. USD" pattern="^[A-Z]{3}$" minLength={3} maxLength={3} disabled={virtualCardCreating||virtualCardCreateBlocked||cardReplacing||cardRenewing} required/><input value={virtualCardAlias} onChange={event=>updateVirtualCardAlias(event.target.value)} placeholder="Alias (optional, max 30 characters)" maxLength={30} disabled={virtualCardCreating||virtualCardCreateBlocked||cardReplacing||cardRenewing}/><button disabled={busy||virtualCardCreating||virtualCardCreateBlocked||cardReplacing||cardRenewing}>{virtualCardCreating?'Creating once…':virtualCardCreateBlocked?'Refresh before creating':'Create virtual card'}</button>{virtualCardCreateError&&<div className="inline-error">{virtualCardCreateError} · No Provider or internal error details displayed.</div>}<p className="card-action-note">Manual SANDBOX/TEST only · one canonical UUIDv4 Idempotency-Key · exactly one POST · no retries. Selection and all Card resources change only after exact persisted created Card and bounded list reads agree.</p></form>}
     {cards.length===0?<p>Unavailable · no cards returned by Backend.</p>:<select value={selectedCard?.id||''} disabled={virtualCardCreating||cardReplacing||cardRenewing} onChange={event=>{const card=cards.find(row=>row.id===event.target.value);if(card)void selectCard(card)}}>{cards.map(card=><option key={card.id} value={card.id}>{card.last4?`•••• ${card.last4}`:card.id} · {card.status}</option>)}</select>}
     {cardListError&&<p className="inline-error">{cardListError} · Current cards remain scoped to this session.</p>}
     {cardRefreshError&&<p className="inline-error">{cardRefreshError} · No partial Card data was applied.</p>}

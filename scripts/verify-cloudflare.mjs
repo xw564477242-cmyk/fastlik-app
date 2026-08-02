@@ -39,6 +39,8 @@ const walletTransfer = read("src/walletTransfer.ts");
 const walletTransactions = read("src/walletTransactions.ts");
 const walletOperations = read("src/walletOperations.ts");
 const virtualCardCreate = read("src/virtualCardCreate.ts");
+const virtualCardCreatePostChain = read("src/virtualCardCreatePostChain.ts");
+const virtualCardCreatePostChainIntegrationTests = read("tests/virtualCardCreatePostChain.integration.test.ts");
 const index = read("index.html");
 
 assert(index.includes('src="./runtime-config.js"'), "runtime config must load before the Wallet app");
@@ -59,9 +61,13 @@ assert(apiClient.includes("readWalletTransactionHistory(walletTransactionTranspo
 assert(apiClient.includes("walletTransactionDetail:async"), "Wallet must use the public selected transaction detail endpoint");
 assert(apiClient.includes("walletOperations:async"), "Wallet must use the public all-account operation activity endpoint");
 assert(apiClient.includes("walletOperationDetail:async"), "Wallet must use the public selected operation detail endpoint");
-assert(apiClient.includes("createVirtualCard:async"), "Wallet must use the typed public Virtual Card creation endpoint");
-assert(virtualCardCreate.includes('sessionEnvironment !== "SANDBOX" && sessionEnvironment !== "TEST"'), "Virtual Card creation must remain non-production only");
-assert(virtualCardCreate.includes("virtualCardCreateRequestIsCurrent"), "Virtual Card creation must remain session-scope and generation isolated");
+assert(apiClient.includes("submitVirtualCardCreate(virtualCardCreateTransport,session,walletRuntime.environment") && apiClient.includes("confirmVirtualCardCreate:async"), "Wallet must use the caller-owned typed Virtual Card POST and persisted confirmation endpoints");
+assert(apiClient.includes("virtualCardCreateCardRefresh:async") && apiClient.includes("virtualCardCreateTransactionsRefresh:async"), "Virtual Card post-create resource 401 handling must remain caller-owned");
+assert(virtualCardCreate.includes('runtimeEnvironment !== "SANDBOX" && runtimeEnvironment !== "TEST"') && virtualCardCreate.includes("session.expiresAt"), "Virtual Card creation must remain unexpired-session non-production only");
+assert(virtualCardCreate.includes("virtualCardCreateRequestIsCurrent") && virtualCardCreate.includes("captureVirtualCardGeneration"), "Virtual Card creation must remain exact session, input, Card and generation isolated");
+assert(virtualCardCreatePostChain.includes("VIRTUAL_CARD_CREATE_CONFIRMATION_MAX_PAGES = 25") && virtualCardCreatePostChain.includes("runVirtualCardCreatePostChain"), "Virtual Card creation must confirm exact persisted detail/list before atomic refresh");
+assert(app.includes("await runVirtualCardCreatePostChain({") && app.includes("virtualCardCreateBlockedRef.current=true"), "Cloudflare App must consume only verified create outcomes and block an unconfirmed duplicate");
+assert(virtualCardCreatePostChainIntegrationTests.includes('assert.equal(calls.filter(call => call === "POST").length, 1)') && virtualCardCreatePostChainIntegrationTests.includes("assert.equal(pages, 25)") && virtualCardCreatePostChainIntegrationTests.includes("assert.equal(await operation, null)"), "Cloudflare Virtual Card evidence must cover one POST, bounded confirmation and stale zero writes");
 assert(walletOperations.includes("/v1/wallet/operations?"), "Wallet activity must use the public bounded operation contract");
 assert(walletOperations.includes("WALLET_OPERATION_TYPES") && walletOperations.includes("WALLET_OPERATION_STATUSES"), "Wallet activity filters must use the Backend canonical allowlists");
 assert(walletOperations.includes("readWalletOperationActivity") && walletOperations.includes('method: "GET"'), "Wallet activity must remain a one-GET caller-cancelled read");
@@ -138,7 +144,7 @@ assert(app.includes("All-account Wallet activity · read only"), "Wallet UI must
 assert(app.includes("Refresh activity") && app.includes("wallet-operation-filters"), "Wallet UI must expose one manual refresh and closed operation filters");
 assert(app.includes("Selected operation · read only"), "Wallet UI must expose read-only selected operation detail");
 assert(app.includes("Create virtual card"), "Wallet UI must expose the gated non-production Virtual Card form");
-assert(app.includes("Automatic retries are disabled"), "Wallet UI must retain the one-submit no-retry boundary");
+assert(app.includes("exactly one POST · no retries"), "Wallet UI must retain the one-submit no-retry boundary");
 assert(app.includes("No unvalidated or cross-card balance displayed"), "Card balance UI must fail closed for stale or invalid responses");
 assert(app.includes("No unvalidated or cross-card limits displayed"), "Card limits UI must fail closed for stale or invalid responses");
 assert(app.includes("Card limits · public contract") && app.includes("Apply limits once"), "Card limits UI must expose the gated public update contract");
