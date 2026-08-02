@@ -11,6 +11,8 @@
     "test": "node --experimental-strip-types --test tests/*.test.ts",
     "test:transfer:sandbox": "FASTLINK_TEST_ENVIRONMENT=SANDBOX node --experimental-strip-types --test tests/walletTransfer.integration.test.ts",
     "test:transfer:test": "FASTLINK_TEST_ENVIRONMENT=TEST node --experimental-strip-types --test tests/walletTransfer.integration.test.ts",
+    "test:fx-quote:sandbox": "FASTLINK_TEST_ENVIRONMENT=SANDBOX node --experimental-strip-types --test tests/fxQuote.integration.test.ts tests/fxQuote.mounted.integration.test.ts",
+    "test:fx-quote:test": "FASTLINK_TEST_ENVIRONMENT=TEST node --experimental-strip-types --test tests/fxQuote.integration.test.ts tests/fxQuote.mounted.integration.test.ts",
     "test:wallet-transactions:sandbox": "FASTLINK_TEST_ENVIRONMENT=SANDBOX node --experimental-strip-types --test tests/walletTransactions.integration.test.ts",
     "test:wallet-transactions:test": "FASTLINK_TEST_ENVIRONMENT=TEST node --experimental-strip-types --test tests/walletTransactions.integration.test.ts",
     "test:wallet-operation-filters:sandbox": "FASTLINK_TEST_ENVIRONMENT=SANDBOX node --experimental-strip-types --test tests/walletOperationFilters.integration.test.ts",
