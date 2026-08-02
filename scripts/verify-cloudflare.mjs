@@ -21,6 +21,8 @@ const cardActivationIntegrationTests = read("tests/cardActivation.integration.te
 const cardStatusPostChain = read("src/cardStatusPostChain.ts");
 const cardStatusPostChainIntegrationTests = read("tests/cardStatusPostChain.integration.test.ts");
 const cardReplacement = read("src/cardReplacement.ts");
+const cardReplacementPostChain = read("src/cardReplacementPostChain.ts");
+const cardReplacementPostChainIntegrationTests = read("tests/cardReplacementPostChain.integration.test.ts");
 const cardRenewal = read("src/cardRenewal.ts");
 const cardTimeline = read("src/cardTimeline.ts");
 const cardTimelineRefresh = read("src/cardTimelineRefresh.ts");
@@ -96,6 +98,10 @@ assert(cardReplacement.includes('runtimeEnvironment !== "SANDBOX" && runtimeEnvi
 assert(cardReplacement.includes("beginCardReplacement") && cardReplacement.includes("cardReplacementRequestIsCurrent"), "Card replacement writes must prevent duplicates and reject stale completion writes");
 assert(cardReplacement.includes("createCardReplacementCommit") && cardReplacement.includes("collides with an existing Card"), "Card replacement must atomically reject new-Card identity collisions");
 assert(apiClient.includes("submitCardReplacement(cardReplacementTransport,session,walletRuntime.environment"), "Card replacement writes must use the typed exact POST contract");
+assert(apiClient.includes("cardReplacementTransport=({path,method,body,idempotencyKey,signal}") && apiClient.includes("confirmCardReplacement:async"), "Card replacement POST and persisted confirmation must be caller-cancelled and caller-owned");
+assert(cardReplacementPostChain.includes("CARD_REPLACEMENT_CONFIRMATION_MAX_PAGES = 25") && cardReplacementPostChain.includes('predecessor.status !== "CLOSED"') && cardReplacementPostChain.includes("runCardReplacementPostChain"), "Card replacement must confirm exact predecessor, successor and bounded list generations before refresh");
+assert(app.includes("await runCardReplacementPostChain({") && app.includes("invalidatedCommit=outcome.commit"), "Cloudflare App must consume only complete or safely invalidated replacement outcomes");
+assert(cardReplacementPostChainIntegrationTests.includes('assert.equal(calls.filter(call => call === "POST").length, 1)') && cardReplacementPostChainIntegrationTests.includes('assert.equal(pages, 25)') && cardReplacementPostChainIntegrationTests.includes('assert.equal(await operation, null)'), "Cloudflare replacement evidence must cover one POST, bounded confirmation and stale zero writes");
 assert(app.includes("Manual SANDBOX/TEST only · one canonical UUIDv4 Idempotency-Key · at most one POST · no automatic retries."), "Card replacement UI must state its non-production one-POST no-retry boundary");
 assert(cardRenewal.includes('runtimeEnvironment !== "SANDBOX" && runtimeEnvironment !== "TEST"') && cardRenewal.includes("session.expiresAt"), "Card renewal writes must remain unexpired-session SANDBOX/TEST only");
 assert(cardRenewal.includes("beginCardRenewal") && cardRenewal.includes("cardRenewalRequestIsCurrent"), "Card renewal writes must prevent duplicates and reject stale completion writes");

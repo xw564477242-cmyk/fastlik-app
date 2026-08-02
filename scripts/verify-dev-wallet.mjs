@@ -35,6 +35,8 @@ const walletTransactions = readFileSync(join(root, "src/walletTransactions.ts"),
 const walletOperations = readFileSync(join(root, "src/walletOperations.ts"), "utf8");
 const virtualCardCreate = readFileSync(join(root, "src/virtualCardCreate.ts"), "utf8");
 const cardReplacement = readFileSync(join(root, "src/cardReplacement.ts"), "utf8");
+const cardReplacementPostChain = readFileSync(join(root, "src/cardReplacementPostChain.ts"), "utf8");
+const cardReplacementPostChainIntegrationTests = readFileSync(join(root, "tests/cardReplacementPostChain.integration.test.ts"), "utf8");
 const cardRenewal = readFileSync(join(root, "src/cardRenewal.ts"), "utf8");
 const kycStatus = readFileSync(join(root, "src/kycStatus.ts"), "utf8");
 const kycStatusPanel = readFileSync(join(root, "src/KycStatusPanel.tsx"), "utf8");
@@ -189,7 +191,7 @@ assert(virtualCardCreate.includes("parseVirtualCardCreateInput"), "Virtual Card 
 assert(virtualCardCreate.includes("parseVirtualCardCreateResponse"), "Virtual Card response must use an exact public Card parser");
 assert(virtualCardCreate.includes("virtualCardCreateRequestIsCurrent"), "Virtual Card creation must be isolated by session scope and generation");
 assert(apiClient.includes("submitCardReplacement(cardReplacementTransport,session,walletRuntime.environment"), "Card replacement must fail closed through the typed session-gated consumer");
-assert(apiClient.includes("cardReplacementTransport=({path,method,body,idempotencyKey}"), "Card replacement must make one typed POST with the caller-owned idempotency key");
+assert(apiClient.includes("cardReplacementTransport=({path,method,body,idempotencyKey,signal}") && apiClient.includes("'json',signal,undefined,'caller'"), "Card replacement must make one caller-cancelled typed POST with caller-owned 401 handling");
 assert(cardReplacement.includes('runtimeEnvironment !== "SANDBOX" && runtimeEnvironment !== "TEST"') && cardReplacement.includes("session.expiresAt"), "Card replacement must require an unexpired matching SANDBOX or TEST session");
 assert(cardReplacement.includes("card.capabilities.replace"), "Card replacement must require the Backend replace capability");
 assert(cardReplacement.includes('Object.getPrototypeOf(value) !== Object.prototype'), "Card replacement response must accept only ordinary JSON objects");
@@ -200,6 +202,9 @@ assert(cardReplacement.includes("hasAvailableBalanceMinor") && cardReplacement.i
 assert(cardReplacement.includes("request.reason !== currentReason") && cardReplacement.includes("cardReplacementVersionMatches(request.oldCardVersion, currentOldCard)"), "Card replacement must bind reason and every selected old Card version field");
 assert(cardReplacement.includes("beginCardReplacement") && cardReplacement.includes("gate.activeRequestId !== null"), "Card replacement must synchronously reject double click");
 assert(cardReplacement.includes("createCardReplacementCommit") && cardReplacement.includes("collides with an existing Card"), "Card replacement must atomically replace the old Card and reject identity collisions");
+assert(cardReplacementPostChain.includes("CARD_REPLACEMENT_CONFIRMATION_MAX_PAGES = 25") && cardReplacementPostChain.includes('predecessor.status !== "CLOSED"') && cardReplacementPostChain.includes("publicCardVersion(successor) !== publicCardVersion(submitted)"), "Card replacement must confirm the exact closed predecessor and accepted successor through bounded persisted reads");
+assert(cardReplacementPostChain.includes("runCardReplacementPostChain") && cardReplacementPostChain.includes("await input.submit(input.signal)") && cardReplacementPostChain.includes("readCardDetailRefresh(") && cardReplacementPostChain.includes("createCardReplacementInvalidatedCommit"), "One Card replacement orchestrator must own the single POST, confirmation, successor refresh and fail-closed outcome");
+assert(cardReplacementPostChainIntegrationTests.includes('assert.equal(calls.filter(call => call === "POST").length, 1)') && cardReplacementPostChainIntegrationTests.includes('assert.equal(pages, 25)') && cardReplacementPostChainIntegrationTests.includes('assert.equal(await operation, null)'), "Executable SANDBOX/TEST replacement tests must cover one POST, bounded confirmation and stale zero-commit outcomes");
 assert(walletOperations.includes("/v1/wallet/operations?"), "Wallet activity must use the public operation history contract");
 assert(walletOperations.includes('query.set("limit", String(WALLET_OPERATION_PAGE_SIZE))'), "Wallet activity requests must remain bounded");
 assert(!walletOperations.includes("new URLSearchParams({ assetCode"), "Wallet activity must not invent an asset filter");
@@ -356,7 +361,8 @@ assert(app.includes("replacementDecision?.allowed&&<form"), "Card replacement UI
 assert(app.includes("beginCardReplacement(cardReplacementSubmitGate.current,requestId)"), "Card replacement must synchronously block duplicate submissions");
 assert(app.includes("createCardReplacementRequestIdentity(requestId,decision.scopeKey,input.reason,oldCard,crypto.randomUUID())"), "Each accepted Card replacement submission must generate one fresh UUIDv4");
 assert(app.includes("cardReplacementReasonRef.current,selectedCardRef.current") && app.includes("walletRequestMounted.current&&"), "Card replacement completion must bind reason, selection, session and mounted state");
-assert(app.includes("createCardReplacementCommit(cardsRef.current,selectedCardRef.current,request.oldCardVersion,replacement)"), "Card replacement UI must commit one collision-checked atomic list and selection update");
+assert(app.includes("await runCardReplacementPostChain({") && app.includes("confirmCardReplacement") && app.includes("invalidatedCommit=outcome.commit"), "Card replacement UI must consume only the post-chain complete or safely invalidated commit");
+assert(app.includes("setCards([...commit.cards])") && app.includes("setSelectedCard(commit.card)") && app.includes("replaceCardTransactionHistory") && app.includes("replaceCardTimelineHistory"), "Card replacement UI must atomically move selection and all successor resources only after confirmation");
 assert(app.includes("Manual SANDBOX/TEST only · one canonical UUIDv4 Idempotency-Key · at most one POST · no automatic retries."), "Card replacement UI must state the non-production one-POST no-retry boundary");
 assert(app.includes("Card replacement unavailable for this session · Trace"), "Card replacement errors must remain Provider and internal-detail neutral");
 assert(apiClient.includes("submitCardRenewal(cardRenewalTransport,session,walletRuntime.environment"), "Card renewal must fail closed through the typed session-gated consumer");

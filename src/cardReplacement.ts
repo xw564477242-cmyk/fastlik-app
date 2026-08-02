@@ -23,6 +23,7 @@ export type CardReplacementTransportRequest = Readonly<{
   method: "POST";
   body: CardReplacementInput;
   idempotencyKey: string;
+  signal?: AbortSignal;
 }>;
 
 export type CardReplacementTransport = (request: CardReplacementTransportRequest) => Promise<unknown>;
@@ -416,6 +417,7 @@ export async function submitCardReplacement(
   input: CardReplacementInput,
   idempotencyKey: string,
   now = Date.now(),
+  signal?: AbortSignal,
 ): Promise<CardRecord> {
   const decision = cardReplacementDecision(oldCard, session, runtimeEnvironment, currentScopeKey, currentCardId, now);
   if (!decision.allowed || decision.scopeKey === null)
@@ -426,6 +428,7 @@ export async function submitCardReplacement(
     method: "POST",
     body: normalized,
     idempotencyKey: validateCardReplacementIdempotencyKey(idempotencyKey),
+    ...(signal ? { signal } : {}),
   });
   return parseCardReplacementResponse(response, oldCard.id);
 }

@@ -18,7 +18,8 @@ import {WALLET_TRANSFER_STATUS_REFRESH_LIMIT,walletRequestIsCurrent,walletTransf
 import {DEFAULT_WALLET_OPERATION_FILTERS,WALLET_OPERATION_STATUSES,WALLET_OPERATION_TYPES,appendWalletOperationPage,createWalletOperationActivityRequestIdentity,createWalletOperationDetailRequestIdentity,walletOperationActivityRequestIsCurrent,walletOperationDetailRequestIsCurrent,walletOperationFilterKey,walletOperationRequestWasAborted,type WalletOperationFilterSelection} from './walletOperations'
 import {parseVirtualCardCreateInput,virtualCardCreateDecision,virtualCardCreateRequestIsCurrent} from './virtualCardCreate'
 import type {VirtualCardCreateInput} from './virtualCardCreate'
-import {CARD_REPLACEMENT_REASONS,beginCardReplacement,captureCardReplacementVersion,cardReplacementDecision,cardReplacementRequestIsCurrent,cardReplacementVersionMatches,createCardReplacementCommit,createCardReplacementRequestIdentity,parseCardReplacementInput,settleCardReplacement} from './cardReplacement'
+import {CARD_REPLACEMENT_REASONS,beginCardReplacement,captureCardReplacementVersion,cardReplacementDecision,cardReplacementRequestIsCurrent,cardReplacementVersionMatches,createCardReplacementRequestIdentity,parseCardReplacementInput,settleCardReplacement} from './cardReplacement'
+import {cardReplacementPostChainFailureIsAmbiguous,createCardReplacementInvalidatedCommit,runCardReplacementPostChain,type CardReplacementConfirmation,type CardReplacementInvalidatedCommit} from './cardReplacementPostChain'
 import {beginCardRenewal,captureCardRenewalVersion,cardRenewalDecision,cardRenewalRequestIsCurrent,cardRenewalVersionMatches,createCardRenewalCommit,createCardRenewalRequestIdentity,settleCardRenewal} from './cardRenewal'
 import {captureWalletAccountsVersion,walletBalanceSummaryRequestIsCurrent,walletBalanceSummaryRequestWasAborted,walletBalanceSummaryRetainsSnapshotOnFailure} from './walletBalanceSummary'
 import {walletAccountBalanceRequestWasAborted,walletAccountBalanceRetainsSnapshotOnFailure} from './walletAccountBalance'
@@ -165,6 +166,7 @@ export default function App(){
  const cardReplacementRequestSequence=useRef(0)
  const cardReplacementTarget=useRef<string|null>(null)
  const cardReplacementSubmitGate=useRef<{activeRequestId:number|null}>({activeRequestId:null})
+ const cardReplacementAbortController=useRef<AbortController|null>(null)
  const cardReplacementInFlight=useRef(false)
  const cardReplacementReasonRef=useRef<CardReplacementReason>('LOST')
  const cardRenewalRequestSequence=useRef(0)
@@ -262,7 +264,7 @@ export default function App(){
  const clearCardTimeline=()=>{abortCardTimelineRequest();cardTimelineRequestSequence.current+=1;cardTimelineTarget.current=null;cardTimelineCursorTarget.current=null;replaceCardTimelineHistory(null);setCardTimelineLoadingMore(false);resetCardTimelineRefresh();setCardTimelineError('')}
  const resetCardTransactionFilter=()=>{cardTransactionFilterRef.current='ALL';setCardTransactionFilterState('ALL')}
  const clearVirtualCardCreate=()=>{virtualCardCreateRequestSequence.current+=1;virtualCardCreateInFlight.current=false;setVirtualCardCreating(false);setVirtualCardCreateError('');setVirtualCardCurrency('USD');setVirtualCardAlias('')}
- const clearCardReplacement=()=>{cardReplacementRequestSequence.current+=1;cardReplacementTarget.current=null;cardReplacementSubmitGate.current.activeRequestId=null;cardReplacementInFlight.current=false;cardReplacementReasonRef.current='LOST';setCardReplacing(false);setCardReplacementError('');setCardReplacementReasonState('LOST')}
+ const clearCardReplacement=()=>{cardReplacementAbortController.current?.abort();cardReplacementAbortController.current=null;cardReplacementRequestSequence.current+=1;cardReplacementTarget.current=null;cardReplacementSubmitGate.current.activeRequestId=null;cardReplacementInFlight.current=false;cardReplacementReasonRef.current='LOST';setCardReplacing(false);setCardReplacementError('');setCardReplacementReasonState('LOST')}
  const clearCardRenewal=()=>{cardRenewalRequestSequence.current+=1;cardRenewalTarget.current=null;cardRenewalSubmitGate.current.activeRequestId=null;cardRenewalInFlight.current=false;setCardRenewing(false);setCardRenewalError('')}
  const replaceAccounts=(rows:WalletAccountRecord[])=>{accountsRef.current=rows;setAccounts(rows)}
  const replaceSession=(next:WalletSession|null)=>{sessionRef.current=next;setSession(next)}
@@ -664,7 +666,7 @@ export default function App(){
  const selectWalletTransaction=async(transaction:WalletTransactionRecord)=>{replaceSelectedWalletTransaction(transaction);await loadWalletTransactionDetail(transaction)}
  const refreshSelectedWalletTransaction=()=>{const transaction=selectedWalletTransactionRef.current;if(transaction)void loadWalletTransactionDetail(transaction)}
  useEffect(()=>{cardsRef.current=cards},[cards])
- useEffect(()=>{walletRequestMounted.current=true;return()=>{walletRequestMounted.current=false;sessionRef.current=null;selectedCardTransactionDetailRef.current=null;cardRequestSequence.current+=1;abortCardListRequest();cardListCursorTarget.current=null;cardDetailRequestSequence.current+=1;abortCardDetailRequest();abortCardTransactionRequest();abortCardTransactionDetailRequest();abortCardTimelineRequest();cardTransactionRequestSequence.current+=1;cardTransactionDetailRequestSequence.current+=1;cardTimelineRequestSequence.current+=1;cardTransactionTarget.current=null;cardTransactionCursorTarget.current=null;cardTimelineTarget.current=null;cardTimelineCursorTarget.current=null;walletOperationRequestSequence.current+=1;walletOperationDetailRequestSequence.current+=1;walletOperationInFlight.current=false;abortWalletOperationRequest();abortWalletOperationDetailRequest();walletHistoryRequestSequence.current+=1;walletTransactionDetailRequestSequence.current+=1;walletTransferRequestSequence.current+=1;walletTransferTarget.current=null;walletTransferSubmitGate.current.activeRequestId=null;walletTransferStatusRequestSequence.current+=1;walletTransferStatusTarget.current=null;walletTransferStatusInFlight.current=false;walletTransferInputGeneration.current+=1;cardLimitsUpdateRequestSequence.current+=1;cardLimitsUpdateSubmitGate.current.activeRequestId=null;cardLimitsUpdateInFlight.current=false;cardActionRequestSequence.current+=1;cardActionTarget.current=null;cardStatusAbortController.current?.abort();cardStatusAbortController.current=null;cardStatusSubmitGate.current.activeRequestId=null;cardStatusInFlight.current=false;cardStatusRetryRequest.current=null;cardStatusConflictRequest.current=null;cardReplacementRequestSequence.current+=1;cardReplacementTarget.current=null;cardReplacementSubmitGate.current.activeRequestId=null;cardReplacementInFlight.current=false;cardRenewalRequestSequence.current+=1;cardRenewalTarget.current=null;cardRenewalSubmitGate.current.activeRequestId=null;cardRenewalInFlight.current=false;abortWalletAccountBalanceRequest();abortWalletHistoryRequest();abortWalletTransactionDetailRequest();abortWalletBalanceSummaryRequest()}},[])
+ useEffect(()=>{walletRequestMounted.current=true;return()=>{walletRequestMounted.current=false;sessionRef.current=null;selectedCardTransactionDetailRef.current=null;cardRequestSequence.current+=1;abortCardListRequest();cardListCursorTarget.current=null;cardDetailRequestSequence.current+=1;abortCardDetailRequest();abortCardTransactionRequest();abortCardTransactionDetailRequest();abortCardTimelineRequest();cardTransactionRequestSequence.current+=1;cardTransactionDetailRequestSequence.current+=1;cardTimelineRequestSequence.current+=1;cardTransactionTarget.current=null;cardTransactionCursorTarget.current=null;cardTimelineTarget.current=null;cardTimelineCursorTarget.current=null;walletOperationRequestSequence.current+=1;walletOperationDetailRequestSequence.current+=1;walletOperationInFlight.current=false;abortWalletOperationRequest();abortWalletOperationDetailRequest();walletHistoryRequestSequence.current+=1;walletTransactionDetailRequestSequence.current+=1;walletTransferRequestSequence.current+=1;walletTransferTarget.current=null;walletTransferSubmitGate.current.activeRequestId=null;walletTransferStatusRequestSequence.current+=1;walletTransferStatusTarget.current=null;walletTransferStatusInFlight.current=false;walletTransferInputGeneration.current+=1;cardLimitsUpdateRequestSequence.current+=1;cardLimitsUpdateSubmitGate.current.activeRequestId=null;cardLimitsUpdateInFlight.current=false;cardActionRequestSequence.current+=1;cardActionTarget.current=null;cardStatusAbortController.current?.abort();cardStatusAbortController.current=null;cardStatusSubmitGate.current.activeRequestId=null;cardStatusInFlight.current=false;cardStatusRetryRequest.current=null;cardStatusConflictRequest.current=null;cardReplacementAbortController.current?.abort();cardReplacementAbortController.current=null;cardReplacementRequestSequence.current+=1;cardReplacementTarget.current=null;cardReplacementSubmitGate.current.activeRequestId=null;cardReplacementInFlight.current=false;cardRenewalRequestSequence.current+=1;cardRenewalTarget.current=null;cardRenewalSubmitGate.current.activeRequestId=null;cardRenewalInFlight.current=false;abortWalletAccountBalanceRequest();abortWalletHistoryRequest();abortWalletTransactionDetailRequest();abortWalletBalanceSummaryRequest()}},[])
  useEffect(()=>{const invalidate=(event:Event)=>{const value=event instanceof CustomEvent?event.detail:null;if(sessionFailureRequiresClear(value)){if(walletScope.current)handleSessionInvalidation(value);else clear()}};window.addEventListener('fastlink:session-invalid',invalidate);void (async()=>{try{await acceptSession(await walletApi.session())}catch(value){if(sessionFailureRequiresClear(value)){if(value instanceof SessionValidationError||walletScope.current)handleSessionInvalidation(value)}else setError(describe(value))}finally{if(walletRequestMounted.current)setBusy(false)}})();return()=>window.removeEventListener('fastlink:session-invalid',invalidate)},[])
  useEffect(()=>{if(!session)return;const expiresAt=typeof session.expiresAt==='string'?Date.parse(session.expiresAt):Number.NaN;const remaining=expiresAt-Date.now();if(!Number.isFinite(remaining)||remaining<=0){clear();return}const timeout=window.setTimeout(()=>clear(),Math.min(remaining,2_147_483_647));return()=>window.clearTimeout(timeout)},[session])
  const authenticate=async(event:FormEvent)=>{event.preventDefault();setBusy(true);setError('');clear();try{const credentials:WalletCredentials={tenantId:tenantId.trim(),email:email.trim(),password};const current=mode==='login'?await walletApi.login(credentials):await walletApi.register(credentials);await acceptSession(current);setPassword('')}catch(value){if(sessionFailureRequiresClear(value))handleSessionInvalidation(value);else setError(describe(value))}finally{setBusy(false)}}
@@ -697,24 +699,153 @@ export default function App(){
   cardReplacementInFlight.current=true
   setCardReplacing(true)
   setCardReplacementError('')
+  abortCardListRequest()
+  abortCardDetailRequest()
+  abortCardTransactionRequest()
+  abortCardTransactionDetailRequest()
+  abortCardTimelineRequest()
+  const controller=new AbortController()
+  cardReplacementAbortController.current=controller
+  const transactionFilter=cardTransactionFilterRef.current
+  let successorDetailRequest:ReturnType<typeof createCardDetailRefreshRequestIdentity>|null=null
+  let successorTransactionRequest:ReturnType<typeof createCardTransactionHistoryRequestIdentity>|null=null
+  let successorTimelineRequest:ReturnType<typeof createCardTimelineRequestIdentity>|null=null
+  let successorId:string|null=null
+  const successorReadsAreCurrent=()=>Boolean(
+   successorId===null||(
+    successorDetailRequest&&successorTransactionRequest&&successorTimelineRequest&&
+    cardDetailAbortController.current===controller&&
+    cardDetailRefreshRequestIsCurrent(successorDetailRequest,cardDetailRequestSequence.current,cardScope.current,successorId,walletRequestMounted.current)&&
+    cardDetailTarget.current===successorId&&cardBalanceTarget.current===successorId&&cardLimitsTarget.current===successorId&&
+    cardTransactionTarget.current===successorId&&cardTimelineTarget.current===successorId&&
+    cardTransactionHistoryRequestIsCurrent(successorTransactionRequest,cardTransactionRequestSequence.current,cardScope.current,successorId,cardTransactionFilterRef.current,cardTransactionCursorTarget.current,walletRequestMounted.current)&&
+    cardTimelineRequestIsCurrent(successorTimelineRequest,cardTimelineRequestSequence.current,cardScope.current,successorId,cardTimelineCursorTarget.current,walletRequestMounted.current)
+   )
+  )
+  const chainIsCurrent=()=>Boolean(isCurrent()&&cardReplacementAbortController.current===controller&&!controller.signal.aborted&&successorReadsAreCurrent())
+  let confirmed:CardReplacementConfirmation|null=null
+  let invalidatedCommit:CardReplacementInvalidatedCommit|null=null
   try{
-   const replacement=await walletApi.replaceCard(activeSession,oldCard,input,request.idempotencyKey,cardScope.current,cardDetailTarget.current)
-   if(!isCurrent())return
-   const commit=createCardReplacementCommit(cardsRef.current,selectedCardRef.current,request.oldCardVersion,replacement)
+   const outcome=await runCardReplacementPostChain({
+    selected:oldCard,
+    submit:signal=>walletApi.replaceCard(activeSession,oldCard,input,request.idempotencyKey,request.scopeKey,oldCard.id,signal??controller.signal),
+    confirm:(submitted,signal)=>{
+     if(successorId!==null)throw new Error('Duplicate Card replacement confirmation')
+     successorId=submitted.id
+     successorDetailRequest=createCardDetailRefreshRequestIdentity(++cardDetailRequestSequence.current,request.scopeKey,submitted.id)
+     successorTransactionRequest=createCardTransactionHistoryRequestIdentity(++cardTransactionRequestSequence.current,request.scopeKey,submitted.id,transactionFilter,null)
+     successorTimelineRequest=createCardTimelineRequestIdentity(++cardTimelineRequestSequence.current,request.scopeKey,submitted.id,null)
+     cardDetailAbortController.current=controller
+     cardDetailTarget.current=submitted.id
+     cardSnapshotTarget.current=null
+     cardBalanceRequestSequence.current+=1
+     cardBalanceTarget.current=submitted.id
+     cardLimitsRequestSequence.current+=1
+     cardLimitsTarget.current=submitted.id
+     cardTransactionTarget.current=submitted.id
+     cardTransactionCursorTarget.current=null
+     cardTimelineTarget.current=submitted.id
+     cardTimelineCursorTarget.current=null
+     setCardBalanceLoading(true)
+     setCardLimitsLoading(true)
+     setCardTransactionLoadingMore(false)
+     setCardTimelineLoadingMore(false)
+     resetCardTransactionRefresh()
+     resetCardTimelineRefresh()
+     setCardRefreshError('')
+     setCardBalanceError('')
+     setCardLimitsError('')
+     setCardTransactionError('')
+     setCardTimelineError('')
+     return walletApi.confirmCardReplacement(activeSession,request.scopeKey,oldCard,submitted,signal??controller.signal)
+    },
+    refresh:{
+     card:(id,signal)=>walletApi.card(id,signal),
+     balance:(id,signal)=>walletApi.balance(id,signal),
+     limits:(id,signal)=>walletApi.limits(id,signal),
+     transactions:(id,signal)=>walletApi.transactions(id,{filter:transactionFilter},signal),
+     timeline:(id,signal)=>walletApi.timeline(activeSession,request.scopeKey,id,null,signal??controller.signal),
+    },
+    isCurrent:chainIsCurrent,
+    signal:controller.signal,
+   })
+   if(!outcome||!chainIsCurrent())return
+   confirmed=outcome.confirmation
+   if(outcome.status==='CONFIRMED_REFRESH_FAILED'){
+    invalidatedCommit=outcome.commit
+    throw outcome.failure
+   }
+   const commit=outcome.commit
    settleCardReplacement(cardReplacementSubmitGate.current,requestId)
    cardReplacementInFlight.current=false
    cardReplacementTarget.current=null
+   cardReplacementAbortController.current=null
+   if(cardDetailAbortController.current===controller)cardDetailAbortController.current=null
    setCardReplacing(false)
-   setCards(commit.cards)
-   setSelectedCard(commit.selectedCard)
+   setBusy(false)
+   setCards([...commit.cards])
+   setCardNextCursor(commit.nextCursor)
+   setSelectedCard(commit.card)
    setCardListError('')
-   setBusy(true)
-   await loadCard(commit.selectedCard,request.scopeKey,activeSession,detailCallbacks)
-  }catch(value){if(isCurrent())setCardReplacementError(describeCardReplacement(value))}
+   setCardBalance(commit.balance)
+   replaceCardLimits(commit.limits)
+   replaceCardTransactionHistory(commitCardTransactionHistoryPage(null,successorTransactionRequest as NonNullable<typeof successorTransactionRequest>,commit.transactions))
+   replaceCardTimelineHistory(commitCardTimelinePage(null,successorTimelineRequest as NonNullable<typeof successorTimelineRequest>,commit.timeline))
+   cardSnapshotTarget.current=commit.card.id
+   setCardBalanceLoading(false)
+   setCardLimitsLoading(false)
+  }catch(value){
+   if(chainIsCurrent()){
+    if(sessionFailureRequiresClear(value))handleSessionInvalidation(value,sessionRef.current===activeSession)
+    else if(confirmed){
+     const commit=invalidatedCommit??createCardReplacementInvalidatedCommit(confirmed)
+     controller.abort()
+     settleCardReplacement(cardReplacementSubmitGate.current,requestId)
+     cardReplacementInFlight.current=false
+     cardReplacementTarget.current=null
+     cardReplacementAbortController.current=null
+     if(cardDetailAbortController.current===controller)cardDetailAbortController.current=null
+     setCardReplacing(false)
+     setBusy(false)
+     setCards([...commit.cards])
+     setCardNextCursor(commit.nextCursor)
+     setSelectedCard(commit.card)
+     setCardListError('')
+     cardDetailTarget.current=null
+     cardSnapshotTarget.current=null
+     clearCardBalance()
+     clearCardLimits()
+     clearCardTransactions()
+     clearCardTimeline()
+     setCardRefreshError('Card replacement was confirmed, but the complete successor Card refresh failed. Refresh the Card before another action.')
+     setCardReplacementError('Card replacement is confirmed. Associated Card data was safely cleared; refresh the real Card before another action.')
+    }else if(cardReplacementPostChainFailureIsAmbiguous(value)){
+     controller.abort()
+     settleCardReplacement(cardReplacementSubmitGate.current,requestId)
+     cardReplacementInFlight.current=false
+     cardReplacementTarget.current=null
+     cardReplacementAbortController.current=null
+     if(cardDetailAbortController.current===controller)cardDetailAbortController.current=null
+     setCardReplacing(false)
+     setBusy(false)
+     setCards([])
+     setCardNextCursor(null)
+     setSelectedCard(null)
+     cardDetailTarget.current=null
+     cardSnapshotTarget.current=null
+     clearCardBalance()
+     clearCardLimits()
+     clearCardTransactions()
+     clearCardTimeline()
+     setCardListError('Card replacement was accepted but its exact persisted result is not confirmed. Refresh the real Card list; do not submit another replacement.')
+    }
+    else setCardReplacementError(describeCardReplacement(value))
+   }
+  }
   finally{
-   const currentRequest=isCurrent()
+   const currentRequest=chainIsCurrent()
    const settled=settleCardReplacement(cardReplacementSubmitGate.current,requestId)
-   if(currentRequest&&settled){cardReplacementInFlight.current=false;cardReplacementTarget.current=null;setCardReplacing(false)}
+   if(currentRequest&&settled){controller.abort();cardReplacementInFlight.current=false;cardReplacementTarget.current=null;cardReplacementAbortController.current=null;if(cardDetailAbortController.current===controller)cardDetailAbortController.current=null;setCardReplacing(false);setBusy(false);setCardBalanceLoading(false);setCardLimitsLoading(false)}
   }
  }
  const renewSelectedCard=async(event:FormEvent)=>{
@@ -1135,7 +1266,7 @@ export default function App(){
      <button onClick={toggle} disabled={busy||virtualCardCreating||cardReplacing||cardRenewing||cardStatusConflictPending||!toggleDecision?.allowed} title={cardStatusConflictPending?'Refresh the real Card before another status action':toggleDecision?.reason??undefined}>{toggleDecision?.operation==='activate'?<ShieldCheck/>:<Snowflake/>} {cardStatusConflictPending?'Refresh Card first':cardStatusRetryPending?`Retry ${toggleDecision?.label??'Card action'}`:toggleDecision?.label??'Card action unavailable'}</button>
      <p className="card-action-note">Manual SANDBOX/TEST action · browser Cookie, CSRF and same-origin Origin · one bodyless POST · one explicit same-key retry only · activation, freeze and unfreeze commit Card, list, balance, limits, transactions and timeline only after exact persisted reads agree.</p>
      {toggleDecision?.reason&&<p className="card-action-note">{toggleDecision.reason}</p>}
-     {replacementDecision?.allowed&&<form className="transfer-form" onSubmit={replaceSelectedCard}><h3><RefreshCw/> Replace selected Card · {session?.environment}</h3><select value={cardReplacementReason} onChange={event=>updateCardReplacementReason(event.target.value as CardReplacementReason)} disabled={cardReplacing||virtualCardCreating||cardRenewing}>{CARD_REPLACEMENT_REASONS.map(reason=><option key={reason} value={reason}>{reason}</option>)}</select><button disabled={busy||cardReplacing||virtualCardCreating||cardRenewing}>{cardReplacing?'Replacing once…':'Replace selected Card'}</button>{cardReplacementError&&<div className="inline-error">{cardReplacementError} · No Provider or internal error details displayed.</div>}<p className="card-action-note">Manual SANDBOX/TEST only · one canonical UUIDv4 Idempotency-Key · at most one POST · no automatic retries.</p></form>}
+     {replacementDecision?.allowed&&<form className="transfer-form" onSubmit={replaceSelectedCard}><h3><RefreshCw/> Replace selected Card · {session?.environment}</h3><select value={cardReplacementReason} onChange={event=>updateCardReplacementReason(event.target.value as CardReplacementReason)} disabled={cardReplacing||virtualCardCreating||cardRenewing}>{CARD_REPLACEMENT_REASONS.map(reason=><option key={reason} value={reason}>{reason}</option>)}</select><button disabled={busy||cardReplacing||virtualCardCreating||cardRenewing}>{cardReplacing?'Replacing once…':'Replace selected Card'}</button>{cardReplacementError&&<div className="inline-error">{cardReplacementError} · No Provider or internal error details displayed.</div>}<p className="card-action-note">Manual SANDBOX/TEST only · one canonical UUIDv4 Idempotency-Key · at most one POST · no automatic retries. Selection and all Card resources change only after exact persisted predecessor, successor and bounded list reads agree.</p></form>}
      {renewalDecision?.allowed&&<form className="transfer-form" onSubmit={renewSelectedCard}><h3><RefreshCw/> Renew selected Card · {session?.environment}</h3><button disabled={busy||cardRenewing||virtualCardCreating||cardReplacing}>{cardRenewing?'Renewing once…':'Renew selected Card'}</button>{cardRenewalError&&<div className="inline-error">{cardRenewalError} · No Provider or internal error details displayed.</div>}<p className="card-action-note">Manual SANDBOX/TEST only · one canonical UUIDv4 Idempotency-Key · at most one bodyless POST · no automatic retries.</p></form>}
      <div className="record-list"><div className="panel-row"><h3>Card transactions</h3><button type="button" onClick={()=>void refreshCardTransactions()} disabled={busy||!transactionRefreshAllowed||cardTransactionRefreshAttempt>=CARD_TRANSACTION_REFRESH_MAX_ATTEMPTS} title={transactionRefreshAllowed?'Refresh the current Card and status filter only':'Available only for the current SANDBOX/TEST Card and filter'}><RefreshCw/> {cardTransactionRefreshing?`Refresh again (${cardTransactionRefreshAttempt}/${CARD_TRANSACTION_REFRESH_MAX_ATTEMPTS})`:cardTransactionError&&cardTransactionRefreshAttempt>0?cardTransactionRefreshAttempt>=CARD_TRANSACTION_REFRESH_MAX_ATTEMPTS?'Retry limit reached':`Retry transactions (${cardTransactionRefreshAttempt}/${CARD_TRANSACTION_REFRESH_MAX_ATTEMPTS})`:'Refresh transactions'}</button></div><p className="card-action-note">Manual SANDBOX/TEST GET · current Card and status filter only · at most {CARD_TRANSACTION_REFRESH_MAX_ATTEMPTS} attempts per cycle · no automatic retries.</p><div className="wallet-history-filters"><label>Status<select aria-label="Card transaction status filter" value={cardTransactionFilter} onChange={event=>changeCardTransactionFilter(event.target.value)} disabled={busy||cardTransactionLoadingMore}>{CARD_TRANSACTION_FILTERS.map(filter=><option value={filter} key={filter}>{filter==='ALL'?'All':filter}</option>)}</select></label></div>{cardTransactionRefreshing&&<p>Refreshing current Card transactions… Keeping the last verified snapshot until completion.</p>}{cardTransactionError&&<div className="inline-error">{cardTransactionError} · The verified same-filter state remains unchanged; no unvalidated or cross-filter data displayed.</div>}{cardTransactions.length===0&&!cardTransactionError&&!cardTransactionRefreshing&&<p>No Card transactions match this status.</p>}{cardTransactions.map(transaction=><button type="button" className={`wallet-history-row${selectedCardTransaction?.id===transaction.id?' selected':''}`} key={transaction.id} onClick={()=>selectCardTransactionDetail(transaction)} disabled={busy||cardTransactionLoadingMore}><span><b>{transaction.merchantName??'Card transaction'}</b><small>{transaction.status} · {new Date(transaction.occurredAt).toLocaleString()} {transaction.merchantCategory?`· MCC ${transaction.merchantCategory}`:''}</small></span><b>{transaction.amountMinor} minor {transaction.currency}</b></button>)}{cardTransactionNextCursor&&<button className="load-more" onClick={()=>void loadMoreCardTransactions()} disabled={busy||cardTransactionLoadingMore||cardTransactionRefreshing||virtualCardCreating||cardReplacing||cardRenewing}>{cardTransactionLoadingMore?'Loading more transactions…':'Load more transactions'}</button>}{selectedCardTransaction&&<div className="wallet-transaction-detail"><div className="panel-row"><h4>Selected Card transaction · read only</h4><button type="button" onClick={()=>void refreshSelectedCardTransactionDetail()} disabled={busy||!transactionRefreshAllowed}><RefreshCw/> {cardTransactionDetailRefreshing?'Refresh again':'Refresh detail'}</button></div><small>Manual only · one GET per click · no automatic retries · current unexpired session, Card, status filter and list snapshot only.</small>{cardTransactionDetailRefreshing&&<p>Refreshing selected transaction… Keeping the last verified detail until completion.</p>}{cardTransactionDetailError&&<div className="inline-error">{cardTransactionDetailError} · The last verified detail remains unchanged; no upstream details displayed.</div>}<div><span>Transaction</span><b>{selectedCardTransaction.id}</b></div><div><span>Type (from status)</span><b>{cardTransactionLifecycleType(selectedCardTransaction.status)}</b></div><div><span>Status</span><b>{selectedCardTransaction.status}</b></div><div><span>Amount</span><b>{selectedCardTransaction.amountMinor} minor {selectedCardTransaction.currency}</b></div><div><span>Authorized</span><b>{selectedCardTransaction.authorizedAmountMinor} minor</b></div><div><span>Cleared</span><b>{selectedCardTransaction.clearedAmountMinor} minor</b></div><div><span>Settled</span><b>{selectedCardTransaction.settledAmountMinor} minor</b></div><div><span>Reversed</span><b>{selectedCardTransaction.reversedAmountMinor} minor</b></div><div><span>Refunded</span><b>{selectedCardTransaction.refundedAmountMinor} minor</b></div><div><span>Currency</span><b>{selectedCardTransaction.currency}</b></div><div><span>Merchant</span><b>{selectedCardTransaction.merchantName??'Not provided'}</b></div><div><span>Merchant category</span><b>{selectedCardTransaction.merchantCategory??'Not provided'}</b></div><div><span>Occurred</span><b>{new Date(selectedCardTransaction.occurredAt).toLocaleString()}</b></div><div><span>Trace</span><b>{selectedCardTransaction.traceId??'Not provided'}</b></div></div>}</div>
      <div className="record-list"><div className="panel-row"><h3>Card lifecycle timeline · read only</h3><button type="button" onClick={()=>void refreshCardTimeline()} disabled={busy||!timelineRefreshAllowed||cardTimelineRefreshAttempt>=CARD_TIMELINE_REFRESH_MAX_ATTEMPTS}><RefreshCw/> {cardTimelineRefreshing?`Refresh again (${cardTimelineRefreshAttempt}/${CARD_TIMELINE_REFRESH_MAX_ATTEMPTS})`:cardTimelineError&&cardTimelineRefreshAttempt>0?cardTimelineRefreshAttempt>=CARD_TIMELINE_REFRESH_MAX_ATTEMPTS?'Retry limit reached':`Retry timeline (${cardTimelineRefreshAttempt}/${CARD_TIMELINE_REFRESH_MAX_ATTEMPTS})`:'Refresh timeline'}</button></div><p className="card-action-note">GET only · signed opaque cursor · 25 per page, at most {CARD_TIMELINE_MAX_PAGES} pages · no automatic retries · current unexpired SANDBOX/TEST session and Card only.</p>{cardTimelineRefreshing&&<p>Refreshing lifecycle timeline… Keeping the last verified snapshot until completion.</p>}{cardTimelineError&&<div className="inline-error">{cardTimelineError} · The last verified lifecycle snapshot remains unchanged; no internal Provider fields displayed.</div>}{cardTimeline?.events.length===0&&!cardTimelineError&&!cardTimelineRefreshing&&<p>No persisted lifecycle events returned.</p>}{cardTimeline?.events.map(event=><div className="wallet-history-row" key={event.id}><span><b>{event.type}</b><small>{event.fromStatus??'—'} → {event.toStatus??'—'} · {new Date(event.occurredAt).toLocaleString()}</small></span><b>{event.id}</b></div>)}{cardTimeline?.nextCursor&&<button className="load-more" type="button" onClick={()=>void loadMoreCardTimeline()} disabled={busy||cardTimelineLoadingMore||cardTimelineRefreshing||virtualCardCreating||cardReplacing||cardRenewing}>{cardTimelineLoadingMore?'Loading more lifecycle events…':'Load more lifecycle events'}</button>}</div>
