@@ -4,7 +4,7 @@ import {CardBalanceRecord,CardLimitsRecord,CardReplacementInput,CardReplacementR
 import {CardDetailRefreshError,cardDetailRefreshCanRetainSnapshot,cardDetailRefreshRequestIsCurrent,cardDetailRefreshRequestWasAborted,createCardDetailRefreshRequestIdentity,readCardDetailRefresh} from './cardDetailRefresh'
 import {CARD_LIMIT_UPDATE_FIELDS,CARD_LIMIT_UPDATE_MAX_MINOR,beginCardLimitsUpdate,cardLimitsUpdateDecision,cardLimitsUpdateDraft,cardLimitsUpdateInputFromDraft,cardLimitsUpdateRequestIsCurrent,createCardLimitsUpdateRequestIdentity,settleCardLimitsUpdate,type CardLimitUpdateField,type CardLimitsUpdateDraft} from './cardLimitsUpdate'
 import {beginCardStatusAction,cardStatusConflictIsCurrent,cardStatusDecision,cardStatusFailureIsAmbiguous,cardStatusFailureIsExplicit401,cardStatusFailureKind,cardStatusRequestIsCurrent,cardStatusRetryKey,createCardStatusIdempotencyKey,createCardStatusRequestIdentity,settleCardStatusAction,type CardStatusRequestIdentity} from './cardStatusAction'
-import {cardActivationFailureIsAmbiguous,createCardActivationCommit} from './cardActivation'
+import {cardActivationFailureIsAmbiguous,createCardActivationInvalidatedCommit,runCardActivationPostChain,type CardActivationCommit,type CardActivationInvalidatedCommit} from './cardActivation'
 import {CardRecord,cardListRequestIsCurrent,cardListRequestWasAborted,cardRequestIsCurrent,createCardListRequestIdentity,mergeCardPages} from './cardList'
 import {CARD_TRANSACTION_FILTERS,CardTransactionFilter,CardTransactionRecord,cardTransactionLifecycleType,parseCardTransactionFilter} from './cardTransactions'
 import {CardTransactionDetailSelection,createCardTransactionDetailSelection,reconcileCardTransactionDetailSelection} from './cardTransactionDetail'
@@ -905,23 +905,36 @@ export default function App(){
   setBusy(true)
   setError('')
   let confirmedActivation:Awaited<ReturnType<typeof walletApi.confirmCardActivation>>|null=null
+  let invalidatedActivationCommit:CardActivationInvalidatedCommit|null=null
   try{
-   let updated=await walletApi.setCardStatus(activeSession,card,request.operation,request.idempotencyKey,cardScope.current,cardDetailTarget.current,controller.signal)
-   if(!isCurrent())return
-   let activationCommit:ReturnType<typeof createCardActivationCommit>|null=null
+   let updated:CardRecord
+   let activationCommit:CardActivationCommit|null=null
    if(request.operation==='activate'){
-    confirmedActivation=await walletApi.confirmCardActivation(activeSession,request.scopeKey,card,controller.signal)
-    if(!isCurrent())return
-    const snapshot=await readCardDetailRefresh({
-     card:(id,signal)=>walletApi.card(id,signal),
-     balance:(id,signal)=>walletApi.balance(id,signal),
-     limits:(id,signal)=>walletApi.limits(id,signal),
-     transactions:(id,signal)=>walletApi.transactions(id,{filter:activationTransactionFilter},signal),
-     timeline:(id,signal)=>walletApi.timeline(activeSession,request.scopeKey,id,null,signal??controller.signal),
-    },card.id,controller.signal)
-    if(!isCurrent())return
-    activationCommit=createCardActivationCommit(confirmedActivation,snapshot)
+    const outcome=await runCardActivationPostChain({
+     selected:card,
+     submit:signal=>walletApi.setCardStatus(activeSession,card,request.operation,request.idempotencyKey,cardScope.current,cardDetailTarget.current,signal??controller.signal),
+     confirm:signal=>walletApi.confirmCardActivation(activeSession,request.scopeKey,card,signal??controller.signal),
+     refresh:{
+      card:(id,signal)=>walletApi.card(id,signal),
+      balance:(id,signal)=>walletApi.balance(id,signal),
+      limits:(id,signal)=>walletApi.limits(id,signal),
+      transactions:(id,signal)=>walletApi.transactions(id,{filter:activationTransactionFilter},signal),
+      timeline:(id,signal)=>walletApi.timeline(activeSession,request.scopeKey,id,null,signal??controller.signal),
+     },
+     isCurrent,
+     signal:controller.signal,
+    })
+    if(!outcome||!isCurrent())return
+    confirmedActivation=outcome.confirmation
+    if(outcome.status==='CONFIRMED_REFRESH_FAILED'){
+     invalidatedActivationCommit=outcome.commit
+     throw outcome.failure
+    }
+    activationCommit=outcome.commit
     updated=activationCommit.card
+   }else{
+    updated=await walletApi.setCardStatus(activeSession,card,request.operation,request.idempotencyKey,cardScope.current,cardDetailTarget.current,controller.signal)
+    if(!isCurrent())return
    }
    cardStatusRetryRequest.current=null
    cardStatusConflictRequest.current=null
@@ -950,7 +963,7 @@ export default function App(){
     const ambiguous=cardStatusFailureIsAmbiguous(value)||cardActivationFailureIsAmbiguous(value)
     if(sessionFailureRequiresClear(value))handleSessionInvalidation(value,sessionRef.current===activeSession)
     else if(confirmedActivation){
-     const confirmed=confirmedActivation
+     const confirmed=invalidatedActivationCommit??createCardActivationInvalidatedCommit(confirmedActivation)
      controller.abort()
      settleCardStatusAction(cardStatusSubmitGate.current,requestId)
      cardStatusRetryRequest.current=null

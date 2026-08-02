@@ -17,6 +17,7 @@ const cardLimits = read("src/cardLimits.ts");
 const cardLimitsUpdate = read("src/cardLimitsUpdate.ts");
 const cardStatusAction = read("src/cardStatusAction.ts");
 const cardActivation = read("src/cardActivation.ts");
+const cardActivationIntegrationTests = read("tests/cardActivation.integration.test.ts");
 const cardReplacement = read("src/cardReplacement.ts");
 const cardRenewal = read("src/cardRenewal.ts");
 const cardTimeline = read("src/cardTimeline.ts");
@@ -82,7 +83,9 @@ assert(cardStatusAction.includes('return operation === "activate" ? `activate:${
 assert(cardActivation.includes("CARD_ACTIVATION_LIST_MAX_PAGES = 25") && cardActivation.includes('card.status !== "ACTIVE"') && cardActivation.includes('match.status !== "ACTIVE"'), "Card activation must be confirmed by bounded canonical Card and list reads");
 assert(cardActivation.includes("createCardActivationCommit") && cardActivation.includes("CardActivationPostRefreshError") && cardActivation.includes("cardPublicVersion(snapshot.card)"), "Card activation must expose one exact commit-ready complete Card snapshot");
 assert(apiClient.includes("confirmCardActivation:async") && apiClient.includes("readCardActivationConfirmation") && apiClient.includes("cardActivationListTransport"), "Card activation confirmation must use typed caller-owned persisted reads");
-assert(app.includes("createCardActivationCommit(confirmedActivation,snapshot)") && app.includes("if(confirmedActivation)") && app.includes("Associated Card data was safely cleared"), "Confirmed activation must atomically refresh or safely invalidate the complete Card screen");
+assert(cardActivation.includes("runCardActivationPostChain") && cardActivation.includes("await input.submit(input.signal)") && cardActivation.includes("readCardDetailRefresh(") && cardActivation.includes("createCardActivationInvalidatedCommit"), "One Card activation orchestrator must own POST, confirmation, five-resource refresh and fail-closed outcome creation");
+assert(app.includes("await runCardActivationPostChain({") && app.includes("if(outcome.status==='CONFIRMED_REFRESH_FAILED')") && app.includes("invalidatedActivationCommit=outcome.commit") && app.includes("Associated Card data was safely cleared"), "Production App must consume the tested activation orchestrator's exact complete or invalidated commit");
+assert(cardActivationIntegrationTests.includes('const invalidations = ["Session", "environment", "Card", "generation"]') && cardActivationIntegrationTests.includes('const completions = ["success", "error", "401"]'), "Cloudflare evidence must include executable stale activation success/error/401 isolation coverage");
 assert(app.includes("activation commits Card, list, balance, limits, transactions and timeline only after all persisted reads agree on ACTIVE"), "Card status UI must state its bounded retry and complete activation refresh boundary");
 assert(cardReplacement.includes('runtimeEnvironment !== "SANDBOX" && runtimeEnvironment !== "TEST"') && cardReplacement.includes("session.expiresAt"), "Card replacement writes must remain unexpired-session SANDBOX/TEST only");
 assert(cardReplacement.includes("beginCardReplacement") && cardReplacement.includes("cardReplacementRequestIsCurrent"), "Card replacement writes must prevent duplicates and reject stale completion writes");

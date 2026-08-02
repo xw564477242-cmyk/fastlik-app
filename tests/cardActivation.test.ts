@@ -6,6 +6,7 @@ import {
   CardActivationPostRefreshError,
   cardActivationFailureIsAmbiguous,
   createCardActivationCommit,
+  createCardActivationInvalidatedCommit,
   readCardActivationConfirmation,
 } from "../src/cardActivation.ts";
 import { readCardDetailRefresh } from "../src/cardDetailRefresh.ts";
@@ -105,6 +106,19 @@ test("creates one atomic activation commit only after detail, list and complete 
     await completeActiveSnapshot({ alias: "Cross-generation" }),
   ), CardActivationPostRefreshError);
   assert.equal(cardActivationFailureIsAmbiguous(new CardActivationPostRefreshError()), false);
+});
+
+test("confirmed refresh failure commit retains only ACTIVE Card/list and invalidates every associated resource", () => {
+  const verified = active();
+  const confirmation = Object.freeze({ card: verified, cards: Object.freeze([verified]), nextCursor: null });
+  const commit = createCardActivationInvalidatedCommit(confirmation);
+  assert.equal(commit.card.status, "ACTIVE");
+  assert.equal(commit.cards[0], verified);
+  assert.equal(commit.balance, null);
+  assert.equal(commit.limits, null);
+  assert.equal(commit.transactions, null);
+  assert.equal(commit.timeline, null);
+  assert.equal(Object.isFrozen(commit), true);
 });
 
 test("rejects non-PENDING selection before reads and propagates cancellation without a commit", async () => {
