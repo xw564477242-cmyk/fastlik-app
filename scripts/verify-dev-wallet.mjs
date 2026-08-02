@@ -105,7 +105,7 @@ assert(app.includes("walletRequestMounted.current&&") && app.includes("cardStatu
 assert(app.includes("Manual SANDBOX/TEST action · one bodyless POST per click · no automatic retries."), "Card status UI must state its manual non-production no-retry boundary");
 assert(apiClient.includes("internalTransfer:async") && apiClient.includes("Promise<WalletTransferReceipt>"), "Internal transfer must expose only the typed public receipt");
 assert(apiClient.includes("submitWalletTransfer(walletTransferTransport,session,walletRuntime.environment,accounts,input,idempotencyKey)"), "Transfer responses must pass through the bounded exact consumer");
-assert(app.includes("const idempotencyKey=crypto.randomUUID();const request=createWalletTransferRequestIdentity"), "Each user transfer submission must generate one caller-owned idempotency key");
+assert(app.includes("const idempotencyKey=crypto.randomUUID()") && app.includes("const request=createWalletTransferRequestIdentity(requestId,scope,account,input,idempotencyKey)"), "Each user transfer submission must generate one caller-owned idempotency key");
 assert(apiClient.includes("walletTransferStatus:async"), "Wallet must consume the existing safe operation status endpoint");
 assert(walletTransfer.includes("WALLET_TRANSFER_ACCOUNT_MAX_JSON_BYTES = 65_536") && walletTransfer.includes("WALLET_TRANSFER_RESPONSE_MAX_JSON_BYTES = 16_384"), "Wallet transfer raw JSON responses must remain bounded");
 assert(walletTransfer.includes("walletTransferSessionScope") && walletTransfer.includes("session.expiresAt"), "Wallet transfer scope must bind identity, environment, and session expiry");
@@ -118,8 +118,8 @@ assert(walletTransfer.includes("beginWalletTransferSubmit") && walletTransfer.in
 assert(app.includes("walletTransferSubmitGate.current.activeRequestId=null") && app.includes("walletTransferStatusInFlight.current=false"), "Wallet transfer busy and status state must clear synchronously with scope invalidation");
 assert(app.includes("setTransferReceipt(null)") && app.includes("replaceAccounts([])"), "Wallet transfer receipt and account data must clear on session changes and logout");
 assert(app.includes("useEffect(()=>{if(!session)return;const expiresAt=") && app.includes("window.setTimeout(()=>clear()"), "Wallet must clear transfer state when the session expires");
-assert(app.includes("const isCurrent=()=>walletTransferSessionScope(session,walletRuntime.environment)===scope"), "Wallet transfer completions must re-check session expiry before every write");
-assert(app.includes("catch{if(isCurrent())setWalletError(describeWalletTransfer())}"), "Wallet transfer errors must remain Provider, trace, and internal-detail neutral");
+assert(app.includes("walletTransferSessionScope(activeSession,walletRuntime.environment)===scope") && app.includes("consumerTransferUiRequestIsCurrent(uiRequest") && app.includes("walletRequestMounted.current"), "Wallet transfer completions must re-check session, input generation, selection and mount state before every write");
+assert(app.includes("setTransferError(receipt?'Transfer accepted, but current balances could not be refreshed.':describeWalletTransfer())"), "Wallet transfer errors must remain Provider, trace, and internal-detail neutral");
 assert(apiClient.includes("readFxQuote(fxQuoteTransport,session,walletRuntime.environment,input,signal)"), "FX quote must pass caller cancellation through the strict session-gated consumer");
 assert(apiClient.includes("fxQuoteTransport=({path,method,body,signal}:FxQuoteTransportRequest)=>request<string>(path,method,body,undefined,'text',signal,FX_QUOTE_RESPONSE_MAX_JSON_BYTES,'caller')"), "FX quote must use a bounded caller-scoped transport over the Cookie and CSRF aware same-origin API");
 assert(fxQuote.includes('FX_QUOTE_PATH = "/v1/wallet/fx/quotes"'), "FX quote must use the exact public Wallet quote path");
