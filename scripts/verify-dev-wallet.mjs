@@ -38,6 +38,8 @@ const cardReplacement = readFileSync(join(root, "src/cardReplacement.ts"), "utf8
 const cardReplacementPostChain = readFileSync(join(root, "src/cardReplacementPostChain.ts"), "utf8");
 const cardReplacementPostChainIntegrationTests = readFileSync(join(root, "tests/cardReplacementPostChain.integration.test.ts"), "utf8");
 const cardRenewal = readFileSync(join(root, "src/cardRenewal.ts"), "utf8");
+const cardRenewalPostChain = readFileSync(join(root, "src/cardRenewalPostChain.ts"), "utf8");
+const cardRenewalPostChainIntegrationTests = readFileSync(join(root, "tests/cardRenewalPostChain.integration.test.ts"), "utf8");
 const kycStatus = readFileSync(join(root, "src/kycStatus.ts"), "utf8");
 const kycStatusPanel = readFileSync(join(root, "src/KycStatusPanel.tsx"), "utf8");
 const kycStatusTests = readFileSync(join(root, "tests/kycStatus.mounted.integration.test.ts"), "utf8");
@@ -366,7 +368,7 @@ assert(app.includes("setCards([...commit.cards])") && app.includes("setSelectedC
 assert(app.includes("Manual SANDBOX/TEST only · one canonical UUIDv4 Idempotency-Key · at most one POST · no automatic retries."), "Card replacement UI must state the non-production one-POST no-retry boundary");
 assert(app.includes("Card replacement unavailable for this session · Trace"), "Card replacement errors must remain Provider and internal-detail neutral");
 assert(apiClient.includes("submitCardRenewal(cardRenewalTransport,session,walletRuntime.environment"), "Card renewal must fail closed through the typed session-gated consumer");
-assert(apiClient.includes("cardRenewalTransport=({path,method,idempotencyKey}") && apiClient.includes("request<unknown>(path,method,undefined,idempotencyKey)"), "Card renewal must make one typed bodyless POST with the caller-owned idempotency key");
+assert(apiClient.includes("cardRenewalTransport=({path,method,idempotencyKey,signal}") && apiClient.includes("'json',signal,undefined,'caller'"), "Card renewal must make one caller-cancelled typed bodyless POST with the caller-owned idempotency key");
 assert(cardRenewal.includes('runtimeEnvironment !== "SANDBOX" && runtimeEnvironment !== "TEST"') && cardRenewal.includes("session.expiresAt"), "Card renewal must require an unexpired matching SANDBOX or TEST session");
 assert(cardRenewal.includes("card.capabilities.renew"), "Card renewal must require the Backend renew capability");
 assert(cardRenewal.includes("Number.isInteger(card.expiryMonth)") && cardRenewal.includes("Number.isInteger(card.expiryYear)"), "Card renewal must strictly validate the current expiry version");
@@ -380,11 +382,15 @@ assert(cardRenewal.includes("hasAvailableBalanceMinor") && cardRenewal.includes(
 assert(cardRenewal.includes("cardRenewalVersionMatches(request.oldCardVersion, currentCard)"), "Card renewal must bind every selected Card public version field");
 assert(cardRenewal.includes("beginCardRenewal") && cardRenewal.includes("gate.activeRequestId !== null"), "Card renewal must synchronously reject double click");
 assert(cardRenewal.includes("createCardRenewalCommit") && cardRenewal.includes("unavailable or duplicated"), "Card renewal must atomically update one listed and selected Card");
+assert(cardRenewalPostChain.includes("CARD_RENEWAL_CONFIRMATION_MAX_PAGES = 25") && cardRenewalPostChain.includes("confirmCardRenewalPredecessor") && cardRenewalPostChain.includes("runCardRenewalPostChain"), "Card renewal must confirm the exact predecessor and renewed generation through a bounded persisted read chain");
+assert(cardRenewalPostChain.includes("await input.predecessor(input.signal)") && cardRenewalPostChain.includes("await input.submit(input.signal)") && cardRenewalPostChain.includes("readCardDetailRefresh") && cardRenewalPostChain.includes("createCardRenewalInvalidatedCommit"), "Card renewal post-chain must order predecessor, one submit, exact confirmation and safe five-resource refresh");
+assert(cardRenewalPostChainIntegrationTests.includes('assert.equal(calls.filter(call => call === "POST").length, 1)') && cardRenewalPostChainIntegrationTests.includes("assert.equal(pages, 25)") && cardRenewalPostChainIntegrationTests.includes("assert.equal(await operation, null)"), "Card renewal evidence must cover one POST, bounded confirmation and stale zero writes");
 assert(app.includes("renewalDecision?.allowed&&<form"), "Card renewal UI must be hidden unless capability, environment, scope and selection allow it");
 assert(app.includes("beginCardRenewal(cardRenewalSubmitGate.current,requestId)"), "Card renewal must synchronously block duplicate submissions");
 assert(app.includes("createCardRenewalRequestIdentity(requestId,decision.scopeKey,card,crypto.randomUUID())"), "Each accepted Card renewal submission must generate one fresh UUIDv4");
 assert(app.includes("cardRenewalRequestIsCurrent(request,cardRenewalRequestSequence.current,activeSession,walletRuntime.environment") && app.includes("walletRequestMounted.current&&"), "Card renewal completion must bind selection, session and mounted state");
-assert(app.includes("createCardRenewalCommit(cardsRef.current,selectedCardRef.current,request.oldCardVersion,renewed)"), "Card renewal UI must commit one atomic list and selection update");
+assert(app.includes("await runCardRenewalPostChain({") && app.includes("confirmCardRenewalPredecessor") && app.includes("confirmCardRenewal") && app.includes("invalidatedCommit=outcome.commit"), "Card renewal UI must consume only exact complete or safely invalidated post-chain outcomes");
+assert(app.includes("setCardBalance(commit.balance)") && app.includes("replaceCardLimits(commit.limits)") && app.includes("commitCardTransactionHistoryPage(null,renewalTransactionRequest,commit.transactions)") && app.includes("commitCardTimelinePage(null,renewalTimelineRequest,commit.timeline)"), "Card renewal must atomically commit the confirmed Card, balance, limits, transactions and timeline");
 assert(app.includes("Manual SANDBOX/TEST only · one canonical UUIDv4 Idempotency-Key · at most one bodyless POST · no automatic retries."), "Card renewal UI must state the non-production bodyless one-POST no-retry boundary");
 assert(app.includes("Card renewal unavailable for this session · Trace"), "Card renewal errors must remain Provider and internal-detail neutral");
 

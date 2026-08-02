@@ -64,15 +64,17 @@ mounted(`Card renewal exact mounted consumer (${environment ?? "ENVIRONMENT_REQU
   const activeSession = session();
   const scope = cardRenewalSessionScope(activeSession, runtime, now);
   if (!scope) throw new Error("mounted scope required");
+  const controller = new AbortController();
   const calls: unknown[] = [];
   const renewed = await submitCardRenewal(
     async request => { calls.push(request); return renewalResponse(); },
-    activeSession, runtime, scope, oldCard().id, oldCard(), keyA, now,
+    activeSession, runtime, scope, oldCard().id, oldCard(), keyA, now, controller.signal,
   );
   assert.deepEqual(calls, [{
     path: "/v1/cards/card%3Amounted.renew/renew",
     method: "POST",
     idempotencyKey: keyA,
+    signal: controller.signal,
   }]);
   assert.deepEqual(Object.keys(renewed).sort(), [
     "alias", "availableBalanceMinor", "capabilities", "createdAt", "currency", "expiryMonth", "expiryYear", "id", "last4", "status", "type",

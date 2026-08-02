@@ -46,6 +46,7 @@ export type CardRenewalTransportRequest = Readonly<{
   path: string;
   method: "POST";
   idempotencyKey: string;
+  signal?: AbortSignal;
 }>;
 
 export type CardRenewalTransport = (request: CardRenewalTransportRequest) => Promise<unknown>;
@@ -360,10 +361,18 @@ export function parseCardRenewalResponse(value: unknown, currentCard: CardRecord
   };
   if (
     renewed.type !== currentCard.type ||
+    renewed.status !== currentCard.status ||
     renewed.last4 !== currentCard.last4 ||
     renewed.currency !== currentCard.currency ||
     renewed.alias !== currentCard.alias ||
-    renewed.createdAt !== currentCard.createdAt
+    renewed.createdAt !== currentCard.createdAt ||
+    Object.prototype.hasOwnProperty.call(renewed, "availableBalanceMinor") !== Object.prototype.hasOwnProperty.call(currentCard, "availableBalanceMinor") ||
+    renewed.availableBalanceMinor !== currentCard.availableBalanceMinor ||
+    renewed.capabilities.freeze !== currentCard.capabilities.freeze ||
+    renewed.capabilities.unfreeze !== currentCard.capabilities.unfreeze ||
+    renewed.capabilities.replace !== currentCard.capabilities.replace ||
+    renewed.capabilities.renew !== currentCard.capabilities.renew ||
+    renewed.capabilities.updateLimits !== currentCard.capabilities.updateLimits
   ) throw new Error("Card renewal response changed immutable public Card fields");
   return renewed;
 }
@@ -403,6 +412,7 @@ export async function submitCardRenewal(
   card: CardRecord,
   idempotencyKey: string,
   now = Date.now(),
+  signal?: AbortSignal,
 ): Promise<CardRecord> {
   const decision = cardRenewalDecision(card, session, runtimeEnvironment, currentScopeKey, currentCardId, now);
   if (!decision.allowed || decision.scopeKey === null)
@@ -411,6 +421,7 @@ export async function submitCardRenewal(
     path: cardRenewalPath(card.id),
     method: "POST",
     idempotencyKey: validateCardRenewalIdempotencyKey(idempotencyKey),
+    ...(signal ? { signal } : {}),
   });
   return parseCardRenewalResponse(response, card);
 }

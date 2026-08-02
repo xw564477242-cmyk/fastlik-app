@@ -186,11 +186,14 @@ test("strictly validates capability data, timestamp and signed-64 optional balan
   assert.equal(getterCalls, 0);
   assert.throws(() => parseCardRenewalResponse(rawRenewal({ createdAt: "2026-02-30T00:00:00Z" }), selectedCard()), /createdAt/);
   for (const availableBalanceMinor of ["0", "1", "-1", "9223372036854775807", "-9223372036854775808"])
-    assert.equal(parseCardRenewalResponse(rawRenewal({ availableBalanceMinor }), selectedCard()).availableBalanceMinor, availableBalanceMinor);
+    assert.equal(parseCardRenewalResponse(rawRenewal({ availableBalanceMinor }), selectedCard({ availableBalanceMinor })).availableBalanceMinor, availableBalanceMinor);
   for (const availableBalanceMinor of ["-0", "00", "01", "-01", "+1", "9223372036854775808", "-9223372036854775809"])
     assert.throws(() => parseCardRenewalResponse(rawRenewal({ availableBalanceMinor }), selectedCard()), /balance/);
+  assert.throws(() => parseCardRenewalResponse(rawRenewal({ availableBalanceMinor: "1" }), selectedCard()), /immutable/);
+  assert.throws(() => parseCardRenewalResponse(rawRenewal(), selectedCard({ availableBalanceMinor: "1" })), /immutable/);
   for (const capability of ["freeze", "unfreeze", "replace", "renew", "updateLimits"] as const)
     assert.throws(() => parseCardRenewalResponse(rawRenewal({ capabilities: { ...(rawRenewal().capabilities as object), [capability]: 1 } }), selectedCard()), /capability/);
+  assert.throws(() => parseCardRenewalResponse(rawRenewal({ capabilities: { ...(rawRenewal().capabilities as object), freeze: false } }), selectedCard()), /immutable/);
 });
 
 test("session, generation, scope and every selected Card public version field invalidate late writes", () => {
