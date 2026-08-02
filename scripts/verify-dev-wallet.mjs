@@ -264,7 +264,11 @@ assert(cardTimeline.includes("CARD_TIMELINE_CURSOR_MAX_BYTES = 2_048") && cardTi
 assert(cardTimeline.includes("walletTransferSessionScope(session, runtimeEnvironment, now()) !== expectedScopeKey") && cardTimeline.includes('method: "GET"'), "Card timeline transport must be GET-only and revalidate the live actor session before and after transport");
 assert(cardTimeline.includes("cardTimelineFailureCanInvalidateSession") && cardTimeline.includes("cardTimelineFailureClearsSnapshot"), "Card timeline failures must separate matching-session 401 invalidation from 403/404 snapshot clearing");
 assert(cardTimelineRefresh.includes('sessionEnvironment === "SANDBOX" || sessionEnvironment === "TEST"') && cardTimelineRefresh.includes("CARD_TIMELINE_REFRESH_MAX_ATTEMPTS = 3"), "Card timeline manual refresh must remain SANDBOX/TEST-only and bounded without automatic retries");
-assert(apiClient.includes("readCardTimelinePage(cardTimelineTransport,session,walletRuntime.environment,scopeKey,id,cursor,signal)") && apiClient.includes("signal,'caller'"), "Wallet API must leave Card timeline session invalidation to the current request owner");
+assert(
+  apiClient.includes("readCardTimelinePage(cardTimelineTransport,session,walletRuntime.environment,scopeKey,id,cursor,signal)") &&
+    apiClient.includes("cardTimelineTransport=({path,method,signal}:CardTimelineTransportRequest)=>request<unknown>(path,method,undefined,undefined,'json',signal,undefined,'caller')"),
+  "Wallet API must leave Card timeline session invalidation to the current request owner while preserving the response-limit parameter",
+);
 assert(app.includes("walletApi.timeline(activeSession,expectedScope,id,null") && app.includes("walletTransferSessionScope(activeSession,walletRuntime.environment)===expectedScope"), "Atomic Card detail timeline completion must bind the current unexpired session");
 assert(app.includes("cardTimelineFailureCanInvalidateSession(value,current,controller.signal)") && app.includes("cardTimelineFailureClearsSnapshot(value,current,controller.signal)"), "Only a current Card timeline request may clear its snapshot or invalidate its matching session");
 assert(app.includes("Card lifecycle timeline · read only") && app.includes("signed opaque cursor") && app.includes("no automatic retries"), "Card timeline UI must state its read-only bounded manual contract");

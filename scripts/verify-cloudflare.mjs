@@ -103,7 +103,11 @@ assert(app.includes("No unvalidated or cross-card limits displayed"), "Card limi
 assert(app.includes("Card limits · public contract") && app.includes("Apply limits once"), "Card limits UI must expose the gated public update contract");
 assert(app.includes("one new UUIDv4 Idempotency-Key, at most one POST, no automatic retries"), "Card limits UI must state the one-submit no-retry boundary");
 assert(app.includes("Card transactions"), "Wallet UI must expose card transaction history");
-assert(apiClient.includes("readCardTimelinePage(cardTimelineTransport,session,walletRuntime.environment,scopeKey,id,cursor,signal)") && apiClient.includes("signal,'caller'"), "Wallet must consume the scoped Card timeline through the same-origin API with caller-owned session invalidation");
+assert(
+  apiClient.includes("readCardTimelinePage(cardTimelineTransport,session,walletRuntime.environment,scopeKey,id,cursor,signal)") &&
+    apiClient.includes("cardTimelineTransport=({path,method,signal}:CardTimelineTransportRequest)=>request<unknown>(path,method,undefined,undefined,'json',signal,undefined,'caller')"),
+  "Wallet must consume the scoped Card timeline through the same-origin API with caller-owned session invalidation and the response-limit parameter preserved",
+);
 assert(cardTimeline.includes("/v1/cards/${encodeURIComponent(cardId)}/timeline?") && cardTimeline.includes('method: "GET"'), "Card timeline must remain an exact GET-only public route");
 assert(cardTimeline.includes("CARD_TIMELINE_MAX_PAGES = 10") && cardTimeline.includes("CARD_TIMELINE_CURSOR_MAX_BYTES = 2_048"), "Card timeline pagination and signed cursor must remain consumer bounded");
 assert(cardTimeline.includes("walletTransferSessionScope(session, runtimeEnvironment, now()) !== expectedScopeKey"), "Card timeline must revalidate the live tenant/customer/session scope after transport");
