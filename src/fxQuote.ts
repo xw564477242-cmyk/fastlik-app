@@ -481,6 +481,9 @@ export function fxQuoteFailureRetainsVerifiedQuote(status: unknown): boolean {
   return (
     typeof status === "number" &&
     Number.isInteger(status) &&
-    (status === 0 || status === 408 || status === 429 || status >= 500)
+    (status === 0 ||
+      status === 408 ||
+      status === 429 ||
+      (status >= 500 && status <= 599))
   );
 }

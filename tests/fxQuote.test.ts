@@ -242,9 +242,9 @@ test("synchronous gate allows one request and no automatic retry", async () => {
 });
 
 test("only retryable, network and server statuses retain a same-input verified quote", () => {
-  for (const status of [0, 408, 429, 500, 503])
+  for (const status of [0, 408, 429, 500, 503, 599])
     assert.equal(fxQuoteFailureRetainsVerifiedQuote(status), true);
-  for (const status of [200, 400, 401, 403, 404, 422, Number.NaN, "500"])
+  for (const status of [200, 400, 401, 403, 404, 422, 600, Number.NaN, "500"])
     assert.equal(fxQuoteFailureRetainsVerifiedQuote(status), false);
 });
 
