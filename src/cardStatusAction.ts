@@ -32,8 +32,11 @@ export type CardStatusRequestIdentity = Readonly<{
   requestId: number;
   scopeKey: string;
   operation: CardStatusOperation;
+  session: CardStatusSession;
+  card: CardRecord;
   cardKey: string;
   idempotencyKey: string;
+  retry: boolean;
 }>;
 
 const RFC3339 = /^(\d{4})-(\d{2})-(\d{2})T(?:[01]\d|2[0-3]):[0-5]\d:[0-5]\d(?:\.\d{1,9})?(?:Z|[+-](?:[01]\d|2[0-3]):[0-5]\d)$/;
@@ -222,8 +225,10 @@ export function createCardStatusRequestIdentity(
   requestId: number,
   scopeKey: string,
   operation: CardStatusOperation,
+  session: CardStatusSession,
   card: CardRecord,
   idempotencyKey: string,
+  retry = false,
 ): CardStatusRequestIdentity {
   if (!Number.isSafeInteger(requestId) || requestId < 1 || scopeKey.length < 1 || scopeKey.length > 2048)
     throw new Error("Invalid Card status request identity");
@@ -231,8 +236,11 @@ export function createCardStatusRequestIdentity(
     requestId,
     scopeKey,
     operation,
+    session,
+    card,
     cardKey: cardVersionKey(card),
     idempotencyKey: validateCardStatusIdempotencyKey(idempotencyKey),
+    retry,
   };
 }
 
@@ -248,12 +256,70 @@ export function cardStatusRequestIsCurrent(
   if (
     request.requestId !== currentRequestId ||
     request.scopeKey !== currentScopeKey ||
+    request.session !== currentSession ||
     currentCard === null ||
+    request.card !== currentCard ||
     cardVersionKey(currentCard) !== request.cardKey ||
     cardStatusSessionScope(currentSession, runtimeEnvironment, now) !== request.scopeKey
   ) return false;
   const decision = cardStatusDecision(currentCard, currentSession, runtimeEnvironment, currentScopeKey, currentCard.id, now);
   return decision.allowed && decision.operation === request.operation;
+}
+
+function ownNumericStatus(value: unknown): number | null {
+  if (!value || typeof value !== "object") return null;
+  try {
+    const descriptor = Object.getOwnPropertyDescriptor(value, "status");
+    return descriptor && "value" in descriptor && typeof descriptor.value === "number"
+      ? descriptor.value
+      : null;
+  } catch {
+    return null;
+  }
+}
+
+export function cardStatusFailureIsAmbiguous(value: unknown): boolean {
+  if (value instanceof TypeError) return true;
+  const status = ownNumericStatus(value);
+  return status === 0 || status === 408 || status === 409 || (status !== null && status >= 500 && status <= 599);
+}
+
+export function cardStatusFailureIsExplicit401(value: unknown): boolean {
+  return ownNumericStatus(value) === 401;
+}
+
+export function cardStatusRetryKey(
+  request: CardStatusRequestIdentity | null,
+  currentSession: CardStatusSession | null,
+  currentScopeKey: string | null,
+  currentCard: CardRecord | null,
+  currentOperation: CardStatusOperation | null,
+): string | null {
+  if (
+    !request ||
+    request.retry ||
+    request.session !== currentSession ||
+    request.scopeKey !== currentScopeKey ||
+    request.card !== currentCard ||
+    request.operation !== currentOperation
+  ) return null;
+  return request.idempotencyKey;
+}
+
+export function cardStatusConflictIsCurrent(
+  request: CardStatusRequestIdentity | null,
+  currentSession: CardStatusSession | null,
+  currentScopeKey: string | null,
+  currentCard: CardRecord | null,
+  currentOperation: CardStatusOperation | null,
+): boolean {
+  return Boolean(
+    request?.retry &&
+      request.session === currentSession &&
+      request.scopeKey === currentScopeKey &&
+      request.card === currentCard &&
+      request.operation === currentOperation,
+  );
 }
 
 function parseCardStatusResponse(

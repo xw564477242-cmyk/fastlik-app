@@ -3,8 +3,12 @@ import test from "node:test";
 import type { CardRecord } from "../src/cardList.ts";
 import {
   beginCardStatusAction,
+  cardStatusConflictIsCurrent,
   cardStatusDecision,
+  cardStatusFailureIsAmbiguous,
+  cardStatusFailureIsExplicit401,
   cardStatusRequestIsCurrent,
+  cardStatusRetryKey,
   cardStatusSessionScope,
   createCardStatusRequestIdentity,
   settleCardStatusAction,
@@ -98,10 +102,11 @@ test("generates a canonical fresh UUIDv4 only after synchronous duplicate gating
 });
 
 test("binds completion to generation, tenant/customer session scope, selection and full public Card version", () => {
-  const scope = cardStatusSessionScope(session(), "SANDBOX", now);
+  const activeSession = session();
+  const scope = cardStatusSessionScope(activeSession, "SANDBOX", now);
   if (!scope) throw new Error("scope required");
   const selected = card();
-  const request = createCardStatusRequestIdentity(7, scope, "freeze", selected, keyA);
+  const request = createCardStatusRequestIdentity(7, scope, "freeze", activeSession, selected, keyA);
   const current = (overrides: Partial<{
     requestId: number;
     session: CardStatusSession;
@@ -111,13 +116,15 @@ test("binds completion to generation, tenant/customer session scope, selection a
   }> = {}) => cardStatusRequestIsCurrent(
     request,
     overrides.requestId ?? 7,
-    overrides.session ?? session(),
+    overrides.session ?? activeSession,
     overrides.runtime ?? "SANDBOX",
     overrides.scope === undefined ? scope : overrides.scope,
     overrides.card === undefined ? selected : overrides.card,
     now,
   );
   assert.equal(current(), true);
+  assert.equal(current({ session: session() }), false, "equal-valued replacement Session is stale");
+  assert.equal(current({ card: card() }), false, "equal-valued replacement Card is stale");
   assert.equal(current({ requestId: 8 }), false);
   assert.equal(current({ scope: "scope-b" }), false);
   assert.equal(current({ runtime: "PRODUCTION" }), false);
@@ -138,6 +145,36 @@ test("binds completion to generation, tenant/customer session scope, selection a
     card({ createdAt: "2026-01-02T00:00:00Z" }),
     card({ capabilities: { ...card().capabilities, replace: false } }),
   ]) assert.equal(current({ card: changed }), false);
+});
+
+test("allows one exact same-key retry and then marks only the unchanged exact scope conflicted", () => {
+  const activeSession = session();
+  const selected = card();
+  const scope = cardStatusSessionScope(activeSession, "SANDBOX", now);
+  if (!scope) throw new Error("scope required");
+  const first = createCardStatusRequestIdentity(1, scope, "freeze", activeSession, selected, keyA);
+  assert.equal(cardStatusRetryKey(first, activeSession, scope, selected, "freeze"), keyA);
+  assert.equal(cardStatusRetryKey(first, session(), scope, selected, "freeze"), null);
+  assert.equal(cardStatusRetryKey(first, activeSession, scope, card(), "freeze"), null);
+  const retry = createCardStatusRequestIdentity(2, scope, "freeze", activeSession, selected, keyA, true);
+  assert.equal(cardStatusRetryKey(retry, activeSession, scope, selected, "freeze"), null);
+  assert.equal(cardStatusConflictIsCurrent(retry, activeSession, scope, selected, "freeze"), true);
+  assert.equal(cardStatusConflictIsCurrent(retry, activeSession, scope, card(), "freeze"), false);
+});
+
+test("classifies only transport, timeout, replay conflict and server failures as ambiguous", () => {
+  assert.equal(cardStatusFailureIsAmbiguous(new TypeError("transport failed")), true);
+  assert.equal(cardStatusFailureIsAmbiguous(new Error("local parse failed")), false);
+  for (const status of [0, 408, 409, 500, 503, 599])
+    assert.equal(cardStatusFailureIsAmbiguous({ status }), true);
+  for (const status of [400, 401, 403, 404, 422, 600])
+    assert.equal(cardStatusFailureIsAmbiguous({ status }), false);
+  assert.equal(cardStatusFailureIsExplicit401({ status: 401 }), true);
+  assert.equal(cardStatusFailureIsExplicit401({ status: 403 }), false);
+  const hostile = Object.create(null) as Record<string, unknown>;
+  Object.defineProperty(hostile, "status", { get: () => { throw new Error("getter"); } });
+  assert.equal(cardStatusFailureIsAmbiguous(hostile), false);
+  assert.equal(cardStatusFailureIsExplicit401(hostile), false);
 });
 
 test("one accepted freeze emits one bodyless POST and returns only same-Card public fields", async () => {

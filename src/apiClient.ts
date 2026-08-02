@@ -115,7 +115,10 @@ const cardListTransport=({path,method,signal}:CardListTransportRequest)=>request
 const walletOperationTransport=({path,method,signal}:WalletOperationTransportRequest)=>request<unknown>(path,method,undefined,undefined,'json',signal)
 const cardTransactionDetailTransport=({path,method,signal}:CardTransactionDetailTransportRequest)=>request<unknown>(path,method,undefined,undefined,'json',signal)
 const cardLimitsUpdateTransport=({path,method,body,idempotencyKey}:CardLimitsUpdateTransportRequest)=>request<unknown>(path,method,body,idempotencyKey)
-const cardStatusTransport=({path,method,idempotencyKey}:CardStatusTransportRequest)=>request<unknown>(path,method,undefined,idempotencyKey)
+const cardStatusTransport=({path,method,idempotencyKey}:CardStatusTransportRequest)=>{
+ if(!csrfToken())return Promise.reject(new WalletApiError(400,trace(),'Card status security context unavailable'))
+ return request<unknown>(path,method,undefined,idempotencyKey,'json',undefined,undefined,'caller')
+}
 const cardReplacementTransport=({path,method,body,idempotencyKey}:CardReplacementTransportRequest)=>request<unknown>(path,method,body,idempotencyKey)
 const cardRenewalTransport=({path,method,idempotencyKey}:CardRenewalTransportRequest)=>request<unknown>(path,method,undefined,idempotencyKey)
 const fxQuoteTransport=({path,method,body,signal}:FxQuoteTransportRequest)=>request<string>(path,method,body,undefined,'text',signal,FX_QUOTE_RESPONSE_MAX_JSON_BYTES,'caller')

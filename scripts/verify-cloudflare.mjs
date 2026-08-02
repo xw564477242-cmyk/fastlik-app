@@ -70,10 +70,14 @@ assert(cardLimitsUpdate.includes("beginCardLimitsUpdate") && cardLimitsUpdate.in
 assert(apiClient.includes("submitCardLimitsUpdate(cardLimitsUpdateTransport"), "Card limits updates must use the typed public POST contract");
 assert(cardStatusAction.includes('runtimeEnvironment !== "SANDBOX" && runtimeEnvironment !== "TEST"') && cardStatusAction.includes("session.expiresAt"), "Card status writes must remain unexpired-session SANDBOX/TEST only");
 assert(cardStatusAction.includes("beginCardStatusAction") && cardStatusAction.includes("cardStatusRequestIsCurrent"), "Card status writes must prevent duplicates and reject stale completion writes");
+assert(cardStatusAction.includes("request.session !== currentSession") && cardStatusAction.includes("request.card !== currentCard"), "Card status writes must bind exact Session and Card objects");
+assert(cardStatusAction.includes("cardStatusFailureIsAmbiguous") && cardStatusAction.includes("cardStatusRetryKey") && cardStatusAction.includes("cardStatusConflictIsCurrent"), "Card status writes must allow one exact same-key ambiguous retry then require refresh");
 assert(cardStatusAction.includes("Object.getOwnPropertyDescriptor") && cardStatusAction.includes("parseCardStatusResponse"), "Card status responses must reconstruct only safe public fields");
 assert(apiClient.includes("submitCardStatusAction(cardStatusTransport") && apiClient.includes("cardStatusTransport=({path,method,idempotencyKey}"), "Card status writes must use the typed bodyless POST contract");
-assert(app.includes("createCardStatusRequestIdentity(requestId,decision.scopeKey,decision.operation,card,crypto.randomUUID())"), "Card status writes must use one fresh caller-owned idempotency key per accepted click");
-assert(app.includes("Manual SANDBOX/TEST action · one bodyless POST per click · no automatic retries."), "Card status UI must state its manual non-production no-retry boundary");
+assert(apiClient.includes("if(!csrfToken())return Promise.reject") && apiClient.includes("'caller')"), "Card status writes must require CSRF and leave exact 401 invalidation to the caller");
+assert(app.includes("retryKey??crypto.randomUUID()") && app.includes("Boolean(retryKey)"), "Card status writes must use one fresh key or the one exact retained retry key");
+assert(app.includes("cardStatusFailureIsExplicit401(value)") && app.includes("sessionRef.current===activeSession"), "Only an exact current Card Session 401 may invalidate authentication");
+assert(app.includes("one explicit same-key retry only · then refresh the real Card"), "Card status UI must state its bounded retry and real refresh boundary");
 assert(cardReplacement.includes('runtimeEnvironment !== "SANDBOX" && runtimeEnvironment !== "TEST"') && cardReplacement.includes("session.expiresAt"), "Card replacement writes must remain unexpired-session SANDBOX/TEST only");
 assert(cardReplacement.includes("beginCardReplacement") && cardReplacement.includes("cardReplacementRequestIsCurrent"), "Card replacement writes must prevent duplicates and reject stale completion writes");
 assert(cardReplacement.includes("createCardReplacementCommit") && cardReplacement.includes("collides with an existing Card"), "Card replacement must atomically reject new-Card identity collisions");
