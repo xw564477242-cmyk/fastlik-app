@@ -9,7 +9,7 @@ import {
 import type { CardPage, CardRecord } from "../src/cardList.ts";
 
 const card = (overrides: Partial<CardRecord> = {}): CardRecord => ({
-  id: "card:activation.1",
+  id: "card_activation_1",
   type: "VIRTUAL",
   status: "PENDING",
   last4: "4242",
@@ -42,7 +42,7 @@ test("commits only when canonical Card GET and paginated list agree on the same 
       cursors.push(cursor);
       if (cursor === null) {
         assert.equal(previous.length, 0);
-        return { cards: [active({ id: "card:newer.1", createdAt: "2026-08-02T00:00:00.000Z" })], nextCursor: "page-two" };
+        return { cards: [active({ id: "card_newer_1", createdAt: "2026-08-02T00:00:00.000Z" })], nextCursor: "page-two" };
       }
       assert.equal(cursor, "page-two");
       assert.equal(previous.length, 1);
@@ -61,7 +61,7 @@ test("fails closed when either real read is stale, cross-Card, internally incons
   const selected = card();
   const cases: Array<{ detail: CardRecord; page: CardPage }> = [
     { detail: card(), page: { cards: [active()], nextCursor: null } },
-    { detail: active({ id: "card:other.1" }), page: { cards: [active()], nextCursor: null } },
+    { detail: active({ id: "card_other_1" }), page: { cards: [active()], nextCursor: null } },
     { detail: active(), page: { cards: [card()], nextCursor: null } },
     { detail: active(), page: { cards: [active({ alias: "Mismatch" })], nextCursor: null } },
     { detail: active(), page: { cards: [], nextCursor: null } },
@@ -101,7 +101,7 @@ test("bounds list confirmation work and never searches indefinitely", async () =
     cards: async (): Promise<CardPage> => {
       pages += 1;
       return {
-        cards: [active({ id: `card:other.${pages}`, createdAt: `2026-07-${String(31 - pages).padStart(2, "0")}T00:00:00.000Z` })],
+        cards: [active({ id: `card_other_${pages}`, createdAt: `2026-07-${String(31 - pages).padStart(2, "0")}T00:00:00.000Z` })],
         nextCursor: `page-${pages + 1}`,
       };
     },

@@ -86,7 +86,8 @@ test("permits only an unexpired exact SANDBOX or TEST session, selection, status
   assert.equal(cardStatusDecision(card(), session(), "SANDBOX", "wrong", card().id, now).allowed, false);
   assert.equal(cardStatusDecision(card(), session(), "SANDBOX", sandboxScope, "card:other", now).allowed, false);
   assert.equal(cardStatusDecision(card({ capabilities: { ...card().capabilities, freeze: false } }), session(), "SANDBOX", sandboxScope, card().id, now).allowed, false);
-  assert.deepEqual(cardStatusDecision(card({ status: "PENDING" }), session(), "SANDBOX", sandboxScope, card().id, now), {
+  const pendingCard = card({ id: "card_pending_1", status: "PENDING" });
+  assert.deepEqual(cardStatusDecision(pendingCard, session(), "SANDBOX", sandboxScope, pendingCard.id, now), {
     operation: "activate", label: "Activate", allowed: true, reason: null, scopeKey: sandboxScope,
   });
 });
@@ -156,7 +157,7 @@ test("binds completion to generation, tenant/customer session scope, selection a
     card({ capabilities: { ...card().capabilities, replace: false } }),
   ]) assert.equal(current({ card: changed }), false);
 
-  const pending = card({ status: "PENDING", capabilities: { ...card().capabilities, freeze: false } });
+  const pending = card({ id: "card_pending_1", status: "PENDING", capabilities: { ...card().capabilities, freeze: false } });
   const activation = createCardStatusRequestIdentity(8, scope, "activate", activeSession, pending, `activate:${keyA}`);
   assert.equal(cardStatusRequestIsCurrent(activation, 8, activeSession, "SANDBOX", scope, pending, now), true);
   assert.equal(cardStatusRequestIsCurrent(activation, 8, activeSession, "SANDBOX", scope, card({ status: "PENDING" }), now), false);
@@ -248,17 +249,18 @@ test("one accepted activation is operation-bound, bodyless and only accepts same
   const scope = cardStatusSessionScope(activeSession, "SANDBOX", now);
   if (!scope) throw new Error("scope required");
   const pending = card({
+    id: "card_owned_1",
     status: "PENDING",
     capabilities: { ...card().capabilities, freeze: false, unfreeze: false },
   });
   const activationKey = createCardStatusIdempotencyKey("activate", keyA);
   const calls: unknown[] = [];
   const result = await submitCardStatusAction(
-    async request => { calls.push(request); return response("activate"); },
+    async request => { calls.push(request); return response("activate", { id: pending.id }); },
     activeSession, "SANDBOX", scope, pending.id, pending, "activate", activationKey, now,
   );
   assert.deepEqual(calls, [{
-    path: "/v1/cards/card%3Aowned.1/activate",
+    path: "/v1/cards/card_owned_1/activate",
     method: "POST",
     idempotencyKey: activationKey,
   }]);
@@ -266,9 +268,52 @@ test("one accepted activation is operation-bound, bodyless and only accepts same
   assert.equal(result.id, pending.id);
   assert.equal(result.status, "ACTIVE");
   await assert.rejects(() => submitCardStatusAction(
-    async () => response("activate", { status: "PENDING" }),
+    async () => response("activate", { id: pending.id, status: "PENDING" }),
     activeSession, "SANDBOX", scope, pending.id, pending, "activate", activationKey, now,
   ));
+});
+
+test("rejects dot and colon activation Card IDs before transport without changing freeze IDs", async () => {
+  const activeSession = session();
+  const scope = cardStatusSessionScope(activeSession, "SANDBOX", now);
+  if (!scope) throw new Error("scope required");
+  const activationKey = createCardStatusIdempotencyKey("activate", keyA);
+  let activationCalls = 0;
+  for (const id of ["card.pending_1", "card:pending_1"]) {
+    const pending = card({
+      id,
+      status: "PENDING",
+      capabilities: { ...card().capabilities, freeze: false, unfreeze: false },
+    });
+    assert.equal(cardStatusDecision(pending, activeSession, "SANDBOX", scope, id, now).allowed, false);
+    await assert.rejects(() => submitCardStatusAction(
+      async () => { activationCalls += 1; return response("activate", { id }); },
+      activeSession,
+      "SANDBOX",
+      scope,
+      id,
+      pending,
+      "activate",
+      activationKey,
+      now,
+    ));
+  }
+  assert.equal(activationCalls, 0);
+
+  let freezeCalls = 0;
+  const frozen = await submitCardStatusAction(
+    async request => { freezeCalls += 1; return response("freeze"); },
+    activeSession,
+    "SANDBOX",
+    scope,
+    card().id,
+    card(),
+    "freeze",
+    keyA,
+    now,
+  );
+  assert.equal(freezeCalls, 1);
+  assert.equal(frozen.id, "card:owned.1");
 });
 
 test("does not execute Provider/internal getters and rejects hostile public getters or cross-Card responses", async () => {

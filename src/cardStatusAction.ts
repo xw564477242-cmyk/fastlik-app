@@ -78,6 +78,12 @@ function opaqueId(value: unknown): string {
   return value;
 }
 
+function activationCardId(value: unknown): string {
+  if (typeof value !== "string" || !/^[A-Za-z0-9_-]{2,128}$/.test(value))
+    throw new Error("Invalid Card activation Card ID");
+  return value;
+}
+
 function boundedScopeText(value: unknown, name: string): string {
   if (
     typeof value !== "string" ||
@@ -201,8 +207,14 @@ export function cardStatusDecision(
     return card.capabilities.unfreeze
       ? { operation: "unfreeze", label: "Unfreeze", allowed: true, reason: null, scopeKey }
       : { operation: "unfreeze", label: "Unfreeze unavailable", allowed: false, reason: "Unfreeze is not permitted by the current Card capabilities.", scopeKey };
-  if (card.status === "PENDING")
-    return { operation: "activate", label: "Activate", allowed: true, reason: null, scopeKey };
+  if (card.status === "PENDING") {
+    try {
+      activationCardId(card.id);
+      return { operation: "activate", label: "Activate", allowed: true, reason: null, scopeKey };
+    } catch {
+      return { operation: "activate", label: "Activate unavailable", allowed: false, reason: "Card activation requires a Backend-compatible Card ID.", scopeKey };
+    }
+  }
   return { operation: null, label: "Card action unavailable", allowed: false, reason: `Card status ${card.status} does not permit freeze or unfreeze.`, scopeKey };
 }
 
@@ -414,8 +426,9 @@ export async function submitCardStatusAction(
   const decision = cardStatusDecision(card, session, runtimeEnvironment, currentScopeKey, currentCardId, now);
   if (!decision.allowed || decision.operation !== operation || decision.scopeKey === null)
     throw new Error(decision.reason ?? "Card status action unavailable");
+  const cardId = operation === "activate" ? activationCardId(card.id) : opaqueId(card.id);
   const response = await transport({
-    path: `/v1/cards/${encodeURIComponent(opaqueId(card.id))}/${operation}`,
+    path: `/v1/cards/${encodeURIComponent(cardId)}/${operation}`,
     method: "POST",
     idempotencyKey: validateCardStatusIdempotencyKey(idempotencyKey, operation),
     ...(signal ? { signal } : {}),

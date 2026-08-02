@@ -24,7 +24,7 @@ export class CardActivationConfirmationError extends Error {
   }
 }
 
-const CARD_ID = /^[A-Za-z0-9._:-]{2,128}$/;
+const CARD_ID = /^[A-Za-z0-9_-]{2,128}$/;
 
 function throwIfAborted(signal?: AbortSignal): void {
   if (signal?.aborted) throw new DOMException("Card activation confirmation cancelled", "AbortError");

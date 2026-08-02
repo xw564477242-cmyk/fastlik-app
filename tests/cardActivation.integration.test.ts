@@ -29,7 +29,7 @@ const session = (overrides: Partial<CardStatusSession> = {}): CardStatusSession 
 });
 
 const pending = (overrides: Partial<CardRecord> = {}): CardRecord => ({
-  id: "card:activation.1",
+  id: "card_activation_1",
   type: "VIRTUAL",
   status: "PENDING",
   last4: "4242",
@@ -66,7 +66,7 @@ mounted(`PENDING Card activation uses one operation-bound bodyless POST then two
     async request => { calls.push(request); return wireActive(); },
     activeSession, runtime, scope, selected.id, selected, "activate", key, now,
   );
-  assert.deepEqual(calls, [{ path: "/v1/cards/card%3Aactivation.1/activate", method: "POST", idempotencyKey: key }]);
+  assert.deepEqual(calls, [{ path: "/v1/cards/card_activation_1/activate", method: "POST", idempotencyKey: key }]);
   assert.equal("body" in (calls[0] as object), false);
   assert.equal("providerOperationRef" in postResult, false);
   assert.equal(postResult.status, "ACTIVE");
@@ -76,7 +76,7 @@ mounted(`PENDING Card activation uses one operation-bound bodyless POST then two
     card: async id => { reads.push(`GET /v1/cards/${encodeURIComponent(id)}`); return active(); },
     cards: async cursor => { reads.push(`GET /v1/cards?limit=20${cursor ? `&cursor=${cursor}` : ""}`); return { cards: [active()], nextCursor: null }; },
   }, selected);
-  assert.deepEqual(reads, ["GET /v1/cards/card%3Aactivation.1", "GET /v1/cards?limit=20"]);
+  assert.deepEqual(reads, ["GET /v1/cards/card_activation_1", "GET /v1/cards?limit=20"]);
   assert.equal(confirmation.card.status, "ACTIVE");
 });
 
