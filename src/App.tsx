@@ -10,6 +10,8 @@ import {CardTransactionDetailSelection,createCardTransactionDetailSelection,reco
 import {cardTransactionDetailRefreshRequestIsCurrent,cardTransactionDetailRefreshWasAborted,createCardTransactionDetailRefreshRequestIdentity} from './cardTransactionDetailRefresh'
 import {CardTransactionHistoryState,cardTransactionHistoryRequestIsCurrent,commitCardTransactionHistoryPage,createCardTransactionHistoryRequestIdentity} from './cardTransactionHistory'
 import {CARD_TRANSACTION_REFRESH_MAX_ATTEMPTS,cardTransactionRefreshAllowed,cardTransactionRefreshRequestIsCurrent,commitCardTransactionRefreshPage,createCardTransactionRefreshRequestIdentity} from './cardTransactionRefresh'
+import {CARD_TIMELINE_MAX_PAGES,CardTimelineHistory,cardTimelineFailureCanInvalidateSession,cardTimelineFailureClearsSnapshot,cardTimelineRequestIsCurrent,cardTimelineRequestWasAborted,commitCardTimelinePage,createCardTimelineRequestIdentity} from './cardTimeline'
+import {CARD_TIMELINE_REFRESH_MAX_ATTEMPTS,cardTimelineRefreshAllowed,cardTimelineRefreshRequestIsCurrent,commitCardTimelineRefreshPage,createCardTimelineRefreshRequestIdentity} from './cardTimelineRefresh'
 import {WALLET_TRANSFER_STATUS_REFRESH_LIMIT,walletRequestIsCurrent,walletTransferStatusRequestIsCurrent} from './walletData'
 import {DEFAULT_WALLET_OPERATION_FILTERS,WALLET_OPERATION_STATUSES,WALLET_OPERATION_TYPES,appendWalletOperationPage,createWalletOperationActivityRequestIdentity,createWalletOperationDetailRequestIdentity,walletOperationActivityRequestIsCurrent,walletOperationDetailRequestIsCurrent,walletOperationFilterKey,walletOperationRequestWasAborted,type WalletOperationFilterSelection} from './walletOperations'
 import {parseVirtualCardCreateInput,virtualCardCreateDecision,virtualCardCreateRequestIsCurrent} from './virtualCardCreate'
@@ -91,6 +93,11 @@ export default function App(){
  const[cardTransactionRefreshing,setCardTransactionRefreshing]=useState(false)
  const[cardTransactionRefreshAttempt,setCardTransactionRefreshAttempt]=useState(0)
  const[cardTransactionError,setCardTransactionError]=useState('')
+ const[cardTimeline,setCardTimeline]=useState<CardTimelineHistory|null>(null)
+ const[cardTimelineLoadingMore,setCardTimelineLoadingMore]=useState(false)
+ const[cardTimelineRefreshing,setCardTimelineRefreshing]=useState(false)
+ const[cardTimelineRefreshAttempt,setCardTimelineRefreshAttempt]=useState(0)
+ const[cardTimelineError,setCardTimelineError]=useState('')
  const[virtualCardCurrency,setVirtualCardCurrency]=useState('USD')
  const[virtualCardAlias,setVirtualCardAlias]=useState('')
  const[virtualCardCreating,setVirtualCardCreating]=useState(false)
@@ -136,6 +143,12 @@ export default function App(){
  const selectedCardTransactionDetailRef=useRef<CardTransactionDetailSelection|null>(null)
  const cardTransactionDetailRequestSequence=useRef(0)
  const cardTransactionDetailAbortController=useRef<AbortController|null>(null)
+ const cardTimelineRequestSequence=useRef(0)
+ const cardTimelineTarget=useRef<string|null>(null)
+ const cardTimelineCursorTarget=useRef<string|null>(null)
+ const cardTimelineAbortController=useRef<AbortController|null>(null)
+ const cardTimelineHistoryRef=useRef<CardTimelineHistory|null>(null)
+ const cardTimelineRefreshAttemptRef=useRef(0)
  const virtualCardCreateRequestSequence=useRef(0)
  const virtualCardCreateInFlight=useRef(false)
  const cardReplacementRequestSequence=useRef(0)
@@ -214,10 +227,11 @@ export default function App(){
  const abortCardDetailRequest=()=>{cardDetailAbortController.current?.abort();cardDetailAbortController.current=null}
  const abortCardTransactionRequest=()=>{cardTransactionAbortController.current?.abort();cardTransactionAbortController.current=null}
  const abortCardTransactionDetailRequest=()=>{cardTransactionDetailAbortController.current?.abort();cardTransactionDetailAbortController.current=null}
+ const abortCardTimelineRequest=()=>{cardTimelineAbortController.current?.abort();cardTimelineAbortController.current=null}
  const resetWalletOperationFilters=()=>{walletOperationTypeFilterTarget.current=DEFAULT_WALLET_OPERATION_FILTERS.type;walletOperationStatusFilterTarget.current=DEFAULT_WALLET_OPERATION_FILTERS.status;setWalletOperationTypeFilter(DEFAULT_WALLET_OPERATION_FILTERS.type);setWalletOperationStatusFilter(DEFAULT_WALLET_OPERATION_FILTERS.status)}
  const resetWalletTransactionFilters=()=>{walletTransactionTypeFilterTarget.current='ALL';walletTransactionStatusFilterTarget.current='ALL';setWalletTransactionTypeFilter('ALL');setWalletTransactionStatusFilter('ALL')}
  const clearCardStatusAction=()=>{const wasActive=cardStatusInFlight.current;cardActionRequestSequence.current+=1;cardActionTarget.current=null;cardStatusSubmitGate.current.activeRequestId=null;cardStatusInFlight.current=false;if(wasActive)setBusy(false)}
- const invalidateCardDetail=()=>{abortCardDetailRequest();abortCardTransactionRequest();abortCardTransactionDetailRequest();cardDetailRequestSequence.current+=1;cardDetailTarget.current=null;cardSnapshotTarget.current=null;cardBalanceRequestSequence.current+=1;cardBalanceTarget.current=null;cardLimitsRequestSequence.current+=1;cardLimitsTarget.current=null;cardLimitsUpdateRequestSequence.current+=1;cardLimitsUpdateSubmitGate.current.activeRequestId=null;cardLimitsUpdateInFlight.current=false;clearCardStatusAction();cardTransactionRequestSequence.current+=1;cardTransactionTarget.current=null;cardTransactionCursorTarget.current=null;cardTransactionDetailRequestSequence.current+=1}
+ const invalidateCardDetail=()=>{abortCardDetailRequest();abortCardTransactionRequest();abortCardTransactionDetailRequest();abortCardTimelineRequest();cardDetailRequestSequence.current+=1;cardDetailTarget.current=null;cardSnapshotTarget.current=null;cardBalanceRequestSequence.current+=1;cardBalanceTarget.current=null;cardLimitsRequestSequence.current+=1;cardLimitsTarget.current=null;cardLimitsUpdateRequestSequence.current+=1;cardLimitsUpdateSubmitGate.current.activeRequestId=null;cardLimitsUpdateInFlight.current=false;clearCardStatusAction();cardTransactionRequestSequence.current+=1;cardTransactionTarget.current=null;cardTransactionCursorTarget.current=null;cardTransactionDetailRequestSequence.current+=1;cardTimelineRequestSequence.current+=1;cardTimelineTarget.current=null;cardTimelineCursorTarget.current=null}
  const clearCardBalance=()=>{cardBalanceRequestSequence.current+=1;cardBalanceTarget.current=null;setCardBalance(null);setCardBalanceLoading(false);setCardBalanceError('')}
  const clearCardLimitsUpdate=()=>{cardLimitsUpdateRequestSequence.current+=1;cardLimitsUpdateSubmitGate.current.activeRequestId=null;cardLimitsUpdateInFlight.current=false;setCardLimitsUpdating(false);setCardLimitsUpdateError('')}
  const replaceCardLimits=(limits:CardLimitsRecord|null)=>{cardLimitsRef.current=limits;setCardLimits(limits);const draft:CardLimitsUpdateDraft=limits?cardLimitsUpdateDraft(limits):{singleTransactionMinor:'',dailySpendMinor:'',monthlySpendMinor:'',dailyAtmMinor:''};cardLimitsUpdateDraftRef.current=draft;setCardLimitsUpdateDraftState(draft)}
@@ -227,6 +241,9 @@ export default function App(){
  const replaceCardTransactionHistory=(history:CardTransactionHistoryState|null)=>{invalidateCardTransactionDetailRefresh();cardTransactionHistoryRef.current=history;const next=history?[...history.transactions]:[];cardTransactionsRef.current=next;setCardTransactions(next);setCardTransactionNextCursor(history?.nextCursor??null);replaceSelectedCardTransactionDetail(reconcileCardTransactionDetailSelection(selectedCardTransactionDetailRef.current,cardScope.current,selectedCardRef.current?.id??null,next,walletRequestMounted.current))}
  const resetCardTransactionRefresh=()=>{cardTransactionRefreshAttemptRef.current=0;setCardTransactionRefreshAttempt(0);setCardTransactionRefreshing(false)}
  const clearCardTransactions=()=>{abortCardTransactionRequest();cardTransactionRequestSequence.current+=1;cardTransactionTarget.current=null;cardTransactionCursorTarget.current=null;replaceCardTransactionHistory(null);setCardTransactionLoadingMore(false);resetCardTransactionRefresh();setCardTransactionError('')}
+ const replaceCardTimelineHistory=(history:CardTimelineHistory|null)=>{cardTimelineHistoryRef.current=history;setCardTimeline(history)}
+ const resetCardTimelineRefresh=()=>{cardTimelineRefreshAttemptRef.current=0;setCardTimelineRefreshAttempt(0);setCardTimelineRefreshing(false)}
+ const clearCardTimeline=()=>{abortCardTimelineRequest();cardTimelineRequestSequence.current+=1;cardTimelineTarget.current=null;cardTimelineCursorTarget.current=null;replaceCardTimelineHistory(null);setCardTimelineLoadingMore(false);resetCardTimelineRefresh();setCardTimelineError('')}
  const resetCardTransactionFilter=()=>{cardTransactionFilterRef.current='ALL';setCardTransactionFilterState('ALL')}
  const clearVirtualCardCreate=()=>{virtualCardCreateRequestSequence.current+=1;virtualCardCreateInFlight.current=false;setVirtualCardCreating(false);setVirtualCardCreateError('');setVirtualCardCurrency('USD');setVirtualCardAlias('')}
  const clearCardReplacement=()=>{cardReplacementRequestSequence.current+=1;cardReplacementTarget.current=null;cardReplacementSubmitGate.current.activeRequestId=null;cardReplacementInFlight.current=false;cardReplacementReasonRef.current='LOST';setCardReplacing(false);setCardReplacementError('');setCardReplacementReasonState('LOST')}
@@ -248,21 +265,24 @@ export default function App(){
  const replaceWalletOperations=(page:WalletOperationPage|null)=>{walletOperationsRef.current=page;setWalletOperations(page)}
  const clearWalletOperationDetail=()=>{abortWalletOperationDetailRequest();walletOperationDetailRequestSequence.current+=1;walletOperationDetailTarget.current=null;setSelectedWalletOperation(null);setWalletOperationDetail(null);setWalletOperationDetailLoading(false);setWalletOperationDetailError('')}
  const clearWalletOperations=()=>{abortWalletOperationRequest();walletOperationRequestSequence.current+=1;walletOperationCursorTarget.current=null;walletOperationInFlight.current=false;replaceWalletOperations(null);setWalletOperationsLoading(false);setWalletOperationsLoadingMore(false);setWalletOperationsRefreshing(false);setWalletOperationsError('');clearWalletOperationDetail()}
- const clear=()=>{sessionInitializationSequence.current+=1;abortCardListRequest();cardRequestSequence.current+=1;cardListCursorTarget.current=null;cardScope.current=null;invalidateCardDetail();clearVirtualCardCreate();clearCardReplacement();clearCardRenewal();walletListRequestSequence.current+=1;walletScope.current=null;invalidateWalletDetail();clearWalletOperations();resetWalletOperationFilters();setSession(null);replaceAccounts([]);clearWalletDetail();resetWalletTransactionFilters();resetCardTransactionFilter();setCards([]);setCardNextCursor(null);setCardListLoadingMore(false);setCardListError('');setSelectedCard(null);clearCardBalance();clearCardLimits();clearCardTransactions()}
+ const clear=()=>{sessionInitializationSequence.current+=1;abortCardListRequest();cardRequestSequence.current+=1;cardListCursorTarget.current=null;cardScope.current=null;invalidateCardDetail();clearVirtualCardCreate();clearCardReplacement();clearCardRenewal();walletListRequestSequence.current+=1;walletScope.current=null;invalidateWalletDetail();clearWalletOperations();resetWalletOperationFilters();setSession(null);replaceAccounts([]);clearWalletDetail();resetWalletTransactionFilters();resetCardTransactionFilter();setCards([]);setCardNextCursor(null);setCardListLoadingMore(false);setCardListError('');setSelectedCard(null);clearCardBalance();clearCardLimits();clearCardTransactions();clearCardTimeline()}
  const handleSessionInvalidation=(value:unknown,isCurrent=true)=>{if(!isCurrent||!sessionFailureRequiresClear(value))return false;clear();setError(describe(value));return true}
  const loadWalletOperations=async(expectedScope=walletScope.current,activeSession=session,filters:WalletOperationFilterSelection={type:walletOperationTypeFilterTarget.current,status:walletOperationStatusFilterTarget.current})=>{if(!activeSession||!expectedScope||walletOperationInFlight.current||walletTransferSessionScope(activeSession,walletRuntime.environment)!==expectedScope||expectedScope!==walletScope.current||walletOperationFilterKey(filters)!==walletOperationFilterKey({type:walletOperationTypeFilterTarget.current,status:walletOperationStatusFilterTarget.current}))return;abortWalletOperationRequest();const snapshot=walletOperationsRef.current;let expectedPage=snapshot;const controller=new AbortController();walletOperationAbortController.current=controller;walletOperationInFlight.current=true;const request=createWalletOperationActivityRequestIdentity(++walletOperationRequestSequence.current,expectedScope,filters,null);walletOperationCursorTarget.current=null;const isCurrent=()=>walletOperationAbortController.current===controller&&walletTransferSessionScope(activeSession,walletRuntime.environment)===expectedScope&&walletOperationsRef.current===expectedPage&&walletOperationActivityRequestIsCurrent(request,walletOperationRequestSequence.current,walletScope.current,walletOperationFilterKey({type:walletOperationTypeFilterTarget.current,status:walletOperationStatusFilterTarget.current}),walletOperationCursorTarget.current,walletRequestMounted.current);clearWalletOperationDetail();setWalletOperationsLoading(snapshot===null);setWalletOperationsRefreshing(snapshot!==null);setWalletOperationsLoadingMore(false);setWalletOperationsError('');try{const page=await walletApi.walletOperations(activeSession,expectedScope,filters,undefined,controller.signal);if(isCurrent()){expectedPage=page;replaceWalletOperations(page)}}catch(value){if(isCurrent()&&!walletOperationRequestWasAborted(value))setWalletOperationsError(describeWalletOperations(value))}finally{if(isCurrent()){walletOperationAbortController.current=null;walletOperationInFlight.current=false;setWalletOperationsLoading(false);setWalletOperationsRefreshing(false)}}}
  const loadWalletBalanceSummary=async(rows:WalletAccountRecord[],account:WalletAccountRecord|null,activeSession:WalletSession,expectedScope=walletScope.current)=>{const activeScope=walletTransferSessionScope(activeSession,walletRuntime.environment);if(!walletRequestMounted.current||!expectedScope||activeScope!==expectedScope||captureWalletAccountsVersion(rows)!==captureWalletAccountsVersion(accountsRef.current)||(account?.id??null)!==(selectedAccountRef.current?.id??null)){clearWalletBalanceSummary();if(walletRequestMounted.current)setWalletBalanceSummaryError(describeWalletBalanceSummary(null));return}abortWalletBalanceSummaryRequest();const controller=new AbortController();walletBalanceSummaryAbortController.current=controller;const request={requestId:++walletBalanceSummaryRequestSequence.current,scopeKey:expectedScope,accountId:account?.id??null,accountsVersion:captureWalletAccountsVersion(rows)};const isCurrent=()=>walletRequestMounted.current&&walletBalanceSummaryAbortController.current===controller&&walletTransferSessionScope(activeSession,walletRuntime.environment)===expectedScope&&walletBalanceSummaryRequestIsCurrent(request,walletBalanceSummaryRequestSequence.current,walletScope.current,accountsRef.current,selectedAccountRef.current);setWalletBalanceSummaryLoading(true);setWalletBalanceSummaryError('');try{const summary=await walletApi.walletBalanceSummary(activeSession,expectedScope,controller.signal);if(isCurrent())replaceWalletBalanceSummary(summary)}catch(value){if(isCurrent()&&!walletBalanceSummaryRequestWasAborted(value)){if(!walletBalanceSummaryRetainsSnapshotOnFailure(value))replaceWalletBalanceSummary(null);setWalletBalanceSummaryError(describeWalletBalanceSummary(value))}}finally{if(isCurrent()){walletBalanceSummaryAbortController.current=null;setWalletBalanceSummaryLoading(false)}}}
  const loadWalletTransactionHistory=async(account:WalletAccountRecord,expectedScope:string,activeSession:WalletSession,selection:WalletTransactionFilterSelection={type:walletTransactionTypeFilterTarget.current,status:walletTransactionStatusFilterTarget.current})=>{let filters;try{filters=walletTransactionFiltersForSelectedAsset(selection,account.assetCode)}catch{clearWalletTransactions();setWalletHistoryError(describeWalletHistory());return}const ownsAccount=accountsRef.current.some(row=>row.id===account.id&&row.assetCode===account.assetCode);if(!walletRequestMounted.current||!ownsAccount||walletTransferSessionScope(activeSession,walletRuntime.environment)!==expectedScope||walletScope.current!==expectedScope||selectedAccountRef.current?.id!==account.id||selectedAccountRef.current.assetCode!==account.assetCode){clearWalletTransactions();if(walletRequestMounted.current)setWalletHistoryError(describeWalletHistory());return}clearWalletTransactions();const filterKey=walletTransactionFilterKey(filters);const historyRequest=createWalletTransactionHistoryRequestIdentity(++walletHistoryRequestSequence.current,expectedScope,filters,null);const historyController=new AbortController();walletHistoryAbortController.current=historyController;walletHistoryAssetTarget.current=account.assetCode;walletHistoryFilterTarget.current=filterKey;walletHistoryCursorTarget.current=null;walletHistoryInFlight.current=true;const isCurrent=()=>walletRequestMounted.current&&walletHistoryAbortController.current===historyController&&walletTransferSessionScope(activeSession,walletRuntime.environment)===expectedScope&&walletTransactionHistoryRequestIsCurrent(historyRequest,walletHistoryRequestSequence.current,walletScope.current,walletHistoryFilterTarget.current,walletHistoryCursorTarget.current)&&accountsRef.current.some(row=>row.id===account.id&&row.assetCode===account.assetCode)&&selectedAccountRef.current?.id===account.id&&selectedAccountRef.current.assetCode===account.assetCode;setWalletHistoryLoading(true);setWalletTransactionLoadingMore(false);setWalletHistoryError('');try{const history=await walletApi.walletTransactions(activeSession,filters,null,historyController.signal);if(!isCurrent())return;replaceWalletTransactions(history);walletHistoryCursorTarget.current=history.nextCursor}catch(value){if(isCurrent()&&!walletTransactionRequestWasAborted(value)){replaceWalletTransactions(null);setWalletHistoryError(describeWalletHistory())}}finally{if(isCurrent()){walletHistoryAbortController.current=null;walletHistoryInFlight.current=false;setWalletHistoryLoading(false)}}}
  const loadWallet=async(account:WalletAccountRecord,expectedScope:string|null,activeSession:WalletSession)=>{replaceSelectedAccount(account);const ownsAccount=accountsRef.current.some(row=>row.id===account.id&&row.assetCode===account.assetCode);if(!walletRequestMounted.current||!expectedScope||walletTransferSessionScope(activeSession,walletRuntime.environment)!==expectedScope||expectedScope!==walletScope.current||!ownsAccount){abortWalletAccountBalanceRequest();replaceAccountBalance(null);setWalletLoading(false);if(walletRequestMounted.current)setWalletError('Wallet balance unavailable for this session');return}abortWalletAccountBalanceRequest();const balanceSnapshot=accountBalanceRef.current;if(!balanceSnapshot||balanceSnapshot.accountId!==account.id||balanceSnapshot.assetCode!==account.assetCode)replaceAccountBalance(null);const controller=new AbortController();walletAccountBalanceAbortController.current=controller;const request={requestId:++walletAccountRequestSequence.current,scopeKey:expectedScope,accountId:account.id};walletAccountTarget.current=account.id;const isCurrent=()=>walletRequestMounted.current&&walletAccountBalanceAbortController.current===controller&&walletTransferSessionScope(activeSession,walletRuntime.environment)===expectedScope&&selectedAccountRef.current?.id===account.id&&selectedAccountRef.current.assetCode===account.assetCode&&accountsRef.current.some(row=>row.id===account.id&&row.assetCode===account.assetCode)&&walletRequestIsCurrent(request,walletAccountRequestSequence.current,walletScope.current,walletAccountTarget.current);setWalletLoading(true);setWalletError('');const historyPromise=loadWalletTransactionHistory(account,expectedScope,activeSession);const[balanceResult]=await Promise.all([walletApi.walletBalance(activeSession,expectedScope,account,controller.signal).then(balance=>({balance,error:null})).catch(error=>({balance:null,error})),historyPromise]);if(isCurrent()){if(balanceResult.balance)replaceAccountBalance(balanceResult.balance);else if(!walletAccountBalanceRequestWasAborted(balanceResult.error)){if(!walletAccountBalanceRetainsSnapshotOnFailure(balanceResult.error))replaceAccountBalance(null);setWalletError(describe(balanceResult.error))}walletAccountBalanceAbortController.current=null;setWalletLoading(false)}}
- const loadCard=async(card:CardRecord,expectedScope=cardScope.current,callbacks?:{onError?:(value:unknown)=>void;onSettled?:()=>void})=>{
+ const loadCard=async(card:CardRecord,expectedScope=cardScope.current,activeSession:WalletSession|null=session,callbacks?:{onError?:(value:unknown)=>void;onSettled?:()=>void})=>{
   abortCardDetailRequest()
   abortCardTransactionRequest()
+  abortCardTimelineRequest()
   setCardTransactionLoadingMore(false)
+  setCardTimelineLoadingMore(false)
   resetCardTransactionRefresh()
+  resetCardTimelineRefresh()
   cardActionRequestSequence.current+=1
   cardActionTarget.current=null
   clearCardLimitsUpdate()
-  if(!expectedScope){
+  if(!expectedScope||!activeSession||walletTransferSessionScope(activeSession,walletRuntime.environment)!==expectedScope){
    const publicError=new Error('Card refresh unavailable for this session')
    callbacks?.onSettled?.()
    if(callbacks?.onError)callbacks.onError(publicError)
@@ -274,11 +294,13 @@ export default function App(){
    clearCardBalance()
    clearCardLimits()
    clearCardTransactions()
+   clearCardTimeline()
   }
   setCardRefreshError('')
   const request=createCardDetailRefreshRequestIdentity(++cardDetailRequestSequence.current,expectedScope,card.id)
   const transactionFilter=cardTransactionFilterRef.current
   const transactionRequest=createCardTransactionHistoryRequestIdentity(++cardTransactionRequestSequence.current,expectedScope,card.id,transactionFilter,null)
+  const timelineRequest=createCardTimelineRequestIdentity(++cardTimelineRequestSequence.current,expectedScope,card.id,null)
   cardDetailTarget.current=card.id
   cardBalanceRequestSequence.current+=1
   cardBalanceTarget.current=card.id
@@ -286,20 +308,24 @@ export default function App(){
   cardLimitsTarget.current=card.id
   cardTransactionTarget.current=card.id
   cardTransactionCursorTarget.current=null
+  cardTimelineTarget.current=card.id
+  cardTimelineCursorTarget.current=null
   const detailController=new AbortController()
   cardDetailAbortController.current=detailController
-  const isCurrent=()=>cardDetailAbortController.current===detailController&&cardDetailRefreshRequestIsCurrent(request,cardDetailRequestSequence.current,cardScope.current,selectedCardRef.current?.id??null,walletRequestMounted.current)&&cardDetailTarget.current===card.id&&cardBalanceTarget.current===card.id&&cardLimitsTarget.current===card.id&&cardTransactionTarget.current===card.id&&cardTransactionHistoryRequestIsCurrent(transactionRequest,cardTransactionRequestSequence.current,cardScope.current,selectedCardRef.current?.id??null,cardTransactionFilterRef.current,cardTransactionCursorTarget.current,walletRequestMounted.current)
+  const isCurrent=()=>cardDetailAbortController.current===detailController&&walletTransferSessionScope(activeSession,walletRuntime.environment)===expectedScope&&cardDetailRefreshRequestIsCurrent(request,cardDetailRequestSequence.current,cardScope.current,selectedCardRef.current?.id??null,walletRequestMounted.current)&&cardDetailTarget.current===card.id&&cardBalanceTarget.current===card.id&&cardLimitsTarget.current===card.id&&cardTransactionTarget.current===card.id&&cardTimelineTarget.current===card.id&&cardTransactionHistoryRequestIsCurrent(transactionRequest,cardTransactionRequestSequence.current,cardScope.current,selectedCardRef.current?.id??null,cardTransactionFilterRef.current,cardTransactionCursorTarget.current,walletRequestMounted.current)&&cardTimelineRequestIsCurrent(timelineRequest,cardTimelineRequestSequence.current,cardScope.current,selectedCardRef.current?.id??null,cardTimelineCursorTarget.current,walletRequestMounted.current)
   setCardBalanceLoading(true)
   setCardBalanceError('')
   setCardLimitsLoading(true)
   setCardLimitsError('')
   setCardTransactionError('')
+  setCardTimelineError('')
   try{
    const snapshot=await readCardDetailRefresh({
     card:(id,signal)=>walletApi.card(id,signal),
     balance:(id,signal)=>walletApi.balance(id,signal),
     limits:(id,signal)=>walletApi.limits(id,signal),
     transactions:(id,signal)=>walletApi.transactions(id,{filter:transactionFilter},signal),
+    timeline:(id,signal)=>walletApi.timeline(activeSession,expectedScope,id,null,signal??detailController.signal),
    },card.id,detailController.signal)
    if(!isCurrent())return
    setSelectedCard(snapshot.card)
@@ -307,16 +333,24 @@ export default function App(){
    setCardBalance(snapshot.balance)
    replaceCardLimits(snapshot.limits)
    replaceCardTransactionHistory(commitCardTransactionHistoryPage(null,transactionRequest,snapshot.transactions))
+   replaceCardTimelineHistory(commitCardTimelinePage(null,timelineRequest,snapshot.timeline))
    cardSnapshotTarget.current=card.id
   }catch(value){
    if(!isCurrent())return
    if(cardDetailRefreshRequestWasAborted(value))return
+   const clearTimelineSnapshot=value instanceof CardDetailRefreshError&&value.resource==='timeline'&&cardTimelineFailureClearsSnapshot(value,true,detailController.signal)
+   const invalidateTimelineSession=value instanceof CardDetailRefreshError&&value.resource==='timeline'&&cardTimelineFailureCanInvalidateSession(value,true,detailController.signal)
    detailController.abort()
    const publicError=new Error('Card refresh unavailable for this session')
    if(value instanceof CardDetailRefreshError){
     if(value.resource==='balance')setCardBalanceError(describeCardBalance(value.cause))
     else if(value.resource==='limits')setCardLimitsError(describeCardLimits(value.cause))
     else if(value.resource==='transactions')setCardTransactionError('Card transactions unavailable for this session')
+    else if(value.resource==='timeline'){
+     if(clearTimelineSnapshot)replaceCardTimelineHistory(null)
+     setCardTimelineError('Card lifecycle timeline unavailable for this session')
+     if(invalidateTimelineSession)window.dispatchEvent(new CustomEvent('fastlink:session-invalid',{detail:value}))
+    }
     else setCardRefreshError(publicError.message)
    }
    if(callbacks?.onError)callbacks.onError(value)
@@ -356,6 +390,7 @@ export default function App(){
   clearCardBalance()
   clearCardLimits()
   clearCardTransactions()
+  clearCardTimeline()
   replaceAccounts([])
   clearWalletDetail()
   setSession(current)
@@ -383,7 +418,7 @@ export default function App(){
    isCurrent,
   })
   if(!isCurrent())return
-  if(card)await loadCard(card,scope,{onError:value=>{if(!handleSessionInvalidation(value,isCurrent()))setCardRefreshError('Card refresh unavailable for this session')}})
+  if(card)await loadCard(card,scope,current,{onError:value=>{if(!handleSessionInvalidation(value,isCurrent()))setCardRefreshError('Card refresh unavailable for this session')}})
  }
  const loadMoreCards=async()=>{if(!session||!cardNextCursor||cardListLoadingMore||cardListAbortController.current)return;const scope=walletTransferSessionScope(session,walletRuntime.environment);if(!scope||scope!==cardScope.current)return;const cursor=cardNextCursor;const snapshot=cardsRef.current;const controller=new AbortController();cardListAbortController.current=controller;cardListCursorTarget.current=cursor;const request=createCardListRequestIdentity(++cardRequestSequence.current,scope,cursor);const isCurrent=()=>cardListAbortController.current===controller&&walletTransferSessionScope(session,walletRuntime.environment)===scope&&cardListRequestIsCurrent(request,cardRequestSequence.current,cardScope.current,cardListCursorTarget.current,walletRequestMounted.current);setCardListLoadingMore(true);setCardListError('');try{const page=await walletApi.cards(session,scope,cursor,snapshot,controller.signal);if(!isCurrent())return;setCards(current=>mergeCardPages(current,page.cards));setCardNextCursor(page.nextCursor)}catch(value){if(isCurrent()&&!cardListRequestWasAborted(value))setCardListError(describe(value))}finally{if(isCurrent()){cardListAbortController.current=null;setCardListLoadingMore(false)}}}
  const reloadCardListFirstPage=async(activeSession:WalletSession,scope:string,ownerIsCurrent:()=>boolean)=>{abortCardListRequest();const controller=new AbortController();cardListAbortController.current=controller;cardListCursorTarget.current=null;const request=createCardListRequestIdentity(++cardRequestSequence.current,scope,null);const isCurrent=()=>ownerIsCurrent()&&cardListAbortController.current===controller&&walletTransferSessionScope(activeSession,walletRuntime.environment)===scope&&cardListRequestIsCurrent(request,cardRequestSequence.current,cardScope.current,cardListCursorTarget.current,walletRequestMounted.current);try{const page=await walletApi.cards(activeSession,scope,null,[],controller.signal);return isCurrent()?page:null}finally{if(cardListAbortController.current===controller)cardListAbortController.current=null}}
@@ -428,7 +463,7 @@ export default function App(){
   const scope=activeSession?sessionScope(activeSession):null
   if(!activeSession||!card||!scope||scope!==cardScope.current||!walletRequestMounted.current){setCardTransactionError('Card transaction history unavailable for this session');return}
   setBusy(true)
-  void loadCard(card,scope,{onError:()=>setCardTransactionError('Card transaction history unavailable for this session'),onSettled:()=>setBusy(false)})
+  void loadCard(card,scope,activeSession,{onError:()=>setCardTransactionError('Card transaction history unavailable for this session'),onSettled:()=>setBusy(false)})
  }
  const refreshCardTransactions=async()=>{
   const activeSession=session
@@ -479,6 +514,92 @@ export default function App(){
    }
   }
  }
+ const loadMoreCardTimeline=async()=>{
+  const history=cardTimelineHistoryRef.current
+  const activeSession=session
+  const card=selectedCardRef.current
+  if(!activeSession||!card||!history?.nextCursor||history.pageCount>=CARD_TIMELINE_MAX_PAGES||cardTimelineLoadingMore||cardTimelineAbortController.current)return
+  const scope=walletTransferSessionScope(activeSession,walletRuntime.environment)
+  const cursor=history.nextCursor
+  if(!scope||scope!==cardScope.current||card.id!==cardDetailTarget.current||card.id!==cardTimelineTarget.current||history.scopeKey!==scope||history.cardId!==card.id)return
+  let expectedHistory=history
+  const request=createCardTimelineRequestIdentity(++cardTimelineRequestSequence.current,scope,card.id,cursor)
+  const controller=new AbortController()
+  cardTimelineAbortController.current=controller
+  cardTimelineCursorTarget.current=cursor
+  const isCurrent=()=>cardTimelineAbortController.current===controller&&walletTransferSessionScope(activeSession,walletRuntime.environment)===scope&&cardTimelineHistoryRef.current===expectedHistory&&card.id===cardDetailTarget.current&&cardTimelineRequestIsCurrent(request,cardTimelineRequestSequence.current,cardScope.current,cardTimelineTarget.current,cardTimelineCursorTarget.current,walletRequestMounted.current)
+  setCardTimelineLoadingMore(true)
+  setCardTimelineError('')
+  try{
+   const page=await walletApi.timeline(activeSession,scope,card.id,cursor,controller.signal)
+   if(!isCurrent())return
+   const merged=commitCardTimelinePage(history,request,page)
+   expectedHistory=merged
+   replaceCardTimelineHistory(merged)
+  }catch(value){
+   const current=isCurrent()
+   if(current&&!cardTimelineRequestWasAborted(value)){
+    cardTimelineAbortController.current=null
+    setCardTimelineLoadingMore(false)
+    if(cardTimelineFailureClearsSnapshot(value,current,controller.signal))replaceCardTimelineHistory(null)
+    setCardTimelineError('Card lifecycle timeline unavailable for this session')
+    if(cardTimelineFailureCanInvalidateSession(value,current,controller.signal))window.dispatchEvent(new CustomEvent('fastlink:session-invalid',{detail:value}))
+   }
+  }finally{
+   if(isCurrent()){
+    cardTimelineAbortController.current=null
+    setCardTimelineLoadingMore(false)
+   }
+  }
+ }
+ const refreshCardTimeline=async()=>{
+  const activeSession=session
+  const card=selectedCardRef.current
+  const scope=activeSession?walletTransferSessionScope(activeSession,walletRuntime.environment):null
+  const snapshot=cardTimelineHistoryRef.current
+  const nextAttempt=cardTimelineRefreshAttemptRef.current+1
+  if(nextAttempt>CARD_TIMELINE_REFRESH_MAX_ATTEMPTS)return
+  if(!activeSession||!card||!scope||card.id!==cardTimelineTarget.current||!cardTimelineRefreshAllowed(activeSession.environment,walletRuntime.environment,scope,cardScope.current,card.id,cardDetailTarget.current,snapshot)){
+   setCardTimelineError('Card lifecycle timeline unavailable for this session')
+   return
+  }
+  abortCardTimelineRequest()
+  setCardTimelineLoadingMore(false)
+  const request=createCardTimelineRefreshRequestIdentity(++cardTimelineRequestSequence.current,scope,card.id,nextAttempt,snapshot)
+  const controller=new AbortController()
+  cardTimelineAbortController.current=controller
+  cardTimelineCursorTarget.current=null
+  cardTimelineRefreshAttemptRef.current=nextAttempt
+  setCardTimelineRefreshAttempt(nextAttempt)
+  const isCurrent=()=>cardTimelineAbortController.current===controller&&walletTransferSessionScope(activeSession,walletRuntime.environment)===scope&&card.id===cardDetailTarget.current&&cardTimelineTarget.current===card.id&&cardTimelineRefreshRequestIsCurrent(request,cardTimelineRequestSequence.current,cardScope.current,selectedCardRef.current?.id??null,cardTimelineRefreshAttemptRef.current,cardTimelineHistoryRef.current,walletRequestMounted.current)
+  setCardTimelineRefreshing(true)
+  setCardTimelineError('')
+  try{
+   const page=await walletApi.timeline(activeSession,scope,card.id,null,controller.signal)
+   if(!isCurrent())return
+   const refreshed=commitCardTimelineRefreshPage(request,page)
+   cardTimelineAbortController.current=null
+   replaceCardTimelineHistory(refreshed)
+   cardTimelineRefreshAttemptRef.current=0
+   setCardTimelineRefreshAttempt(0)
+   setCardTimelineRefreshing(false)
+   setCardTimelineError('')
+  }catch(value){
+   const current=isCurrent()
+   if(current&&!cardTimelineRequestWasAborted(value)){
+    cardTimelineAbortController.current=null
+    setCardTimelineRefreshing(false)
+    if(cardTimelineFailureClearsSnapshot(value,current,controller.signal))replaceCardTimelineHistory(null)
+    setCardTimelineError('Card lifecycle timeline unavailable for this session')
+    if(cardTimelineFailureCanInvalidateSession(value,current,controller.signal))window.dispatchEvent(new CustomEvent('fastlink:session-invalid',{detail:value}))
+   }
+  }finally{
+   if(isCurrent()){
+    cardTimelineAbortController.current=null
+    setCardTimelineRefreshing(false)
+   }
+  }
+ }
  const selectCardTransactionDetail=(transaction:CardTransactionRecord)=>{invalidateCardTransactionDetailRefresh();const scope=cardScope.current;const card=selectedCardRef.current;if(!walletRequestMounted.current||!scope||!card){replaceSelectedCardTransactionDetail(null);return}try{replaceSelectedCardTransactionDetail(createCardTransactionDetailSelection(scope,card.id,transaction,cardTransactionsRef.current))}catch{replaceSelectedCardTransactionDetail(null)}}
  const refreshSelectedCardTransactionDetail=async()=>{
   const activeSession=session
@@ -522,14 +643,14 @@ export default function App(){
  const selectWalletTransaction=async(transaction:WalletTransactionRecord)=>{replaceSelectedWalletTransaction(transaction);await loadWalletTransactionDetail(transaction)}
  const refreshSelectedWalletTransaction=()=>{const transaction=selectedWalletTransactionRef.current;if(transaction)void loadWalletTransactionDetail(transaction)}
  useEffect(()=>{cardsRef.current=cards},[cards])
- useEffect(()=>{walletRequestMounted.current=true;return()=>{walletRequestMounted.current=false;selectedCardTransactionDetailRef.current=null;cardRequestSequence.current+=1;abortCardListRequest();cardListCursorTarget.current=null;cardDetailRequestSequence.current+=1;abortCardDetailRequest();abortCardTransactionRequest();abortCardTransactionDetailRequest();cardTransactionRequestSequence.current+=1;cardTransactionDetailRequestSequence.current+=1;cardTransactionTarget.current=null;cardTransactionCursorTarget.current=null;walletOperationRequestSequence.current+=1;walletOperationDetailRequestSequence.current+=1;walletOperationInFlight.current=false;abortWalletOperationRequest();abortWalletOperationDetailRequest();walletHistoryRequestSequence.current+=1;walletTransactionDetailRequestSequence.current+=1;cardLimitsUpdateRequestSequence.current+=1;cardLimitsUpdateSubmitGate.current.activeRequestId=null;cardLimitsUpdateInFlight.current=false;cardActionRequestSequence.current+=1;cardActionTarget.current=null;cardStatusSubmitGate.current.activeRequestId=null;cardStatusInFlight.current=false;cardReplacementRequestSequence.current+=1;cardReplacementTarget.current=null;cardReplacementSubmitGate.current.activeRequestId=null;cardReplacementInFlight.current=false;cardRenewalRequestSequence.current+=1;cardRenewalTarget.current=null;cardRenewalSubmitGate.current.activeRequestId=null;cardRenewalInFlight.current=false;abortWalletAccountBalanceRequest();abortWalletHistoryRequest();abortWalletTransactionDetailRequest();abortWalletBalanceSummaryRequest()}},[])
+ useEffect(()=>{walletRequestMounted.current=true;return()=>{walletRequestMounted.current=false;selectedCardTransactionDetailRef.current=null;cardRequestSequence.current+=1;abortCardListRequest();cardListCursorTarget.current=null;cardDetailRequestSequence.current+=1;abortCardDetailRequest();abortCardTransactionRequest();abortCardTransactionDetailRequest();abortCardTimelineRequest();cardTransactionRequestSequence.current+=1;cardTransactionDetailRequestSequence.current+=1;cardTimelineRequestSequence.current+=1;cardTransactionTarget.current=null;cardTransactionCursorTarget.current=null;cardTimelineTarget.current=null;cardTimelineCursorTarget.current=null;walletOperationRequestSequence.current+=1;walletOperationDetailRequestSequence.current+=1;walletOperationInFlight.current=false;abortWalletOperationRequest();abortWalletOperationDetailRequest();walletHistoryRequestSequence.current+=1;walletTransactionDetailRequestSequence.current+=1;cardLimitsUpdateRequestSequence.current+=1;cardLimitsUpdateSubmitGate.current.activeRequestId=null;cardLimitsUpdateInFlight.current=false;cardActionRequestSequence.current+=1;cardActionTarget.current=null;cardStatusSubmitGate.current.activeRequestId=null;cardStatusInFlight.current=false;cardReplacementRequestSequence.current+=1;cardReplacementTarget.current=null;cardReplacementSubmitGate.current.activeRequestId=null;cardReplacementInFlight.current=false;cardRenewalRequestSequence.current+=1;cardRenewalTarget.current=null;cardRenewalSubmitGate.current.activeRequestId=null;cardRenewalInFlight.current=false;abortWalletAccountBalanceRequest();abortWalletHistoryRequest();abortWalletTransactionDetailRequest();abortWalletBalanceSummaryRequest()}},[])
  useEffect(()=>{const invalidate=(event:Event)=>{const value=event instanceof CustomEvent?event.detail:null;if(sessionFailureRequiresClear(value)){if(walletScope.current)handleSessionInvalidation(value);else clear()}};window.addEventListener('fastlink:session-invalid',invalidate);void (async()=>{try{await acceptSession(await walletApi.session())}catch(value){if(sessionFailureRequiresClear(value)){if(value instanceof SessionValidationError||walletScope.current)handleSessionInvalidation(value)}else setError(describe(value))}finally{if(walletRequestMounted.current)setBusy(false)}})();return()=>window.removeEventListener('fastlink:session-invalid',invalidate)},[])
  useEffect(()=>{if(!session)return;const expiresAt=typeof session.expiresAt==='string'?Date.parse(session.expiresAt):Number.NaN;const remaining=expiresAt-Date.now();if(!Number.isFinite(remaining)||remaining<=0){clear();return}const timeout=window.setTimeout(()=>clear(),Math.min(remaining,2_147_483_647));return()=>window.clearTimeout(timeout)},[session])
  const authenticate=async(event:FormEvent)=>{event.preventDefault();setBusy(true);setError('');clear();try{const credentials:WalletCredentials={tenantId:tenantId.trim(),email:email.trim(),password};const current=mode==='login'?await walletApi.login(credentials):await walletApi.register(credentials);await acceptSession(current);setPassword('')}catch(value){if(sessionFailureRequiresClear(value))handleSessionInvalidation(value);else setError(describe(value))}finally{setBusy(false)}}
  const detailCallbacks={onError:()=>setCardRefreshError('Card refresh unavailable for this session'),onSettled:()=>setBusy(false)}
- const selectCard=async(card:CardRecord)=>{if(!session||cardReplacementInFlight.current||cardRenewalInFlight.current||cardLimitsUpdateInFlight.current||cardStatusInFlight.current)return;clearCardReplacement();clearCardRenewal();clearCardLimitsUpdate();clearCardStatusAction();setBusy(true);setError('');setSelectedCard(card);clearCardBalance();clearCardLimits();clearCardTransactions();await loadCard(card,sessionScope(session),detailCallbacks)}
- const reloadCard=async()=>{if(!session||!selectedCard||cardReplacementInFlight.current||cardRenewalInFlight.current||cardLimitsUpdateInFlight.current||cardStatusInFlight.current)return;setBusy(true);setError('');await loadCard(selectedCard,sessionScope(session),detailCallbacks)}
- const createVirtualCard=async(event:FormEvent)=>{event.preventDefault();if(!session||virtualCardCreateInFlight.current||cardReplacementInFlight.current||cardRenewalInFlight.current)return;const scope=sessionScope(session);const decision=virtualCardCreateDecision(session.environment,walletRuntime.environment);if(!decision.allowed||scope!==cardScope.current){setVirtualCardCreateError('Virtual card creation unavailable for this session');return}let input:VirtualCardCreateInput;try{input=parseVirtualCardCreateInput({currency:virtualCardCurrency,alias:virtualCardAlias})}catch{setVirtualCardCreateError('Use a valid ISO currency and an optional alias of 30 characters or fewer.');return}const request={requestId:++virtualCardCreateRequestSequence.current,scopeKey:scope};const isCurrent=()=>virtualCardCreateRequestIsCurrent(request,virtualCardCreateRequestSequence.current,cardScope.current);virtualCardCreateInFlight.current=true;setVirtualCardCreating(true);setVirtualCardCreateError('');const idempotencyKey=crypto.randomUUID();try{const created=await walletApi.createVirtualCard(input,idempotencyKey,session.environment);if(!isCurrent())return;const page=await reloadCardListFirstPage(session,scope,isCurrent);if(!page)return;setCards(mergeCardPages(page.cards,[created]));setCardNextCursor(page.nextCursor);setCardListError('');setSelectedCard(created);setVirtualCardAlias('');await loadCard(created,scope,{onError:()=>{if(isCurrent())setVirtualCardCreateError('Virtual card created, but refreshed card detail is unavailable for this session.')}})}catch(value){if(isCurrent()&&!cardListRequestWasAborted(value))setVirtualCardCreateError(describeVirtualCardCreate(value))}finally{if(isCurrent()){virtualCardCreateInFlight.current=false;setVirtualCardCreating(false)}}}
+ const selectCard=async(card:CardRecord)=>{if(!session||cardReplacementInFlight.current||cardRenewalInFlight.current||cardLimitsUpdateInFlight.current||cardStatusInFlight.current)return;clearCardReplacement();clearCardRenewal();clearCardLimitsUpdate();clearCardStatusAction();setBusy(true);setError('');setSelectedCard(card);clearCardBalance();clearCardLimits();clearCardTransactions();clearCardTimeline();await loadCard(card,sessionScope(session),session,detailCallbacks)}
+ const reloadCard=async()=>{if(!session||!selectedCard||cardReplacementInFlight.current||cardRenewalInFlight.current||cardLimitsUpdateInFlight.current||cardStatusInFlight.current)return;setBusy(true);setError('');await loadCard(selectedCard,sessionScope(session),session,detailCallbacks)}
+ const createVirtualCard=async(event:FormEvent)=>{event.preventDefault();if(!session||virtualCardCreateInFlight.current||cardReplacementInFlight.current||cardRenewalInFlight.current)return;const scope=sessionScope(session);const decision=virtualCardCreateDecision(session.environment,walletRuntime.environment);if(!decision.allowed||scope!==cardScope.current){setVirtualCardCreateError('Virtual card creation unavailable for this session');return}let input:VirtualCardCreateInput;try{input=parseVirtualCardCreateInput({currency:virtualCardCurrency,alias:virtualCardAlias})}catch{setVirtualCardCreateError('Use a valid ISO currency and an optional alias of 30 characters or fewer.');return}const request={requestId:++virtualCardCreateRequestSequence.current,scopeKey:scope};const isCurrent=()=>virtualCardCreateRequestIsCurrent(request,virtualCardCreateRequestSequence.current,cardScope.current);virtualCardCreateInFlight.current=true;setVirtualCardCreating(true);setVirtualCardCreateError('');const idempotencyKey=crypto.randomUUID();try{const created=await walletApi.createVirtualCard(input,idempotencyKey,session.environment);if(!isCurrent())return;const page=await reloadCardListFirstPage(session,scope,isCurrent);if(!page)return;setCards(mergeCardPages(page.cards,[created]));setCardNextCursor(page.nextCursor);setCardListError('');setSelectedCard(created);setVirtualCardAlias('');await loadCard(created,scope,session,{onError:()=>{if(isCurrent())setVirtualCardCreateError('Virtual card created, but refreshed card detail is unavailable for this session.')}})}catch(value){if(isCurrent()&&!cardListRequestWasAborted(value))setVirtualCardCreateError(describeVirtualCardCreate(value))}finally{if(isCurrent()){virtualCardCreateInFlight.current=false;setVirtualCardCreating(false)}}}
  const replaceSelectedCard=async(event:FormEvent)=>{
   event.preventDefault()
   const activeSession=session
@@ -567,7 +688,7 @@ export default function App(){
    setSelectedCard(commit.selectedCard)
    setCardListError('')
    setBusy(true)
-   await loadCard(commit.selectedCard,request.scopeKey,detailCallbacks)
+   await loadCard(commit.selectedCard,request.scopeKey,activeSession,detailCallbacks)
   }catch(value){if(isCurrent())setCardReplacementError(describeCardReplacement(value))}
   finally{
    const currentRequest=isCurrent()
@@ -609,7 +730,7 @@ export default function App(){
    setSelectedCard(commit.selectedCard)
    setCardListError('')
    setBusy(true)
-   await loadCard(commit.selectedCard,request.scopeKey,detailCallbacks)
+   await loadCard(commit.selectedCard,request.scopeKey,activeSession,detailCallbacks)
   }catch(value){if(isCurrent())setCardRenewalError(describeCardRenewal(value))}
   finally{
    const currentRequest=isCurrent()
@@ -682,6 +803,7 @@ export default function App(){
  const toggleDecision=selectedCard?cardStatusDecision(selectedCard,session,walletRuntime.environment,cardScope.current,cardDetailTarget.current):null
  const selectedCardTransaction=selectedCardTransactionDetail?.transaction??null
  const transactionRefreshAllowed=Boolean(session&&selectedCard&&cardTransactionRefreshAllowed(session.environment,walletRuntime.environment,walletTransferSessionScope(session,walletRuntime.environment),cardScope.current,selectedCard.id,cardDetailTarget.current,cardTransactionFilter,cardTransactionFilterRef.current,cardTransactionHistoryRef.current))
+ const timelineRefreshAllowed=Boolean(session&&selectedCard&&cardTimelineRefreshAllowed(session.environment,walletRuntime.environment,walletTransferSessionScope(session,walletRuntime.environment),cardScope.current,selectedCard.id,cardDetailTarget.current,cardTimelineHistoryRef.current))
  const toggle=async()=>{
   const activeSession=session
   const card=selectedCardRef.current
@@ -769,6 +891,7 @@ export default function App(){
      {replacementDecision?.allowed&&<form className="transfer-form" onSubmit={replaceSelectedCard}><h3><RefreshCw/> Replace selected Card · {session?.environment}</h3><select value={cardReplacementReason} onChange={event=>updateCardReplacementReason(event.target.value as CardReplacementReason)} disabled={cardReplacing||virtualCardCreating||cardRenewing}>{CARD_REPLACEMENT_REASONS.map(reason=><option key={reason} value={reason}>{reason}</option>)}</select><button disabled={busy||cardReplacing||virtualCardCreating||cardRenewing}>{cardReplacing?'Replacing once…':'Replace selected Card'}</button>{cardReplacementError&&<div className="inline-error">{cardReplacementError} · No Provider or internal error details displayed.</div>}<p className="card-action-note">Manual SANDBOX/TEST only · one canonical UUIDv4 Idempotency-Key · at most one POST · no automatic retries.</p></form>}
      {renewalDecision?.allowed&&<form className="transfer-form" onSubmit={renewSelectedCard}><h3><RefreshCw/> Renew selected Card · {session?.environment}</h3><button disabled={busy||cardRenewing||virtualCardCreating||cardReplacing}>{cardRenewing?'Renewing once…':'Renew selected Card'}</button>{cardRenewalError&&<div className="inline-error">{cardRenewalError} · No Provider or internal error details displayed.</div>}<p className="card-action-note">Manual SANDBOX/TEST only · one canonical UUIDv4 Idempotency-Key · at most one bodyless POST · no automatic retries.</p></form>}
      <div className="record-list"><div className="panel-row"><h3>Card transactions</h3><button type="button" onClick={()=>void refreshCardTransactions()} disabled={busy||!transactionRefreshAllowed||cardTransactionRefreshAttempt>=CARD_TRANSACTION_REFRESH_MAX_ATTEMPTS} title={transactionRefreshAllowed?'Refresh the current Card and status filter only':'Available only for the current SANDBOX/TEST Card and filter'}><RefreshCw/> {cardTransactionRefreshing?`Refresh again (${cardTransactionRefreshAttempt}/${CARD_TRANSACTION_REFRESH_MAX_ATTEMPTS})`:cardTransactionError&&cardTransactionRefreshAttempt>0?cardTransactionRefreshAttempt>=CARD_TRANSACTION_REFRESH_MAX_ATTEMPTS?'Retry limit reached':`Retry transactions (${cardTransactionRefreshAttempt}/${CARD_TRANSACTION_REFRESH_MAX_ATTEMPTS})`:'Refresh transactions'}</button></div><p className="card-action-note">Manual SANDBOX/TEST GET · current Card and status filter only · at most {CARD_TRANSACTION_REFRESH_MAX_ATTEMPTS} attempts per cycle · no automatic retries.</p><div className="wallet-history-filters"><label>Status<select aria-label="Card transaction status filter" value={cardTransactionFilter} onChange={event=>changeCardTransactionFilter(event.target.value)} disabled={busy||cardTransactionLoadingMore}>{CARD_TRANSACTION_FILTERS.map(filter=><option value={filter} key={filter}>{filter==='ALL'?'All':filter}</option>)}</select></label></div>{cardTransactionRefreshing&&<p>Refreshing current Card transactions… Keeping the last verified snapshot until completion.</p>}{cardTransactionError&&<div className="inline-error">{cardTransactionError} · The verified same-filter state remains unchanged; no unvalidated or cross-filter data displayed.</div>}{cardTransactions.length===0&&!cardTransactionError&&!cardTransactionRefreshing&&<p>No Card transactions match this status.</p>}{cardTransactions.map(transaction=><button type="button" className={`wallet-history-row${selectedCardTransaction?.id===transaction.id?' selected':''}`} key={transaction.id} onClick={()=>selectCardTransactionDetail(transaction)} disabled={busy||cardTransactionLoadingMore}><span><b>{transaction.merchantName??'Card transaction'}</b><small>{transaction.status} · {new Date(transaction.occurredAt).toLocaleString()} {transaction.merchantCategory?`· MCC ${transaction.merchantCategory}`:''}</small></span><b>{transaction.amountMinor} minor {transaction.currency}</b></button>)}{cardTransactionNextCursor&&<button className="load-more" onClick={()=>void loadMoreCardTransactions()} disabled={busy||cardTransactionLoadingMore||cardTransactionRefreshing||virtualCardCreating||cardReplacing||cardRenewing}>{cardTransactionLoadingMore?'Loading more transactions…':'Load more transactions'}</button>}{selectedCardTransaction&&<div className="wallet-transaction-detail"><div className="panel-row"><h4>Selected Card transaction · read only</h4><button type="button" onClick={()=>void refreshSelectedCardTransactionDetail()} disabled={busy||!transactionRefreshAllowed}><RefreshCw/> {cardTransactionDetailRefreshing?'Refresh again':'Refresh detail'}</button></div><small>Manual only · one GET per click · no automatic retries · current unexpired session, Card, status filter and list snapshot only.</small>{cardTransactionDetailRefreshing&&<p>Refreshing selected transaction… Keeping the last verified detail until completion.</p>}{cardTransactionDetailError&&<div className="inline-error">{cardTransactionDetailError} · The last verified detail remains unchanged; no upstream details displayed.</div>}<div><span>Transaction</span><b>{selectedCardTransaction.id}</b></div><div><span>Type (from status)</span><b>{cardTransactionLifecycleType(selectedCardTransaction.status)}</b></div><div><span>Status</span><b>{selectedCardTransaction.status}</b></div><div><span>Amount</span><b>{selectedCardTransaction.amountMinor} minor {selectedCardTransaction.currency}</b></div><div><span>Authorized</span><b>{selectedCardTransaction.authorizedAmountMinor} minor</b></div><div><span>Cleared</span><b>{selectedCardTransaction.clearedAmountMinor} minor</b></div><div><span>Settled</span><b>{selectedCardTransaction.settledAmountMinor} minor</b></div><div><span>Reversed</span><b>{selectedCardTransaction.reversedAmountMinor} minor</b></div><div><span>Refunded</span><b>{selectedCardTransaction.refundedAmountMinor} minor</b></div><div><span>Currency</span><b>{selectedCardTransaction.currency}</b></div><div><span>Merchant</span><b>{selectedCardTransaction.merchantName??'Not provided'}</b></div><div><span>Merchant category</span><b>{selectedCardTransaction.merchantCategory??'Not provided'}</b></div><div><span>Occurred</span><b>{new Date(selectedCardTransaction.occurredAt).toLocaleString()}</b></div><div><span>Trace</span><b>{selectedCardTransaction.traceId??'Not provided'}</b></div></div>}</div>
+     <div className="record-list"><div className="panel-row"><h3>Card lifecycle timeline · read only</h3><button type="button" onClick={()=>void refreshCardTimeline()} disabled={busy||!timelineRefreshAllowed||cardTimelineRefreshAttempt>=CARD_TIMELINE_REFRESH_MAX_ATTEMPTS}><RefreshCw/> {cardTimelineRefreshing?`Refresh again (${cardTimelineRefreshAttempt}/${CARD_TIMELINE_REFRESH_MAX_ATTEMPTS})`:cardTimelineError&&cardTimelineRefreshAttempt>0?cardTimelineRefreshAttempt>=CARD_TIMELINE_REFRESH_MAX_ATTEMPTS?'Retry limit reached':`Retry timeline (${cardTimelineRefreshAttempt}/${CARD_TIMELINE_REFRESH_MAX_ATTEMPTS})`:'Refresh timeline'}</button></div><p className="card-action-note">GET only · signed opaque cursor · 25 per page, at most {CARD_TIMELINE_MAX_PAGES} pages · no automatic retries · current unexpired SANDBOX/TEST session and Card only.</p>{cardTimelineRefreshing&&<p>Refreshing lifecycle timeline… Keeping the last verified snapshot until completion.</p>}{cardTimelineError&&<div className="inline-error">{cardTimelineError} · The last verified lifecycle snapshot remains unchanged; no internal Provider fields displayed.</div>}{cardTimeline?.events.length===0&&!cardTimelineError&&!cardTimelineRefreshing&&<p>No persisted lifecycle events returned.</p>}{cardTimeline?.events.map(event=><div className="wallet-history-row" key={event.id}><span><b>{event.type}</b><small>{event.fromStatus??'—'} → {event.toStatus??'—'} · {new Date(event.occurredAt).toLocaleString()}</small></span><b>{event.id}</b></div>)}{cardTimeline?.nextCursor&&<button className="load-more" type="button" onClick={()=>void loadMoreCardTimeline()} disabled={busy||cardTimelineLoadingMore||cardTimelineRefreshing||virtualCardCreating||cardReplacing||cardRenewing}>{cardTimelineLoadingMore?'Loading more lifecycle events…':'Load more lifecycle events'}</button>}</div>
     </>}
    </section>
    <section className="panel wallet-operation-activity"><div className="panel-row"><div><h2>All-account Wallet activity · read only</h2><p className="card-action-note">Persisted operations for every Wallet account owned by this customer. No asset filter is applied.</p></div><button className="wallet-operation-refresh" onClick={()=>{const scope=session?walletTransferSessionScope(session,walletRuntime.environment):null;if(session&&scope&&scope===walletScope.current)void loadWalletOperations(scope,session,{type:walletOperationTypeFilterTarget.current,status:walletOperationStatusFilterTarget.current})}} disabled={busy||walletOperationsLoading||walletOperationsLoadingMore||walletOperationsRefreshing}>{walletOperationsRefreshing?'Refreshing…':'Refresh activity'}</button></div><div className="wallet-operation-filters"><label>Type<select value={walletOperationTypeFilter} disabled={walletOperationsLoading||walletOperationsLoadingMore||walletOperationsRefreshing} onChange={event=>changeWalletOperationFilters({type:event.target.value as WalletOperationFilterSelection['type']})}><option value="ALL">ALL</option>{WALLET_OPERATION_TYPES.map(type=><option value={type} key={type}>{type}</option>)}</select></label><label>Status<select value={walletOperationStatusFilter} disabled={walletOperationsLoading||walletOperationsLoadingMore||walletOperationsRefreshing} onChange={event=>changeWalletOperationFilters({status:event.target.value as WalletOperationFilterSelection['status']})}><option value="ALL">ALL</option>{WALLET_OPERATION_STATUSES.map(status=><option value={status} key={status}>{status}</option>)}</select></label></div>{walletOperationsError&&<div className="inline-error">{walletOperationsError} · No unvalidated or cross-session activity displayed.</div>}{walletOperationsLoading&&<p>Loading Wallet activity…</p>}{walletOperationsRefreshing&&walletOperations&&<p className="card-action-note">Refreshing once · verified activity remains visible until the GET completes.</p>}<div className="record-list">{!walletOperationsLoading&&walletOperations?.items.length?walletOperations.items.map(operation=><button className={`wallet-history-row${selectedWalletOperation?.id===operation.id?' selected':''}`} key={operation.id} onClick={()=>void selectWalletOperation(operation)} disabled={walletOperationsLoading||walletOperationsLoadingMore||walletOperationsRefreshing}><span><b>{operation.type} · {operation.status}</b><small>{operation.direction} · Created {new Date(operation.createdAt).toLocaleString()}</small><small>{operation.completedAt?`Completed ${new Date(operation.completedAt).toLocaleString()}`:'Not completed'} · Updated {new Date(operation.updatedAt).toLocaleString()}</small><small>Operation {operation.id}</small></span><b>{operation.amount} {operation.assetCode}</b></button>):!walletOperationsLoading&&!walletOperationsError&&<p>No persisted Wallet operations returned.</p>}{walletOperations?.nextCursor&&<button className="load-more" onClick={()=>void loadMoreWalletOperations()} disabled={busy||walletOperationsLoading||walletOperationsLoadingMore||walletOperationsRefreshing}>{walletOperationsLoadingMore?'Loading more activity…':'Load more activity'}</button>}{selectedWalletOperation&&<div className="wallet-transaction-detail"><h4>Selected operation · read only</h4>{walletOperationDetailLoading&&<p>Loading operation detail…</p>}{walletOperationDetailError&&<div className="inline-error">{walletOperationDetailError} · No operation detail displayed.</div>}{walletOperationDetail&&<><div><span>Operation</span><b>{walletOperationDetail.id}</b></div><div><span>Type</span><b>{walletOperationDetail.type}</b></div><div><span>Status</span><b>{walletOperationDetail.status}</b></div><div><span>Direction</span><b>{walletOperationDetail.direction}</b></div><div><span>Amount</span><b>{walletOperationDetail.amount} {walletOperationDetail.assetCode}</b></div><div><span>Created</span><b>{new Date(walletOperationDetail.createdAt).toLocaleString()}</b></div><div><span>Completed</span><b>{walletOperationDetail.completedAt?new Date(walletOperationDetail.completedAt).toLocaleString():'Not completed'}</b></div><div><span>Updated</span><b>{new Date(walletOperationDetail.updatedAt).toLocaleString()}</b></div></>}</div>}</div></section>

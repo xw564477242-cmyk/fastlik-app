@@ -5,6 +5,7 @@ import {
   parseCardTransactionPage,
   type CardTransactionPage,
 } from "./cardTransactions.ts";
+import { parseCardTimelinePage, type CardTimelinePage } from "./cardTimeline.ts";
 
 export type CardDetailRefreshRequestIdentity = Readonly<{
   requestId: number;
@@ -17,6 +18,7 @@ export type CardDetailRefreshSnapshot = Readonly<{
   balance: CardBalanceRecord;
   limits: CardLimitsRecord;
   transactions: CardTransactionPage;
+  timeline: CardTimelinePage;
 }>;
 
 export type CardDetailRefreshReaders = Readonly<{
@@ -24,9 +26,10 @@ export type CardDetailRefreshReaders = Readonly<{
   balance: (cardId: string, signal?: AbortSignal) => Promise<unknown>;
   limits: (cardId: string, signal?: AbortSignal) => Promise<unknown>;
   transactions: (cardId: string, signal?: AbortSignal) => Promise<unknown>;
+  timeline: (cardId: string, signal?: AbortSignal) => Promise<unknown>;
 }>;
 
-export type CardDetailRefreshResource = "card" | "balance" | "limits" | "transactions";
+export type CardDetailRefreshResource = "card" | "balance" | "limits" | "transactions" | "timeline";
 
 export class CardDetailRefreshError extends Error {
   readonly resource: CardDetailRefreshResource;
@@ -84,7 +87,7 @@ function throwIfCardDetailRefreshRequestWasAborted(signal: AbortSignal | undefin
 }
 
 /**
- * Reads one complete Card screen snapshot. Nothing is returned until all four
+ * Reads one complete Card screen snapshot. Nothing is returned until all five
  * public responses have passed their existing allowlist parsers.
  */
 export async function readCardDetailRefresh(
@@ -103,11 +106,12 @@ export async function readCardDetailRefresh(
       throw new CardDetailRefreshError(resource, { cause });
     }
   };
-  const [rawCard, rawBalance, rawLimits, rawTransactions] = await Promise.all([
+  const [rawCard, rawBalance, rawLimits, rawTransactions, rawTimeline] = await Promise.all([
     guarded("card", () => readers.card(selectedCardId, signal)),
     guarded("balance", () => readers.balance(selectedCardId, signal)),
     guarded("limits", () => readers.limits(selectedCardId, signal)),
     guarded("transactions", () => readers.transactions(selectedCardId, signal)),
+    guarded("timeline", () => readers.timeline(selectedCardId, signal)),
   ]);
   throwIfCardDetailRefreshRequestWasAborted(signal);
 
@@ -117,8 +121,9 @@ export async function readCardDetailRefresh(
   const balance = parseCardBalance(rawBalance, selectedCardId);
   const limits = parseCardLimits(rawLimits, selectedCardId);
   const transactions = parseCardTransactionPage(rawTransactions);
+  const timeline = parseCardTimelinePage(rawTimeline);
   if (balance.currency !== card.currency)
     throw new Error("Card detail and balance currencies do not match");
 
-  return Object.freeze({ card, balance, limits, transactions });
+  return Object.freeze({ card, balance, limits, transactions, timeline });
 }

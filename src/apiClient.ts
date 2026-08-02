@@ -31,6 +31,8 @@ import {readWalletTransactionDetail,readWalletTransactionHistory} from './wallet
 import type {WalletTransactionFilters,WalletTransactionHistoryState,WalletTransactionRecord,WalletTransactionTransportRequest} from './walletTransactions'
 import {API_REQUEST_DEADLINE_MS} from './requestPolicy'
 import {sessionFailureRequiresClear} from './sessionLifecycle'
+import {readCardTimelinePage} from './cardTimeline'
+import type {CardTimelineTransportRequest} from './cardTimeline'
 
 export type {WalletAccountRecord,WalletBalanceRecord,WalletTransferReceipt} from './walletData'
 export type {WalletTransactionHistoryState as WalletTransactionPage,WalletTransactionRecord} from './walletTransactions'
@@ -42,6 +44,7 @@ export type {VirtualCardCreateInput} from './virtualCardCreate'
 export type {CardReplacementInput,CardReplacementReason} from './cardReplacement'
 export type {WalletBalanceSummary} from './walletBalanceSummary'
 export type {FxQuote,FxQuoteInput} from './fxQuote'
+export type {CardTimelineEvent,CardTimelineHistory,CardTimelinePage} from './cardTimeline'
 
 export type FastLinkEnvironment='LOCAL'|'SANDBOX'|'TEST'|'UAT'|'PRODUCTION'
 export type WalletSession={actorId:string;tenantId:string;customerId:string;environment:FastLinkEnvironment;expiresAt?:string}
@@ -116,6 +119,7 @@ const cardStatusTransport=({path,method,idempotencyKey}:CardStatusTransportReque
 const cardReplacementTransport=({path,method,body,idempotencyKey}:CardReplacementTransportRequest)=>request<unknown>(path,method,body,idempotencyKey)
 const cardRenewalTransport=({path,method,idempotencyKey}:CardRenewalTransportRequest)=>request<unknown>(path,method,undefined,idempotencyKey)
 const fxQuoteTransport=({path,method,body,signal}:FxQuoteTransportRequest)=>request<string>(path,method,body,undefined,'text',signal,FX_QUOTE_RESPONSE_MAX_JSON_BYTES,'caller')
+const cardTimelineTransport=({path,method,signal}:CardTimelineTransportRequest)=>request<unknown>(path,method,undefined,undefined,'json',signal,undefined,'caller')
 
 export const walletApi={
  register:(credentials:WalletCredentials)=>request<WalletSession>('/v1/auth/register','POST',credentials),
@@ -139,6 +143,7 @@ export const walletApi={
  limits:async(id:string,signal?:AbortSignal)=>parseCardLimits(await request<unknown>(cardLimitsPath(id),'GET',undefined,undefined,'json',signal),id),
  updateCardLimits:async(card:import('./cardList').CardRecord,current:import('./cardLimits').CardLimitsRecord,input:CardLimitsUpdateInput,idempotencyKey:string,sessionEnvironment:FastLinkEnvironment,scopeKey:string,currentScopeKey:string|null,currentCardId:string|null)=>submitCardLimitsUpdate(cardLimitsUpdateTransport,card,current,input,idempotencyKey,sessionEnvironment,walletRuntime.environment,scopeKey,currentScopeKey,currentCardId),
  transactions:async(id:string,query:CardTransactionQuery,signal?:AbortSignal)=>parseCardTransactionPage(await request<unknown>(cardTransactionPath(id,query),'GET',undefined,undefined,'json',signal),query.filter),
+ timeline:async(session:WalletSession,scopeKey:string,id:string,cursor:string|null,signal:AbortSignal)=>readCardTimelinePage(cardTimelineTransport,session,walletRuntime.environment,scopeKey,id,cursor,signal),
  cardTransactionDetail:async(session:WalletSession,cardId:string,selected:import('./cardTransactions').CardTransactionRecord,scopeKey:string,signal:AbortSignal)=>readCardTransactionDetailRefresh(cardTransactionDetailTransport,session,walletRuntime.environment,scopeKey,cardId,selected,signal),
  createVirtualCard:async(input:VirtualCardCreateInput,idempotencyKey:string,sessionEnvironment:FastLinkEnvironment)=>{const decision=virtualCardCreateDecision(sessionEnvironment,walletRuntime.environment);if(!decision.allowed)throw new Error(decision.reason??'Virtual card creation is unavailable');const normalized=parseVirtualCardCreateInput(input);return parseVirtualCardCreateResponse(await request<unknown>(virtualCardCreatePath(),'POST',normalized,validateVirtualCardIdempotencyKey(idempotencyKey)),normalized)},
  replaceCard:async(session:WalletSession,card:import('./cardList').CardRecord,input:CardReplacementInput,idempotencyKey:string,currentScopeKey:string|null,currentCardId:string|null)=>submitCardReplacement(cardReplacementTransport,session,walletRuntime.environment,currentScopeKey,currentCardId,card,input,idempotencyKey),

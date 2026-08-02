@@ -71,32 +71,47 @@ const rawTransactions = (overrides: Record<string, unknown> = {}) => ({
   ...overrides,
 });
 
+const rawTimeline = () => ({
+  events: [{
+    id: "timeline_event_01",
+    type: "CREATED",
+    fromStatus: null,
+    toStatus: "PENDING",
+    occurredAt: "2026-08-01T00:00:00.000Z",
+  }],
+  nextCursor: null,
+});
+
 const readers = (overrides: Partial<{
   card: () => Promise<unknown>;
   balance: () => Promise<unknown>;
   limits: () => Promise<unknown>;
   transactions: () => Promise<unknown>;
+  timeline: () => Promise<unknown>;
 }> = {}) => ({
   card: async () => rawCard(),
   balance: async () => rawBalance(),
   limits: async () => rawLimits(),
   transactions: async () => rawTransactions(),
+  timeline: async () => rawTimeline(),
   ...overrides,
 });
 
-test("builds one exact allowlisted Card screen snapshot after all four reads", async () => {
+test("builds one exact allowlisted Card screen snapshot after all five reads", async () => {
   const calls: string[] = [];
   const snapshot = await readCardDetailRefresh({
     card: async id => { calls.push(`card:${id}`); return rawCard(); },
     balance: async id => { calls.push(`balance:${id}`); return rawBalance(); },
     limits: async id => { calls.push(`limits:${id}`); return rawLimits(); },
     transactions: async id => { calls.push(`transactions:${id}`); return rawTransactions(); },
+    timeline: async id => { calls.push(`timeline:${id}`); return rawTimeline(); },
   }, selectedCardId);
 
   assert.deepEqual(calls.sort(), [
     `balance:${selectedCardId}`,
     `card:${selectedCardId}`,
     `limits:${selectedCardId}`,
+    `timeline:${selectedCardId}`,
     `transactions:${selectedCardId}`,
   ]);
   assert.deepEqual(Object.keys(snapshot.card).sort(), [
@@ -110,10 +125,11 @@ test("builds one exact allowlisted Card screen snapshot after all four reads", a
     "cardId", "dailyAtmMinor", "dailySpendMinor", "monthlySpendMinor", "singleTransactionMinor", "updatedAt",
   ]);
   assert.deepEqual(Object.keys(snapshot.transactions).sort(), ["nextCursor", "transactions"]);
+  assert.deepEqual(Object.keys(snapshot.timeline).sort(), ["events", "nextCursor"]);
   assert.equal("authorizationCode" in snapshot.transactions.transactions[0], false);
 });
 
-test("passes one shared cancellation signal to all four Card detail reads", async () => {
+test("passes one shared cancellation signal to all five Card detail reads", async () => {
   const controller = new AbortController();
   const signals: AbortSignal[] = [];
   const recordSignal = (signal: AbortSignal | undefined) => {
@@ -126,9 +142,10 @@ test("passes one shared cancellation signal to all four Card detail reads", asyn
     balance: async (_id, signal) => { recordSignal(signal); return rawBalance(); },
     limits: async (_id, signal) => { recordSignal(signal); return rawLimits(); },
     transactions: async (_id, signal) => { recordSignal(signal); return rawTransactions(); },
+    timeline: async (_id, signal) => { recordSignal(signal); return rawTimeline(); },
   }, selectedCardId, controller.signal);
 
-  assert.equal(signals.length, 4);
+  assert.equal(signals.length, 5);
   assert.ok(signals.every(signal => signal === controller.signal));
 });
 
@@ -142,6 +159,7 @@ test("rejects without parsing when the shared Card detail request is aborted", a
     balance: async () => { calls += 1; return rawBalance(); },
     limits: async () => { calls += 1; return rawLimits(); },
     transactions: async () => { calls += 1; return rawTransactions(); },
+    timeline: async () => { calls += 1; return rawTimeline(); },
   }, selectedCardId, controller.signal), cardDetailRefreshRequestWasAborted);
 
   assert.equal(calls, 0);

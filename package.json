@@ -33,6 +33,8 @@
     "test:card-transaction-refresh:test": "FASTLINK_TEST_ENVIRONMENT=TEST node --experimental-strip-types --test tests/cardTransactionRefresh.integration.test.ts",
     "test:card-transaction-detail-refresh:sandbox": "FASTLINK_TEST_ENVIRONMENT=SANDBOX node --experimental-strip-types --test tests/cardTransactionDetailRefresh.integration.test.ts",
     "test:card-transaction-detail-refresh:test": "FASTLINK_TEST_ENVIRONMENT=TEST node --experimental-strip-types --test tests/cardTransactionDetailRefresh.integration.test.ts",
+    "test:card-timeline:sandbox": "FASTLINK_TEST_ENVIRONMENT=SANDBOX node --experimental-strip-types --test tests/cardTimeline.integration.test.ts",
+    "test:card-timeline:test": "FASTLINK_TEST_ENVIRONMENT=TEST node --experimental-strip-types --test tests/cardTimeline.integration.test.ts",
     "test:cloudflare": "node scripts/verify-cloudflare.mjs"
   },
   "dependencies": {
