@@ -25,6 +25,8 @@ import {readWalletBalanceSummary} from './walletBalanceSummary'
 import type {WalletBalanceSummary,WalletBalanceSummaryTransportRequest} from './walletBalanceSummary'
 import {readWalletTransferAccounts,readWalletTransferStatus,submitWalletTransfer} from './walletTransfer'
 import type {WalletTransferInput,WalletTransferTransportRequest} from './walletTransfer'
+import {readFxQuote} from './fxQuote'
+import type {FxQuoteInput,FxQuoteTransportRequest} from './fxQuote'
 import {readWalletTransactionDetail,readWalletTransactionHistory} from './walletTransactions'
 import type {WalletTransactionFilters,WalletTransactionHistoryState,WalletTransactionRecord,WalletTransactionTransportRequest} from './walletTransactions'
 import {API_REQUEST_DEADLINE_MS} from './requestPolicy'
@@ -39,6 +41,7 @@ export type {CardLimitsUpdateInput} from './cardLimitsUpdate'
 export type {VirtualCardCreateInput} from './virtualCardCreate'
 export type {CardReplacementInput,CardReplacementReason} from './cardReplacement'
 export type {WalletBalanceSummary} from './walletBalanceSummary'
+export type {FxQuote,FxQuoteInput} from './fxQuote'
 
 export type FastLinkEnvironment='LOCAL'|'SANDBOX'|'TEST'|'UAT'|'PRODUCTION'
 export type WalletSession={actorId:string;tenantId:string;customerId:string;environment:FastLinkEnvironment;expiresAt?:string}
@@ -112,6 +115,7 @@ const cardLimitsUpdateTransport=({path,method,body,idempotencyKey}:CardLimitsUpd
 const cardStatusTransport=({path,method,idempotencyKey}:CardStatusTransportRequest)=>request<unknown>(path,method,undefined,idempotencyKey)
 const cardReplacementTransport=({path,method,body,idempotencyKey}:CardReplacementTransportRequest)=>request<unknown>(path,method,body,idempotencyKey)
 const cardRenewalTransport=({path,method,idempotencyKey}:CardRenewalTransportRequest)=>request<unknown>(path,method,undefined,idempotencyKey)
+const fxQuoteTransport=({path,method,body}:FxQuoteTransportRequest)=>request<string>(path,method,body,undefined,'text')
 
 export const walletApi={
  register:(credentials:WalletCredentials)=>request<WalletSession>('/v1/auth/register','POST',credentials),
@@ -128,6 +132,7 @@ export const walletApi={
  walletTransactionDetail:async(session:WalletSession,selected:WalletTransactionRecord,signal?:AbortSignal):Promise<WalletTransactionRecord>=>readWalletTransactionDetail(walletTransactionTransport,session,walletRuntime.environment,selected,signal),
  internalTransfer:async(session:WalletSession,accounts:readonly WalletAccountRecord[],input:InternalTransferInput,idempotencyKey:string):Promise<WalletTransferReceipt>=>submitWalletTransfer(walletTransferTransport,session,walletRuntime.environment,accounts,input,idempotencyKey),
  walletTransferStatus:async(session:WalletSession,previous:WalletTransferReceipt):Promise<WalletTransferReceipt>=>readWalletTransferStatus(walletTransferTransport,session,walletRuntime.environment,previous),
+ fxQuote:async(session:WalletSession,input:FxQuoteInput)=>readFxQuote(fxQuoteTransport,session,walletRuntime.environment,input),
  cards:async(session:WalletSession,scopeKey:string,cursor:string|null=null,previousCards:readonly CardRecord[]=[],signal?:AbortSignal):Promise<CardPage>=>readCardListPage(cardListTransport,session,walletRuntime.environment,scopeKey,cursor,previousCards,signal),
  card:async(id:string,signal?:AbortSignal)=>parseCardRecord(await request<unknown>(`/v1/cards/${encodeURIComponent(id)}`,'GET',undefined,undefined,'json',signal)),
  balance:async(id:string,signal?:AbortSignal)=>parseCardBalance(await request<unknown>(cardBalancePath(id),'GET',undefined,undefined,'json',signal),id),
