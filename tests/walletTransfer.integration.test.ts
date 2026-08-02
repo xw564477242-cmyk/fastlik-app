@@ -7,10 +7,13 @@ import {
   readWalletTransferStatus,
   settleWalletTransferSubmit,
   submitWalletTransfer,
+  walletTransferFailureIsAmbiguous,
   walletTransferRequestIsCurrent,
+  walletTransferRetryKey,
   walletTransferSessionScope,
   type WalletTransferTransportRequest,
 } from "../src/walletTransfer.ts";
+import { sessionFailureRequiresClear } from "../src/sessionLifecycle.ts";
 
 const configuredEnvironment = process.env.FASTLINK_TEST_ENVIRONMENT;
 const environment =
@@ -127,6 +130,72 @@ integration("uses one request per action, never retries, and a same-key replay i
   assert.equal(beginWalletTransferSubmit(gate, 1), true);
   assert.equal(beginWalletTransferSubmit(gate, 2), false);
   assert.equal(settleWalletTransferSubmit(gate, 1), true);
+});
+
+integration("an uncertain response permits only an exact same-key manual retry", async () => {
+  const accounts = [account("account-source-01"), account("account-destination-02")];
+  const currentSession = session();
+  const scope = walletTransferSessionScope(currentSession, environment!)!;
+  const input = {
+    sourceAccountId: accounts[0].id,
+    destinationAccountId: accounts[1].id,
+    assetCode: "USD",
+    amount: "25",
+  };
+  const key = "123e4567-e89b-42d3-a456-426614174000";
+  const request = createWalletTransferRequestIdentity(1, scope, accounts[0], input, key);
+  const calls: WalletTransferTransportRequest[] = [];
+  const uncertainTransport = async (transportRequest: WalletTransferTransportRequest) => {
+    calls.push(transportRequest);
+    throw { status: 408 };
+  };
+  await assert.rejects(
+    submitWalletTransfer(uncertainTransport, currentSession, environment!, accounts, input, key),
+    (value) => walletTransferFailureIsAmbiguous(value),
+  );
+  const retryKey = walletTransferRetryKey(request, scope, accounts, accounts[0], input);
+  assert.equal(retryKey, key);
+  assert.ok(retryKey);
+  const replayTransport = async (transportRequest: WalletTransferTransportRequest) => {
+    calls.push(transportRequest);
+    return receipt();
+  };
+  await submitWalletTransfer(replayTransport, currentSession, environment!, accounts, input, retryKey);
+  assert.equal(calls.length, 2);
+  assert.equal(calls[0].idempotencyKey, calls[1].idempotencyKey);
+});
+
+integration("a late old-session 401 cannot invalidate a replacement session", () => {
+  const accounts = [account("account-source-01"), account("account-destination-02")];
+  const oldScope = walletTransferSessionScope(session(), environment!)!;
+  const replacementScope = walletTransferSessionScope(
+    session({ actorId: "actor-replacement-02", expiresAt: "2099-08-01T09:00:00.000Z" }),
+    environment!,
+  )!;
+  const request = createWalletTransferRequestIdentity(
+    1,
+    oldScope,
+    accounts[0],
+    {
+      sourceAccountId: accounts[0].id,
+      destinationAccountId: accounts[1].id,
+      assetCode: "USD",
+      amount: "25",
+    },
+    "123e4567-e89b-42d3-a456-426614174000",
+  );
+  const oldRequestIsCurrent = walletTransferRequestIsCurrent(
+    request,
+    2,
+    replacementScope,
+    accounts,
+    accounts[0],
+  );
+  let replacementSessionClears = 0;
+  if (oldRequestIsCurrent && sessionFailureRequiresClear({ status: 401 }))
+    replacementSessionClears += 1;
+  assert.equal(oldRequestIsCurrent, false);
+  assert.equal(replacementSessionClears, 0);
 });
 
 integration("denies mismatch and expiry before transport and rejects stale completion writes", async () => {

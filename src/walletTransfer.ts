@@ -393,6 +393,15 @@ export function validateWalletTransferIdempotencyKey(value: unknown): string {
   return value;
 }
 
+export function walletTransferFailureIsAmbiguous(value: unknown): boolean {
+  if (!value || typeof value !== "object") return false;
+  const descriptor = Object.getOwnPropertyDescriptor(value, "status");
+  if (!descriptor || !("value" in descriptor) || typeof descriptor.value !== "number")
+    return false;
+  return descriptor.value === 0 || descriptor.value === 408 ||
+    (descriptor.value >= 500 && descriptor.value <= 599);
+}
+
 export function walletTransferSessionScope(
   session: WalletTransferSession | null,
   runtimeEnvironment: WalletTransferEnvironment | undefined,
@@ -603,6 +612,28 @@ export function walletTransferRequestIsCurrent(
         account.status === "ACTIVE",
     )
   );
+}
+
+export function walletTransferRetryKey(
+  retry: WalletTransferRequestIdentity | null,
+  scopeKey: string,
+  accounts: readonly WalletAccountRecord[],
+  selectedAccount: WalletAccountRecord,
+  input: WalletTransferInput,
+): string | null {
+  if (
+    !retry ||
+    retry.destinationAccountId !== input.destinationAccountId ||
+    retry.amount !== input.amount ||
+    !walletTransferRequestIsCurrent(
+      retry,
+      retry.requestId,
+      scopeKey,
+      accounts,
+      selectedAccount,
+    )
+  ) return null;
+  return retry.idempotencyKey;
 }
 
 export type WalletTransferSubmitGate = { activeRequestId: number | null };

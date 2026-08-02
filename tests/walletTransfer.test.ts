@@ -10,7 +10,9 @@ import {
   parseWalletTransferReceiptRaw,
   settleWalletTransferSubmit,
   validateWalletTransferIdempotencyKey,
+  walletTransferFailureIsAmbiguous,
   walletTransferRequestIsCurrent,
+  walletTransferRetryKey,
   walletTransferSessionScope,
 } from "../src/walletTransfer.ts";
 
@@ -240,6 +242,31 @@ test("requires one canonical UUIDv4 and synchronously locks duplicate submits", 
   assert.equal(settleWalletTransferSubmit(gate, 2), false);
   assert.equal(settleWalletTransferSubmit(gate, 1), true);
   assert.equal(beginWalletTransferSubmit(gate, 2), true);
+});
+
+test("reuses an ambiguous retry key only for the exact session, source version and input", () => {
+  const accounts = parseWalletTransferAccountsRaw(
+    JSON.stringify([account("account-source-01"), account("account-destination-02")]),
+  );
+  const scope = walletTransferSessionScope(session(), "SANDBOX")!;
+  const key = "123e4567-e89b-42d3-a456-426614174000";
+  const retry = createWalletTransferRequestIdentity(1, scope, accounts[0], input, key);
+  assert.equal(walletTransferRetryKey(retry, scope, accounts, accounts[0], input), key);
+  assert.equal(walletTransferRetryKey(retry, "replacement-session", accounts, accounts[0], input), null);
+  assert.equal(walletTransferRetryKey(retry, scope, [{ ...accounts[0], updatedAt: future }, accounts[1]], { ...accounts[0], updatedAt: future }, input), null);
+  assert.equal(walletTransferRetryKey(retry, scope, accounts, accounts[0], { ...input, destinationAccountId: accounts[0].id }), null);
+  assert.equal(walletTransferRetryKey(retry, scope, accounts, accounts[0], { ...input, amount: "26" }), null);
+});
+
+test("classifies only network, timeout and 5xx transfer failures as ambiguous without invoking getters", () => {
+  for (const status of [0, 408, 500, 502, 599])
+    assert.equal(walletTransferFailureIsAmbiguous({ status }), true);
+  for (const status of [400, 401, 403, 404, 409, 600])
+    assert.equal(walletTransferFailureIsAmbiguous({ status }), false);
+  let reads = 0;
+  const accessor = Object.defineProperty({}, "status", { get() { reads += 1; return 500; } });
+  assert.equal(walletTransferFailureIsAmbiguous(accessor), false);
+  assert.equal(reads, 0);
 });
 
 test("accepts only the exact bounded public receipt and rejects internal fields", () => {

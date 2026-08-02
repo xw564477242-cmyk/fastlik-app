@@ -23,7 +23,7 @@ import {submitCardRenewal} from './cardRenewal'
 import type {CardRenewalTransportRequest} from './cardRenewal'
 import {readWalletBalanceSummary} from './walletBalanceSummary'
 import type {WalletBalanceSummary,WalletBalanceSummaryTransportRequest} from './walletBalanceSummary'
-import {readWalletTransferAccounts,readWalletTransferStatus,submitWalletTransfer} from './walletTransfer'
+import {WALLET_TRANSFER_ACCOUNTS_PATH,WALLET_TRANSFER_ACCOUNT_MAX_JSON_BYTES,WALLET_TRANSFER_RESPONSE_MAX_JSON_BYTES,readWalletTransferAccounts,readWalletTransferStatus,submitWalletTransfer} from './walletTransfer'
 import type {WalletTransferInput,WalletTransferTransportRequest} from './walletTransfer'
 import {FX_QUOTE_RESPONSE_MAX_JSON_BYTES,readFxQuote} from './fxQuote'
 import type {FxQuoteInput,FxQuoteTransportRequest} from './fxQuote'
@@ -107,7 +107,7 @@ async function request<T>(path:string,method='GET',body?:unknown,idempotencyKey?
  }finally{window.clearTimeout(timeout);externalSignal?.removeEventListener('abort',cancel)}
 }
 
-const walletTransferTransport=({path,method,body,idempotencyKey}:WalletTransferTransportRequest)=>request<string>(path,method,body,idempotencyKey,'text')
+const walletTransferTransport=({path,method,body,idempotencyKey}:WalletTransferTransportRequest)=>request<string>(path,method,body,idempotencyKey,'text',undefined,path===WALLET_TRANSFER_ACCOUNTS_PATH?WALLET_TRANSFER_ACCOUNT_MAX_JSON_BYTES:WALLET_TRANSFER_RESPONSE_MAX_JSON_BYTES,'caller')
 const walletTransactionTransport=({path,method,signal}:WalletTransactionTransportRequest)=>request<string>(path,method,undefined,undefined,'text',signal)
 const walletBalanceSummaryTransport=({path,method,signal}:WalletBalanceSummaryTransportRequest)=>request<string>(path,method,undefined,undefined,'text',signal)
 const walletAccountBalanceTransport=({path,method,signal}:WalletAccountBalanceTransportRequest)=>request<string>(path,method,undefined,undefined,'text',signal)
