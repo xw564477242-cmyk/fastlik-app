@@ -119,7 +119,7 @@ const cardStatusTransport=({path,method,idempotencyKey}:CardStatusTransportReque
 const cardReplacementTransport=({path,method,body,idempotencyKey}:CardReplacementTransportRequest)=>request<unknown>(path,method,body,idempotencyKey)
 const cardRenewalTransport=({path,method,idempotencyKey}:CardRenewalTransportRequest)=>request<unknown>(path,method,undefined,idempotencyKey)
 const fxQuoteTransport=({path,method,body,signal}:FxQuoteTransportRequest)=>request<string>(path,method,body,undefined,'text',signal,FX_QUOTE_RESPONSE_MAX_JSON_BYTES,'caller')
-const cardTimelineTransport=({path,method,signal}:CardTimelineTransportRequest)=>request<unknown>(path,method,undefined,undefined,'json',signal)
+const cardTimelineTransport=({path,method,signal}:CardTimelineTransportRequest)=>request<unknown>(path,method,undefined,undefined,'json',signal,undefined,'caller')
 
 export const walletApi={
  register:(credentials:WalletCredentials)=>request<WalletSession>('/v1/auth/register','POST',credentials),

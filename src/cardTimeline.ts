@@ -245,6 +245,39 @@ export function cardTimelineRequestWasAborted(value: unknown): boolean {
   return value instanceof DOMException && value.name === "AbortError";
 }
 
+function cardTimelineFailureStatus(value: unknown, visited = new Set<object>()): number | null {
+  if (!value || typeof value !== "object" || visited.has(value)) return null;
+  visited.add(value);
+  try {
+    const status = Object.getOwnPropertyDescriptor(value, "status");
+    if (status && "value" in status && typeof status.value === "number") return status.value;
+    const cause = Object.getOwnPropertyDescriptor(value, "cause");
+    return cause && "value" in cause
+      ? cardTimelineFailureStatus(cause.value, visited)
+      : null;
+  } catch {
+    return null;
+  }
+}
+
+export function cardTimelineFailureClearsSnapshot(
+  value: unknown,
+  isCurrent: boolean,
+  signal: AbortSignal,
+): boolean {
+  if (!isCurrent || signal.aborted) return false;
+  const status = cardTimelineFailureStatus(value);
+  return status === 401 || status === 403 || status === 404;
+}
+
+export function cardTimelineFailureCanInvalidateSession(
+  value: unknown,
+  isCurrent: boolean,
+  signal: AbortSignal,
+): boolean {
+  return isCurrent && !signal.aborted && cardTimelineFailureStatus(value) === 401;
+}
+
 export async function readCardTimelinePage(
   transport: CardTimelineTransport,
   session: WalletTransferSession,

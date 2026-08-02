@@ -3,6 +3,8 @@ import test from "node:test";
 import {
   CARD_TIMELINE_MAX_PAGES,
   CARD_TIMELINE_PAGE_SIZE,
+  cardTimelineFailureCanInvalidateSession,
+  cardTimelineFailureClearsSnapshot,
   cardTimelinePath,
   cardTimelineRequestIsCurrent,
   commitCardTimelinePage,
@@ -96,6 +98,74 @@ test("rejects stale request identity and unsafe pagination transitions", () => {
   assert.throws(() => commitCardTimelinePage(first, nextRequest, page({ nextCursor: cursor(2) })), /Duplicate/);
   assert.throws(() => commitCardTimelinePage(first, nextRequest, page({ events: [event({ id: "timeline_event_02", occurredAt: "2026-08-01T00:00:01.000Z" })] })), /reverse chronological/);
   assert.throws(() => commitCardTimelinePage(first, nextRequest, page({ events: [event({ id: "timeline_event_02" })], nextCursor: cursor(1) })), /Repeated/);
+});
+
+test("only a current non-aborted 401 can invalidate the matching session", () => {
+  const signal = new AbortController().signal;
+  assert.equal(cardTimelineFailureCanInvalidateSession({ status: 401 }, true, signal), true);
+  assert.equal(cardTimelineFailureCanInvalidateSession({ status: 401 }, false, signal), false);
+  assert.equal(cardTimelineFailureCanInvalidateSession({ status: 403 }, true, signal), false);
+  assert.equal(cardTimelineFailureCanInvalidateSession({ status: 404 }, true, signal), false);
+
+  const aborted = new AbortController();
+  aborted.abort();
+  assert.equal(cardTimelineFailureCanInvalidateSession({ status: 401 }, true, aborted.signal), false);
+
+  const nested = new Error("Card timeline failed", { cause: { status: 401 } });
+  assert.equal(cardTimelineFailureCanInvalidateSession(nested, true, signal), true);
+});
+
+test("current 401/403/404 clear only the timeline snapshot and hostile failures fail closed", () => {
+  const signal = new AbortController().signal;
+  for (const status of [401, 403, 404]) {
+    assert.equal(cardTimelineFailureClearsSnapshot({ status }, true, signal), true);
+  }
+  for (const status of [0, 400, 408, 409, 429, 500]) {
+    assert.equal(cardTimelineFailureClearsSnapshot({ status }, true, signal), false);
+  }
+  assert.equal(cardTimelineFailureClearsSnapshot({ status: 404 }, false, signal), false);
+
+  let getterCalls = 0;
+  const hostile = {};
+  Object.defineProperty(hostile, "status", { get() { getterCalls += 1; return 401; } });
+  assert.equal(cardTimelineFailureClearsSnapshot(hostile, true, signal), false);
+  assert.equal(cardTimelineFailureCanInvalidateSession(hostile, true, signal), false);
+  assert.equal(getterCalls, 0);
+
+  const cycle = new Error("cycle");
+  Object.defineProperty(cycle, "cause", { value: cycle });
+  assert.equal(cardTimelineFailureCanInvalidateSession(cycle, true, signal), false);
+
+  const throwingProxy = new Proxy({}, {
+    getOwnPropertyDescriptor() { throw new Error("hostile trap"); },
+  });
+  assert.equal(cardTimelineFailureClearsSnapshot(throwingProxy, true, signal), false);
+  assert.equal(cardTimelineFailureCanInvalidateSession(throwingProxy, true, signal), false);
+});
+
+test("same-scope session replacement makes old success, error, 401 and finally zero-write", () => {
+  const scope = "same-visible-session-fields";
+  const request = createCardTimelineRequestIdentity(7, scope, "card_timeline", null);
+  let currentRequestId = 7;
+  let writes = 0;
+  const signal = new AbortController().signal;
+  const current = () => cardTimelineRequestIsCurrent(
+    request,
+    currentRequestId,
+    scope,
+    "card_timeline",
+    null,
+    true,
+  );
+  assert.equal(current(), true);
+
+  currentRequestId += 1;
+  for (const completion of ["success", "error", "finally"] as const) {
+    if (current()) writes += 1;
+    assert.equal(completion.length > 0, true);
+  }
+  assert.equal(cardTimelineFailureCanInvalidateSession({ status: 401 }, current(), signal), false);
+  assert.equal(writes, 0);
 });
 
 test("stops exposing continuation after the tenth bounded page", () => {

@@ -10,7 +10,7 @@ import {CardTransactionDetailSelection,createCardTransactionDetailSelection,reco
 import {cardTransactionDetailRefreshRequestIsCurrent,cardTransactionDetailRefreshWasAborted,createCardTransactionDetailRefreshRequestIdentity} from './cardTransactionDetailRefresh'
 import {CardTransactionHistoryState,cardTransactionHistoryRequestIsCurrent,commitCardTransactionHistoryPage,createCardTransactionHistoryRequestIdentity} from './cardTransactionHistory'
 import {CARD_TRANSACTION_REFRESH_MAX_ATTEMPTS,cardTransactionRefreshAllowed,cardTransactionRefreshRequestIsCurrent,commitCardTransactionRefreshPage,createCardTransactionRefreshRequestIdentity} from './cardTransactionRefresh'
-import {CARD_TIMELINE_MAX_PAGES,CardTimelineHistory,cardTimelineRequestIsCurrent,cardTimelineRequestWasAborted,commitCardTimelinePage,createCardTimelineRequestIdentity} from './cardTimeline'
+import {CARD_TIMELINE_MAX_PAGES,CardTimelineHistory,cardTimelineFailureCanInvalidateSession,cardTimelineFailureClearsSnapshot,cardTimelineRequestIsCurrent,cardTimelineRequestWasAborted,commitCardTimelinePage,createCardTimelineRequestIdentity} from './cardTimeline'
 import {CARD_TIMELINE_REFRESH_MAX_ATTEMPTS,cardTimelineRefreshAllowed,cardTimelineRefreshRequestIsCurrent,commitCardTimelineRefreshPage,createCardTimelineRefreshRequestIdentity} from './cardTimelineRefresh'
 import {WALLET_TRANSFER_STATUS_REFRESH_LIMIT,walletRequestIsCurrent,walletTransferStatusRequestIsCurrent} from './walletData'
 import {DEFAULT_WALLET_OPERATION_FILTERS,WALLET_OPERATION_STATUSES,WALLET_OPERATION_TYPES,appendWalletOperationPage,createWalletOperationActivityRequestIdentity,createWalletOperationDetailRequestIdentity,walletOperationActivityRequestIsCurrent,walletOperationDetailRequestIsCurrent,walletOperationFilterKey,walletOperationRequestWasAborted,type WalletOperationFilterSelection} from './walletOperations'
@@ -338,13 +338,19 @@ export default function App(){
   }catch(value){
    if(!isCurrent())return
    if(cardDetailRefreshRequestWasAborted(value))return
+   const clearTimelineSnapshot=value instanceof CardDetailRefreshError&&value.resource==='timeline'&&cardTimelineFailureClearsSnapshot(value,true,detailController.signal)
+   const invalidateTimelineSession=value instanceof CardDetailRefreshError&&value.resource==='timeline'&&cardTimelineFailureCanInvalidateSession(value,true,detailController.signal)
    detailController.abort()
    const publicError=new Error('Card refresh unavailable for this session')
    if(value instanceof CardDetailRefreshError){
     if(value.resource==='balance')setCardBalanceError(describeCardBalance(value.cause))
     else if(value.resource==='limits')setCardLimitsError(describeCardLimits(value.cause))
     else if(value.resource==='transactions')setCardTransactionError('Card transactions unavailable for this session')
-    else if(value.resource==='timeline')setCardTimelineError('Card lifecycle timeline unavailable for this session')
+    else if(value.resource==='timeline'){
+     if(clearTimelineSnapshot)replaceCardTimelineHistory(null)
+     setCardTimelineError('Card lifecycle timeline unavailable for this session')
+     if(invalidateTimelineSession)window.dispatchEvent(new CustomEvent('fastlink:session-invalid',{detail:value}))
+    }
     else setCardRefreshError(publicError.message)
    }
    if(callbacks?.onError)callbacks.onError(value)
@@ -531,7 +537,14 @@ export default function App(){
    expectedHistory=merged
    replaceCardTimelineHistory(merged)
   }catch(value){
-   if(isCurrent()&&!cardTimelineRequestWasAborted(value))setCardTimelineError('Card lifecycle timeline unavailable for this session')
+   const current=isCurrent()
+   if(current&&!cardTimelineRequestWasAborted(value)){
+    cardTimelineAbortController.current=null
+    setCardTimelineLoadingMore(false)
+    if(cardTimelineFailureClearsSnapshot(value,current,controller.signal))replaceCardTimelineHistory(null)
+    setCardTimelineError('Card lifecycle timeline unavailable for this session')
+    if(cardTimelineFailureCanInvalidateSession(value,current,controller.signal))window.dispatchEvent(new CustomEvent('fastlink:session-invalid',{detail:value}))
+   }
   }finally{
    if(isCurrent()){
     cardTimelineAbortController.current=null
@@ -572,7 +585,14 @@ export default function App(){
    setCardTimelineRefreshing(false)
    setCardTimelineError('')
   }catch(value){
-   if(isCurrent()&&!cardTimelineRequestWasAborted(value))setCardTimelineError('Card lifecycle timeline unavailable for this session')
+   const current=isCurrent()
+   if(current&&!cardTimelineRequestWasAborted(value)){
+    cardTimelineAbortController.current=null
+    setCardTimelineRefreshing(false)
+    if(cardTimelineFailureClearsSnapshot(value,current,controller.signal))replaceCardTimelineHistory(null)
+    setCardTimelineError('Card lifecycle timeline unavailable for this session')
+    if(cardTimelineFailureCanInvalidateSession(value,current,controller.signal))window.dispatchEvent(new CustomEvent('fastlink:session-invalid',{detail:value}))
+   }
   }finally{
    if(isCurrent()){
     cardTimelineAbortController.current=null

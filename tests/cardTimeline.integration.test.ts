@@ -1,6 +1,8 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import {
+  cardTimelineFailureCanInvalidateSession,
+  cardTimelineFailureClearsSnapshot,
   cardTimelineRequestWasAborted,
   readCardTimelinePage,
   type CardTimelineHistory,
@@ -51,4 +53,19 @@ mountedTest(`natural session expiry makes late timeline success, error and final
   }, session, runtime, scope(), "card_timeline", null, controller.signal, () => clock);
   await assert.rejects(promise, /expired/);
   assert.equal(cardTimelineRequestWasAborted(new DOMException("cancelled", "AbortError")), true);
+});
+
+mountedTest(`matching 401 invalidates once while stale 401 and current 403/404 only affect the timeline (${environment ?? "ENVIRONMENT_REQUIRED"})`, () => {
+  const signal = new AbortController().signal;
+  const snapshot = commitCardTimelineRefreshPage(createCardTimelineRefreshRequestIdentity(1, scope(), "card_timeline", 1, null), page());
+  const request = createCardTimelineRefreshRequestIdentity(2, scope(), "card_timeline", 1, snapshot);
+  const matching = cardTimelineRefreshRequestIsCurrent(request, 2, scope(), "card_timeline", 1, snapshot, true);
+  const rotated = cardTimelineRefreshRequestIsCurrent(request, 3, scope(), "card_timeline", 1, snapshot, true);
+
+  assert.equal(cardTimelineFailureCanInvalidateSession({ status: 401 }, matching, signal), true);
+  assert.equal(cardTimelineFailureCanInvalidateSession({ status: 401 }, rotated, signal), false);
+  assert.equal(cardTimelineFailureCanInvalidateSession({ status: 403 }, matching, signal), false);
+  assert.equal(cardTimelineFailureCanInvalidateSession({ status: 404 }, matching, signal), false);
+  assert.equal(cardTimelineFailureClearsSnapshot({ status: 403 }, matching, signal), true);
+  assert.equal(cardTimelineFailureClearsSnapshot({ status: 404 }, matching, signal), true);
 });

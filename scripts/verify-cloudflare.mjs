@@ -103,10 +103,11 @@ assert(app.includes("No unvalidated or cross-card limits displayed"), "Card limi
 assert(app.includes("Card limits · public contract") && app.includes("Apply limits once"), "Card limits UI must expose the gated public update contract");
 assert(app.includes("one new UUIDv4 Idempotency-Key, at most one POST, no automatic retries"), "Card limits UI must state the one-submit no-retry boundary");
 assert(app.includes("Card transactions"), "Wallet UI must expose card transaction history");
-assert(apiClient.includes("readCardTimelinePage(cardTimelineTransport,session,walletRuntime.environment,scopeKey,id,cursor,signal)"), "Wallet must consume the scoped Card timeline through the same-origin API");
+assert(apiClient.includes("readCardTimelinePage(cardTimelineTransport,session,walletRuntime.environment,scopeKey,id,cursor,signal)") && apiClient.includes("signal,'caller'"), "Wallet must consume the scoped Card timeline through the same-origin API with caller-owned session invalidation");
 assert(cardTimeline.includes("/v1/cards/${encodeURIComponent(cardId)}/timeline?") && cardTimeline.includes('method: "GET"'), "Card timeline must remain an exact GET-only public route");
 assert(cardTimeline.includes("CARD_TIMELINE_MAX_PAGES = 10") && cardTimeline.includes("CARD_TIMELINE_CURSOR_MAX_BYTES = 2_048"), "Card timeline pagination and signed cursor must remain consumer bounded");
 assert(cardTimeline.includes("walletTransferSessionScope(session, runtimeEnvironment, now()) !== expectedScopeKey"), "Card timeline must revalidate the live tenant/customer/session scope after transport");
+assert(cardTimeline.includes("status === 401 || status === 403 || status === 404") && cardTimeline.includes("cardTimelineFailureCanInvalidateSession"), "Card timeline must clear only its snapshot on current 403/404 and invalidate only on current 401");
 assert(cardTimelineRefresh.includes("CARD_TIMELINE_REFRESH_MAX_ATTEMPTS = 3"), "Card timeline manual refresh must remain bounded without automatic retries");
 assert(app.includes("Card lifecycle timeline · read only") && app.includes("signed opaque cursor"), "Wallet UI must expose only the read-only public Card timeline");
 assert(!app.includes("mock") && !app.includes("Mock"), "Wallet UI must not contain a Mock fallback");
