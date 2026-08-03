@@ -28,6 +28,8 @@ import type {CardRenewalTransportRequest} from './cardRenewal'
 import {confirmCardRenewalPredecessor,readCardRenewalConfirmation} from './cardRenewalPostChain'
 import {readWalletBalanceSummary} from './walletBalanceSummary'
 import type {WalletBalanceSummary,WalletBalanceSummaryTransportRequest} from './walletBalanceSummary'
+import {WALLET_ASSET_CATALOG_MAX_JSON_BYTES,readWalletAssetCatalog} from './walletAssets'
+import type {WalletAssetCatalog,WalletAssetCatalogTransportRequest} from './walletAssets'
 import {WALLET_TRANSFER_ACCOUNTS_PATH,WALLET_TRANSFER_ACCOUNT_MAX_JSON_BYTES,WALLET_TRANSFER_RESPONSE_MAX_JSON_BYTES,readWalletTransferAccounts,readWalletTransferStatus,submitWalletTransfer} from './walletTransfer'
 import type {WalletTransferInput,WalletTransferTransportRequest} from './walletTransfer'
 import {FX_QUOTE_RESPONSE_MAX_JSON_BYTES,readFxQuote} from './fxQuote'
@@ -48,6 +50,7 @@ export type {CardLimitsUpdateInput} from './cardLimitsUpdate'
 export type {VirtualCardCreateInput} from './virtualCardCreate'
 export type {CardReplacementInput,CardReplacementReason} from './cardReplacement'
 export type {WalletBalanceSummary} from './walletBalanceSummary'
+export type {WalletAssetCatalog,WalletAssetClass,WalletAssetMetadata} from './walletAssets'
 export type {FxQuote,FxQuoteInput} from './fxQuote'
 export type {CardTimelineEvent,CardTimelineHistory,CardTimelinePage} from './cardTimeline'
 
@@ -116,6 +119,7 @@ const walletTransferTransport=({path,method,body,idempotencyKey,signal}:WalletTr
 const walletTransactionTransport=({path,method,signal}:WalletTransactionTransportRequest)=>request<string>(path,method,undefined,undefined,'text',signal)
 const walletTransferTransactionTransport=({path,method,signal}:WalletTransactionTransportRequest)=>request<string>(path,method,undefined,undefined,'text',signal,WALLET_TRANSACTION_MAX_JSON_BYTES,'caller')
 const walletBalanceSummaryTransport=({path,method,signal}:WalletBalanceSummaryTransportRequest)=>request<string>(path,method,undefined,undefined,'text',signal)
+const walletAssetCatalogTransport=({path,method,signal}:WalletAssetCatalogTransportRequest)=>request<string>(path,method,undefined,undefined,'text',signal,WALLET_ASSET_CATALOG_MAX_JSON_BYTES)
 const walletAccountBalanceTransport=({path,method,signal}:WalletAccountBalanceTransportRequest)=>request<string>(path,method,undefined,undefined,'text',signal)
 const walletTransferAccountBalanceTransport=({path,method,signal}:WalletAccountBalanceTransportRequest)=>request<string>(path,method,undefined,undefined,'text',signal,WALLET_ACCOUNT_BALANCE_MAX_JSON_BYTES,'caller')
 const cardListTransport=({path,method,signal}:CardListTransportRequest)=>request<string>(path,method,undefined,undefined,'text',signal,CARD_LIST_MAX_JSON_BYTES)
@@ -140,6 +144,7 @@ export const walletApi={
  logout:()=>request<void>('/v1/auth/logout','POST'),
  session:()=>request<WalletSession>('/v1/session'),
  walletAccounts:async(session:WalletSession,signal?:AbortSignal):Promise<WalletAccountRecord[]>=>readWalletTransferAccounts(walletTransferTransport,session,walletRuntime.environment,signal),
+ walletAssets:async(session:WalletSession,scopeKey:string,signal?:AbortSignal):Promise<WalletAssetCatalog>=>readWalletAssetCatalog(walletAssetCatalogTransport,session,walletRuntime.environment,scopeKey,signal),
  walletBalanceSummary:async(session:WalletSession,scopeKey:string,signal?:AbortSignal):Promise<WalletBalanceSummary>=>readWalletBalanceSummary(walletBalanceSummaryTransport,session,walletRuntime.environment,scopeKey,signal),
  walletBalance:async(session:WalletSession,scopeKey:string,account:WalletAccountRecord,signal?:AbortSignal):Promise<WalletBalanceRecord>=>readWalletAccountBalance(walletAccountBalanceTransport,session,walletRuntime.environment,scopeKey,account,signal),
  walletTransactions:async(session:WalletSession,filters:WalletTransactionFilters,previous:WalletTransactionHistoryState|null=null,signal?:AbortSignal):Promise<WalletTransactionHistoryState>=>readWalletTransactionHistory(walletTransactionTransport,session,walletRuntime.environment,filters,previous,signal),

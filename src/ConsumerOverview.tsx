@@ -1,18 +1,21 @@
 import { Activity, CreditCard, Landmark, ShieldCheck, WalletCards } from "lucide-react";
 import type {
   WalletAccountRecord,
+  WalletAssetCatalog,
   WalletBalanceSummary,
   WalletOperationPage,
   WalletSession,
 } from "./apiClient";
 import type { CardRecord } from "./cardList";
 import { createConsumerOverviewSnapshot } from "./consumerOverviewState";
+import { classifyOwnedWalletBalances } from "./walletAssets";
 
 type Props = Readonly<{
   session: WalletSession;
   summary: WalletBalanceSummary | null;
   summaryLoading: boolean;
   summaryUnavailable: boolean;
+  assetCatalog: WalletAssetCatalog | null;
   accounts: readonly WalletAccountRecord[];
   selectedAccount: WalletAccountRecord | null;
   cards: readonly CardRecord[];
@@ -30,6 +33,14 @@ export function ConsumerOverview(props: Props) {
     props.cards,
     props.selectedCard,
     props.operations,
+  );
+  const classifiedBalances = classifyOwnedWalletBalances(
+    props.assetCatalog,
+    props.accounts,
+    props.summary,
+  );
+  const classifications = new Map(
+    (classifiedBalances ?? []).map((balance) => [balance.assetCode, balance.assetClass]),
   );
 
   return (
@@ -56,7 +67,7 @@ export function ConsumerOverview(props: Props) {
         ) : snapshot.balances.length ? (
           snapshot.balances.map((balance) => (
             <article key={balance.assetCode}>
-              <span>{balance.assetCode} available</span>
+              <span>{balance.assetCode} · {classifications.get(balance.assetCode) ?? "classification unavailable"} · available</span>
               <strong>{balance.availableBalance}</strong>
               <small>Ledger {balance.ledgerBalance} · Pending {balance.pendingBalance}</small>
             </article>
