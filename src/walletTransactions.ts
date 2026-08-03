@@ -348,19 +348,24 @@ function canonicalTimestamp(value: unknown, name: string): string {
   return value;
 }
 
-function opaqueCursor(value: unknown): string | null {
-  if (value === null) return null;
-  if (typeof value !== "string" || value.length < 1 || value.length > 512 || !/^[A-Za-z0-9_-]+$/.test(value))
-    throw new Error("Invalid Wallet transaction cursor");
+function canonicalBase64UrlSegment(value: string): boolean {
+  if (value.length < 1 || !/^[A-Za-z0-9_-]+$/.test(value)) return false;
   const remainder = value.length % 4;
   const finalAlphabetIndex = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_".indexOf(
     value[value.length - 1],
   );
-  if (
+  return !(
     remainder === 1 ||
     (remainder === 2 && finalAlphabetIndex % 16 !== 0) ||
     (remainder === 3 && finalAlphabetIndex % 4 !== 0)
-  )
+  );
+}
+
+function opaqueCursor(value: unknown): string | null {
+  if (value === null) return null;
+  if (typeof value !== "string" || value.length > 512) throw new Error("Invalid Wallet transaction cursor");
+  const segments = value.split(".");
+  if (segments.length !== 2 || !segments.every(canonicalBase64UrlSegment))
     throw new Error("Invalid Wallet transaction cursor");
   return value;
 }

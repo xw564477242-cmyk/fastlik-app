@@ -12,7 +12,10 @@ const environment = configuredEnvironment === "SANDBOX" || configuredEnvironment
   : null;
 const integration = environment ? test : test.skip;
 
-const receipt = (status: "PROCESSING" | "COMPLETED" = "PROCESSING") => Object.freeze({
+const receipt = (
+  status: "PROCESSING" | "PENDING_SETTLEMENT" | "COMPLETED" | "FAILED" = "PROCESSING",
+  completedAt: string | null = status === "COMPLETED" ? "2026-08-03T00:01:00.000Z" : null,
+) => Object.freeze({
   id: "operation-transfer-r51",
   type: "INTERNAL_TRANSFER" as const,
   status,
@@ -20,7 +23,7 @@ const receipt = (status: "PROCESSING" | "COMPLETED" = "PROCESSING") => Object.fr
   amount: "25",
   direction: "BETWEEN_OWN_ACCOUNTS" as const,
   createdAt: "2026-08-03T00:00:00.000Z",
-  completedAt: status === "COMPLETED" ? "2026-08-03T00:01:00.000Z" : null,
+  completedAt,
   updatedAt: status === "COMPLETED"
     ? "2026-08-03T00:01:00.000Z"
     : "2026-08-03T00:00:00.000Z",
@@ -211,13 +214,21 @@ integration("source debit and destination credit must uniquely reference the sam
   }
 });
 
-integration("a persisted but incomplete operation cannot masquerade as confirmed debit and credit", async () => {
-  const value = fixture();
-  value.input.confirm = async () => { value.calls.push("STATUS"); return receipt("PROCESSING"); };
-  const result = await runWalletTransferPostChain(value.input);
-  assert.equal(result?.status, "CONFIRMED_REFRESH_FAILED");
-  assert.equal(result?.commit.receipt.status, "PROCESSING");
-  assert.equal(value.posts(), 1);
+integration("an incomplete persisted operation performs zero account, balance or history refresh reads", async () => {
+  for (const candidate of [
+    receipt("PROCESSING"),
+    receipt("PENDING_SETTLEMENT"),
+    receipt("FAILED"),
+    receipt("COMPLETED", null),
+  ]) {
+    const value = fixture();
+    value.input.confirm = async () => { value.calls.push("STATUS"); return candidate; };
+    const result = await runWalletTransferPostChain(value.input);
+    assert.equal(result?.status, "CONFIRMED_REFRESH_FAILED");
+    assert.equal(result?.commit.receipt, candidate);
+    assert.deepEqual(value.calls, ["POST", "STATUS"]);
+    assert.equal(value.posts(), 1);
+  }
 });
 
 integration("late success, error, and 401 become zero-write null results after generation change", async () => {

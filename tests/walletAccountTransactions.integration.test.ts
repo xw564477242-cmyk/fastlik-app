@@ -29,6 +29,7 @@ const session = (overrides: Record<string, unknown> = {}) => ({
 });
 
 const account = (id = "account-source-r52", assetCode = "USD") => ({ id, assetCode });
+const signedCursor = "Y3Vyc29yLXBhZ2UtMg.c2lnbmF0dXJlLXBhZ2UtMg";
 
 const item = (
   id: string,
@@ -56,11 +57,13 @@ test("builds only the exact encoded owned-account transaction path", () => {
     "/v1/wallet/accounts/account-source-r52/transactions?type=TRANSFER&status=COMPLETED&assetCode=USD&limit=2",
   );
   assert.equal(
-    walletAccountTransactionPath("account-source-r52", filters, "YQ"),
-    "/v1/wallet/accounts/account-source-r52/transactions?type=TRANSFER&status=COMPLETED&assetCode=USD&limit=2&cursor=YQ",
+    walletAccountTransactionPath("account-source-r52", filters, signedCursor),
+    `/v1/wallet/accounts/account-source-r52/transactions?type=TRANSFER&status=COMPLETED&assetCode=USD&limit=2&cursor=${signedCursor}`,
   );
   assert.throws(() => walletAccountTransactionPath("../outside", filters), /id/);
   assert.throws(() => walletAccountTransactionPath("account-source-r52", filters, "not/signed"), /cursor/);
+  for (const cursor of ["legacy", ".YQ", "YQ.", "YQ.Yg.Yw", "YQ.Yg!"])
+    assert.throws(() => walletAccountTransactionPath("account-source-r52", filters, cursor), /cursor/);
 });
 
 test("requires the exact public operation association and rejects private or duplicate fields", () => {
@@ -133,12 +136,12 @@ integration("binds an opaque signed cursor to the same account and rejects cross
   const calls: string[] = [];
   const transport = async ({ path }: { path: string }) => {
     calls.push(path);
-    return path.includes("cursor=YQ")
+    return path.includes(`cursor=${signedCursor}`)
       ? raw([item("transaction-older-r52", "2026-08-03T00:00:00.000Z")])
       : raw([
           item("transaction-newest-r52", "2026-08-03T00:02:00.000Z"),
           item("transaction-middle-r52", "2026-08-03T00:01:00.000Z"),
-        ], "YQ");
+        ], signedCursor);
   };
   const first = await readWalletAccountTransactionHistory(
     transport,
@@ -160,7 +163,7 @@ integration("binds an opaque signed cursor to the same account and rejects cross
     "transaction-middle-r52",
     "transaction-older-r52",
   ]);
-  assert.match(calls[1], /account-source-r52\/transactions.*cursor=YQ/);
+  assert.match(calls[1], new RegExp(`account-source-r52/transactions.*cursor=${signedCursor.replace(".", "\\.")}`));
   const before = calls.length;
   await assert.rejects(
     readWalletAccountTransactionHistory(

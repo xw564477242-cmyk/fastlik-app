@@ -46,9 +46,9 @@ const transaction = (id: string, minute: number, overrides: Record<string, unkno
 });
 
 const filters = normalizeWalletTransactionFilters({ assetCode: "USD", limit: 25 });
-const cursorPage1 = "Y3Vyc29yLXBhZ2UtMQ";
-const cursorPage2 = "Y3Vyc29yLXBhZ2UtMg";
-const cursorPage3 = "Y3Vyc29yLXBhZ2UtMw";
+const cursorPage1 = "Y3Vyc29yLXBhZ2UtMQ.c2lnbmF0dXJlLXBhZ2UtMQ";
+const cursorPage2 = "Y3Vyc29yLXBhZ2UtMg.c2lnbmF0dXJlLXBhZ2UtMg";
+const cursorPage3 = "Y3Vyc29yLXBhZ2UtMw.c2lnbmF0dXJlLXBhZ2UtMw";
 
 test("builds only the exact bounded Backend transaction history query", () => {
   assert.equal(
@@ -76,8 +76,8 @@ test("builds only the exact bounded Backend transaction history query", () => {
   ]) assert.throws(() => normalizeWalletTransactionFilters(invalid), /filter|limit|asset/);
   assert.throws(() => walletTransactionPath(filters, "bad/cursor"), /cursor/);
   assert.throws(() => walletTransactionPath(filters, "A"), /cursor/);
-  assert.throws(() => walletTransactionPath(filters, "AB"), /cursor/);
-  assert.equal(walletTransactionPath(filters, "AA").endsWith("cursor=AA"), true);
+  assert.throws(() => walletTransactionPath(filters, "AB.AA"), /cursor/);
+  assert.equal(walletTransactionPath(filters, "AA.AA").endsWith("cursor=AA.AA"), true);
 });
 
 test("builds UI filters only from All or the public allowlists and the selected asset", () => {
@@ -244,7 +244,7 @@ test("bounds raw bytes, dense items, page size, ids and opaque cursor", () => {
   assert.throws(
     () =>
       parseWalletTransactionPageRaw(
-        JSON.stringify({ items: [transaction("transaction-01", 59)], nextCursor: "AA" }),
+        JSON.stringify({ items: [transaction("transaction-01", 59)], nextCursor: "AA.AA" }),
         filters,
       ),
     /full page/,
@@ -298,25 +298,35 @@ test("validates exact type, status, direction, absolute Decimal(36,18), filters 
     );
 });
 
-test("rejects noncanonical Base64URL-equivalent cursors from callers and service output", () => {
+test("requires exactly two canonical Base64URL cursor segments and rejects legacy or malformed cursors", () => {
   assert.deepEqual(Buffer.from("AA", "base64url"), Buffer.from("AB", "base64url"));
-  assert.throws(() => walletTransactionPath(filters, "AB"), /cursor/);
+  for (const cursor of [
+    "YQ",
+    "YQ.Yg.Yw",
+    ".YQ",
+    "YQ.",
+    "YQ.Yg!",
+    "AB.AA",
+    "AA.AB",
+    `${"YQ".repeat(255)}.YQ`,
+  ]) assert.throws(() => walletTransactionPath(filters, cursor), /cursor/);
+  assert.equal(walletTransactionPath(filters, "YQ.Yg").endsWith("cursor=YQ.Yg"), true);
   const fullPage = Array.from({ length: 25 }, (_, index) =>
     transaction(`transaction-${String(99 - index).padStart(2, "0")}`, 59 - index));
   assert.throws(
     () =>
       parseWalletTransactionPageRaw(
-        JSON.stringify({ items: fullPage, nextCursor: "AB" }),
+        JSON.stringify({ items: fullPage, nextCursor: "AB.AA" }),
         filters,
       ),
     /cursor/,
   );
   assert.equal(
     parseWalletTransactionPageRaw(
-      JSON.stringify({ items: fullPage, nextCursor: "AA" }),
+      JSON.stringify({ items: fullPage, nextCursor: "AA.AA" }),
       filters,
     ).nextCursor,
-    "AA",
+    "AA.AA",
   );
 });
 

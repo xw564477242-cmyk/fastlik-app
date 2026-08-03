@@ -224,6 +224,8 @@ export async function runWalletTransferPostChain(
   }
   if (!input.isCurrent()) return null;
   try {
+    if (confirmed.status !== "COMPLETED" || confirmed.completedAt === null)
+      throw new WalletTransferRefreshError("Wallet transfer operation is not completed");
     const commit = await readWalletTransferPostChainRefresh(input, confirmed);
     if (!input.isCurrent()) return null;
     return Object.freeze({ status: "COMPLETE", commit });
