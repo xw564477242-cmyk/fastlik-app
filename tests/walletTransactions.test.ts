@@ -34,6 +34,7 @@ const session = (overrides: Record<string, unknown> = {}) => ({
 
 const transaction = (id: string, minute: number, overrides: Record<string, unknown> = {}) => ({
   id,
+  operationId: "operation-transfer-public-01",
   type: "TRANSFER",
   status: "COMPLETED",
   assetCode: "USD",
@@ -139,7 +140,7 @@ test("allows filter requests only for the current owned account and exact scope"
   assert.equal(walletTransactionFilterRequestAllowed(null, [usd], usd, "scope-a", "scope-a"), false);
 });
 
-test("reconstructs exactly the eight public fields and rejects every internal field", () => {
+test("reconstructs exactly the nine public fields and rejects every internal field", () => {
   const page = parseWalletTransactionPageRaw(
     JSON.stringify({ items: [transaction("transaction-01", 59)], nextCursor: null }),
     filters,
@@ -150,6 +151,7 @@ test("reconstructs exactly the eight public fields and rejects every internal fi
     "createdAt",
     "direction",
     "id",
+    "operationId",
     "status",
     "type",
     "updatedAt",
@@ -497,6 +499,14 @@ test("selected detail remains exact, public and immutable", () => {
     () =>
       parseWalletTransactionDetailRaw(
         JSON.stringify(transaction("transaction-01", 59, { amount: "26" })),
+        selected,
+      ),
+    /immutable/,
+  );
+  assert.throws(
+    () =>
+      parseWalletTransactionDetailRaw(
+        JSON.stringify(transaction("transaction-01", 59, { operationId: "operation-other-01" })),
         selected,
       ),
     /immutable/,

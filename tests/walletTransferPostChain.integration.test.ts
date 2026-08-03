@@ -51,31 +51,23 @@ const balance = (row: ReturnType<typeof account>) => Object.freeze({
   updatedAt: row.updatedAt,
 });
 
-const transactions = Object.freeze({
+const transactions = (accountId: string, direction: "OUTGOING" | "INCOMING") => Object.freeze({
+  accountId,
   items: Object.freeze([
     Object.freeze({
-      id: "transaction-outgoing-r51",
+      id: `transaction-${direction.toLowerCase()}-r52`,
       type: "TRANSFER" as const,
       status: "COMPLETED" as const,
       assetCode: "USD",
       amount: "25",
-      direction: "OUTGOING" as const,
-      createdAt: "2026-08-03T00:01:00.000Z",
-      updatedAt: "2026-08-03T00:01:00.000Z",
-    }),
-    Object.freeze({
-      id: "transaction-incoming-r51",
-      type: "TRANSFER" as const,
-      status: "COMPLETED" as const,
-      assetCode: "USD",
-      amount: "25",
-      direction: "INCOMING" as const,
+      direction,
+      operationId: "operation-transfer-r51",
       createdAt: "2026-08-03T00:01:00.000Z",
       updatedAt: "2026-08-03T00:01:00.000Z",
     }),
   ]),
   nextCursor: null,
-  filterKey: '["ALL","ALL","USD",25]',
+  filterKey: '["TRANSFER","COMPLETED","USD",25]',
   cursorTrail: Object.freeze([]),
 });
 
@@ -100,7 +92,10 @@ function fixture() {
       refresh: {
         accounts: async () => { calls.push("ACCOUNTS"); return [source, destination]; },
         balance: async (row: typeof source) => { calls.push(`BALANCE:${row.id}`); return balance(row); },
-        transactions: async () => { calls.push("TRANSACTIONS:BOTH"); return transactions; },
+        transactions: async (row: typeof source) => {
+          calls.push(`TRANSACTIONS:${row.id}`);
+          return transactions(row.id, row.id === source.id ? "OUTGOING" : "INCOMING");
+        },
       },
       isCurrent: () => current,
     },
@@ -119,12 +114,16 @@ integration(`one POST is persisted-confirmed before one atomic two-sided refresh
     "ACCOUNTS",
     `BALANCE:${value.source.id}`,
     `BALANCE:${value.destination.id}`,
-    "TRANSACTIONS:BOTH",
+    `TRANSACTIONS:${value.source.id}`,
+    `TRANSACTIONS:${value.destination.id}`,
   ]);
   assert.equal(result.commit.receipt.status, "COMPLETED");
   assert.equal(result.commit.sourceBalance.availableBalance, "75");
   assert.equal(result.commit.destinationBalance.availableBalance, "125");
-  assert.deepEqual(result.commit.transactions.items.map(item => item.direction), ["OUTGOING", "INCOMING"]);
+  assert.deepEqual(result.commit.sourceTransactions.items.map(item => item.direction), ["OUTGOING"]);
+  assert.deepEqual(result.commit.destinationTransactions.items.map(item => item.direction), ["INCOMING"]);
+  assert.equal(result.commit.sourceTransactions.items[0].operationId, result.commit.receipt.id);
+  assert.equal(result.commit.destinationTransactions.items[0].operationId, result.commit.receipt.id);
 });
 
 integration("a persisted confirmation failure is ambiguous, blocks refresh, and never retries", async () => {
@@ -141,7 +140,7 @@ integration("a persisted confirmation failure is ambiguous, blocks refresh, and 
 });
 
 integration("every confirmed refresh failure returns one receipt and an all-null safe invalidation", async () => {
-  for (const failed of ["ACCOUNTS", `BALANCE:account-source-r51`, `BALANCE:account-destination-r51`, "TRANSACTIONS:BOTH"]) {
+  for (const failed of ["ACCOUNTS", `BALANCE:account-source-r51`, `BALANCE:account-destination-r51`, "TRANSACTIONS:account-source-r51", "TRANSACTIONS:account-destination-r51"]) {
     const value = fixture();
     const originalAccounts = value.input.refresh.accounts;
     const originalBalance = value.input.refresh.balance;
@@ -154,15 +153,15 @@ integration("every confirmed refresh failure returns one receipt and an all-null
       if (failed === `BALANCE:${row.id}`) throw new Error("balance failed");
       return originalBalance(row, signal);
     };
-    value.input.refresh.transactions = async signal => {
-      if (failed === "TRANSACTIONS:BOTH") throw new Error("history failed");
-      return originalTransactions(signal);
+    value.input.refresh.transactions = async (row, signal) => {
+      if (failed === `TRANSACTIONS:${row.id}`) throw new Error("history failed");
+      return originalTransactions(row, signal);
     };
     const result = await runWalletTransferPostChain(value.input);
     assert.equal(result?.status, "CONFIRMED_REFRESH_FAILED");
     if (!result || result.status !== "CONFIRMED_REFRESH_FAILED") continue;
     assert.equal(result.commit.receipt.status, "COMPLETED");
-    for (const field of ["accounts", "sourceAccount", "destinationAccount", "sourceBalance", "destinationBalance", "transactions"] as const)
+    for (const field of ["accounts", "sourceAccount", "destinationAccount", "sourceBalance", "destinationBalance", "sourceTransactions", "destinationTransactions"] as const)
       assert.equal(result.commit[field], null);
     assert.equal(value.posts(), 1);
   }
@@ -173,6 +172,51 @@ integration("mismatched account and balance generations fail closed after persis
   value.input.refresh.balance = async row => balance({ ...row, updatedAt: "2026-08-03T00:02:00.000Z" });
   const result = await runWalletTransferPostChain(value.input);
   assert.equal(result?.status, "CONFIRMED_REFRESH_FAILED");
+  assert.equal(value.posts(), 1);
+});
+
+integration("a destination absent from the refreshed owned-account list is never queried", async () => {
+  const value = fixture();
+  value.input.refresh.accounts = async () => {
+    value.calls.push("ACCOUNTS");
+    return [value.source];
+  };
+  const result = await runWalletTransferPostChain(value.input);
+  assert.equal(result?.status, "CONFIRMED_REFRESH_FAILED");
+  assert.deepEqual(value.calls, ["POST", "STATUS", "ACCOUNTS"]);
+  assert.equal(value.posts(), 1);
+});
+
+integration("source debit and destination credit must uniquely reference the same confirmed operation", async () => {
+  for (const mismatch of ["SOURCE_OPERATION", "DESTINATION_DIRECTION", "DESTINATION_AMOUNT", "DESTINATION_ACCOUNT", "DUPLICATE_SOURCE"] as const) {
+    const value = fixture();
+    const originalTransactions = value.input.refresh.transactions;
+    value.input.refresh.transactions = async (row, signal) => {
+      const history = await originalTransactions(row, signal);
+      if (mismatch === "DESTINATION_ACCOUNT" && row.id === value.destination.id)
+        return { ...history, accountId: value.source.id };
+      if (mismatch === "DUPLICATE_SOURCE" && row.id === value.source.id)
+        return { ...history, items: [...history.items, { ...history.items[0], id: "transaction-outgoing-duplicate-r52" }] };
+      if (row.id === value.source.id && mismatch === "SOURCE_OPERATION")
+        return { ...history, items: history.items.map(item => ({ ...item, operationId: "operation-other-r52" })) };
+      if (row.id === value.destination.id && mismatch === "DESTINATION_DIRECTION")
+        return { ...history, items: history.items.map(item => ({ ...item, direction: "OUTGOING" as const })) };
+      if (row.id === value.destination.id && mismatch === "DESTINATION_AMOUNT")
+        return { ...history, items: history.items.map(item => ({ ...item, amount: "24" })) };
+      return history;
+    };
+    const result = await runWalletTransferPostChain(value.input);
+    assert.equal(result?.status, "CONFIRMED_REFRESH_FAILED", mismatch);
+    assert.equal(value.posts(), 1);
+  }
+});
+
+integration("a persisted but incomplete operation cannot masquerade as confirmed debit and credit", async () => {
+  const value = fixture();
+  value.input.confirm = async () => { value.calls.push("STATUS"); return receipt("PROCESSING"); };
+  const result = await runWalletTransferPostChain(value.input);
+  assert.equal(result?.status, "CONFIRMED_REFRESH_FAILED");
+  assert.equal(result?.commit.receipt.status, "PROCESSING");
   assert.equal(value.posts(), 1);
 });
 
@@ -193,6 +237,28 @@ integration("late success, error, and 401 become zero-write null results after g
     release();
     assert.equal(await operation, null);
     assert.deepEqual(value.calls, ["POST"]);
+  }
+});
+
+integration("late account-history success, error, and 401 write nothing after session or input generation changes", async () => {
+  for (const mode of ["success", "error", "401"] as const) {
+    const value = fixture();
+    const originalTransactions = value.input.refresh.transactions;
+    let release!: () => void;
+    const pending = new Promise<void>(resolve => { release = resolve; });
+    value.input.refresh.transactions = async (row, signal) => {
+      if (row.id !== value.source.id) return originalTransactions(row, signal);
+      await pending;
+      if (mode === "error") throw new Error("late account-history failure");
+      if (mode === "401") throw Object.assign(new Error("late account-history unauthorized"), { status: 401 });
+      return originalTransactions(row, signal);
+    };
+    const operation = runWalletTransferPostChain(value.input);
+    await Promise.resolve();
+    value.stale();
+    release();
+    assert.equal(await operation, null);
+    assert.equal(value.posts(), 1);
   }
 });
 

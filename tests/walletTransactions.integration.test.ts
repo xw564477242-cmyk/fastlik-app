@@ -35,6 +35,7 @@ const session = (overrides: Record<string, unknown> = {}) => ({
 
 const transaction = (id: string, minute: number, overrides: Record<string, unknown> = {}) => ({
   id,
+  operationId: "operation-transfer-public-01",
   type: "TRANSFER",
   status: "COMPLETED",
   assetCode: "USD",
@@ -90,6 +91,7 @@ integration(`Wallet transaction history exact consumer (${environment ?? "ENVIRO
       "createdAt",
       "direction",
       "id",
+      "operationId",
       "status",
       "type",
       "updatedAt",
