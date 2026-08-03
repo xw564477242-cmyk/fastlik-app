@@ -45,6 +45,11 @@ export type WalletAssetCatalogRequestIdentity = Readonly<{
   scopeKey: string;
 }>;
 
+export type WalletAssetCatalogInitialization = Readonly<{
+  controller: AbortController;
+  request: WalletAssetCatalogRequestIdentity;
+}>;
+
 const responseFields = new Set(["environment", "items"]);
 const itemFields = new Set(["assetCode", "assetClass"]);
 type OwnData = Readonly<Record<string, PropertyDescriptor>>;
@@ -269,6 +274,22 @@ export function createWalletAssetCatalogRequestIdentity(
     throw new Error("Invalid Wallet asset catalog request identity");
   }
   return Object.freeze({ requestId, scopeKey });
+}
+
+export function beginWalletAssetCatalogSessionInitialization(input: Readonly<{
+  scopeKey: string;
+  invalidateAndClear: () => void;
+  requestSequence: { current: number };
+  activeController: { current: AbortController | null };
+}>): WalletAssetCatalogInitialization {
+  input.invalidateAndClear();
+  const controller = new AbortController();
+  input.activeController.current = controller;
+  const request = createWalletAssetCatalogRequestIdentity(
+    ++input.requestSequence.current,
+    input.scopeKey,
+  );
+  return Object.freeze({ controller, request });
 }
 
 export function walletAssetCatalogRequestIsCurrent(

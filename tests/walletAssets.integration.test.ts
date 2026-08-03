@@ -3,6 +3,7 @@ import test from "node:test";
 import { runSessionInitializationModule } from "../src/sessionLifecycle.ts";
 import { walletTransferSessionScope } from "../src/walletTransfer.ts";
 import {
+  beginWalletAssetCatalogSessionInitialization,
   createWalletAssetCatalogRequestIdentity,
   readWalletAssetCatalog,
   walletAssetCatalogRequestIsCurrent,
@@ -47,6 +48,60 @@ integration(`reads one exact authenticated asset catalog (${environment ?? "ENVI
   assert.deepEqual(catalog.items.map(item => [item.assetCode, item.assetClass]), [
     ["EUR", "FIAT"], ["MYR", "FIAT"], ["SGD", "FIAT"], ["USD", "FIAT"], ["USDT", "DIGITAL"],
   ]);
+});
+
+integration("acceptSession initializes a current asset request only after clearing the previous session", async () => {
+  const session = activeSession();
+  const scope = walletTransferSessionScope(session, environment!, NOW)!;
+  const previous = new AbortController();
+  const activeController = { current: previous as AbortController | null };
+  const requestSequence = { current: 4 };
+  const events: string[] = [];
+  let committed: Awaited<ReturnType<typeof readWalletAssetCatalog>> | null = null;
+
+  const initialization = beginWalletAssetCatalogSessionInitialization({
+    scopeKey: scope,
+    requestSequence,
+    activeController,
+    invalidateAndClear: () => {
+      events.push("invalidate-and-clear");
+      activeController.current?.abort();
+      activeController.current = null;
+      requestSequence.current += 1;
+    },
+  });
+  const isCurrent = () => activeController.current === initialization.controller &&
+    walletAssetCatalogRequestIsCurrent(
+      initialization.request,
+      requestSequence.current,
+      scope,
+      true,
+    );
+
+  await runSessionInitializationModule({
+    load: () => readWalletAssetCatalog(async request => {
+      events.push("load");
+      assert.equal(request.signal, initialization.controller.signal);
+      assert.equal(request.signal?.aborted, false);
+      return payload();
+    }, session, environment!, scope, initialization.controller.signal, () => NOW),
+    isCurrent,
+    commit: value => {
+      events.push("commit");
+      committed = value;
+    },
+    moduleError: value => assert.fail(`current initialization failed: ${String(value)}`),
+    sessionInvalid: () => assert.fail("valid initialization cannot clear the session"),
+  });
+
+  assert.equal(previous.signal.aborted, true);
+  assert.equal(initialization.controller.signal.aborted, false);
+  assert.equal(activeController.current, initialization.controller);
+  assert.equal(initialization.request.requestId, 6);
+  assert.equal(isCurrent(), true);
+  assert.deepEqual(events, ["invalidate-and-clear", "load", "commit"]);
+  assert.equal(committed?.environment, environment);
+  assert.equal(committed?.items.length, 5);
 });
 
 integration("isolates replacement generations and aborted late responses", async () => {

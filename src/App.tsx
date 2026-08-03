@@ -24,7 +24,7 @@ import {cardReplacementPostChainFailureIsAmbiguous,createCardReplacementInvalida
 import {beginCardRenewal,captureCardRenewalVersion,cardRenewalDecision,cardRenewalRequestIsCurrent,cardRenewalVersionMatches,createCardRenewalRequestIdentity,settleCardRenewal} from './cardRenewal'
 import {cardRenewalPostChainFailureIsAmbiguous,createCardRenewalInvalidatedCommit,runCardRenewalPostChain,type CardRenewalConfirmation,type CardRenewalInvalidatedCommit} from './cardRenewalPostChain'
 import {captureWalletAccountsVersion,walletBalanceSummaryRequestIsCurrent,walletBalanceSummaryRequestWasAborted,walletBalanceSummaryRetainsSnapshotOnFailure} from './walletBalanceSummary'
-import {classifyOwnedWalletBalances,createWalletAssetCatalogRequestIdentity,walletAssetCatalogRequestIsCurrent,walletAssetCatalogRequestWasAborted,walletAssetClassForOwnedAsset,walletAssetClassForOwnedHistory} from './walletAssets'
+import {beginWalletAssetCatalogSessionInitialization,classifyOwnedWalletBalances,walletAssetCatalogRequestIsCurrent,walletAssetCatalogRequestWasAborted,walletAssetClassForOwnedAsset,walletAssetClassForOwnedHistory} from './walletAssets'
 import {walletAccountBalanceRequestWasAborted,walletAccountBalanceRetainsSnapshotOnFailure} from './walletAccountBalance'
 import {beginWalletTransferSubmit,createWalletTransferRequestIdentity,normalizeWalletTransferInput,settleWalletTransferSubmit,walletTransferFailureIsAmbiguous,walletTransferRequestIsCurrent,walletTransferRetryKey,walletTransferSessionScope,type WalletTransferRequestIdentity} from './walletTransfer'
 import {createWalletTransferInvalidatedCommit,runWalletTransferPostChain,walletTransferPostChainFailureCause,walletTransferPostChainFailureIsAmbiguous,type WalletTransferInvalidatedCommit} from './walletTransferPostChain'
@@ -420,10 +420,6 @@ export default function App(){
   abortCardListRequest()
   const cardListController=new AbortController()
   cardListAbortController.current=cardListController
-  abortWalletAssetCatalogRequest()
-  const walletAssetController=new AbortController()
-  walletAssetCatalogAbortController.current=walletAssetController
-  const walletAssetRequest=createWalletAssetCatalogRequestIdentity(++walletAssetCatalogRequestSequence.current,scope)
   cardListCursorTarget.current=null
   const cardListRequest=createCardListRequestIdentity(++cardRequestSequence.current,scope,null)
   cardScope.current=scope
@@ -444,10 +440,11 @@ export default function App(){
   clearCardTransactions()
   clearCardTimeline()
   replaceAccounts([])
-  setWalletAssets(null)
-  setWalletAssetsLoading(true)
-  setWalletAssetsError('')
   clearWalletDetail()
+  const walletAssetInitialization=beginWalletAssetCatalogSessionInitialization({scopeKey:scope,invalidateAndClear:clearWalletAssets,requestSequence:walletAssetCatalogRequestSequence,activeController:walletAssetCatalogAbortController})
+  const walletAssetController=walletAssetInitialization.controller
+  const walletAssetRequest=walletAssetInitialization.request
+  setWalletAssetsLoading(true)
   replaceSession(current)
   const isCurrent=()=>sessionInitializationRequestIsCurrent(initialization,sessionInitializationSequence.current,walletScope.current,walletRequestMounted.current)&&cardScope.current===scope
   const cardListIsCurrent=()=>isCurrent()&&cardListAbortController.current===cardListController&&cardListRequestIsCurrent(cardListRequest,cardRequestSequence.current,cardScope.current,cardListCursorTarget.current,walletRequestMounted.current)
