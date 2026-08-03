@@ -15,6 +15,8 @@
     "test:wallet-transfer-postchain:test": "FASTLINK_TEST_ENVIRONMENT=TEST node --experimental-strip-types --test tests/walletTransferPostChain.integration.test.ts",
     "test:wallet-account-transactions:sandbox": "FASTLINK_TEST_ENVIRONMENT=SANDBOX node --experimental-strip-types --test tests/walletAccountTransactions.integration.test.ts",
     "test:wallet-account-transactions:test": "FASTLINK_TEST_ENVIRONMENT=TEST node --experimental-strip-types --test tests/walletAccountTransactions.integration.test.ts",
+    "test:wallet-assets:sandbox": "FASTLINK_TEST_ENVIRONMENT=SANDBOX node --experimental-strip-types --test tests/walletAssets.test.ts tests/walletAssets.integration.test.ts",
+    "test:wallet-assets:test": "FASTLINK_TEST_ENVIRONMENT=TEST node --experimental-strip-types --test tests/walletAssets.test.ts tests/walletAssets.integration.test.ts",
     "test:fx-quote:sandbox": "FASTLINK_TEST_ENVIRONMENT=SANDBOX node --experimental-strip-types --test tests/fxQuote.integration.test.ts tests/fxQuote.mounted.integration.test.ts",
     "test:fx-quote:test": "FASTLINK_TEST_ENVIRONMENT=TEST node --experimental-strip-types --test tests/fxQuote.integration.test.ts tests/fxQuote.mounted.integration.test.ts",
     "test:kyc-status:sandbox": "FASTLINK_TEST_ENVIRONMENT=SANDBOX node --experimental-strip-types --test tests/kycStatus.test.ts tests/kycStatus.mounted.integration.test.ts",
