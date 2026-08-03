@@ -3,7 +3,10 @@ import type {
   WalletBalanceRecord,
   WalletTransferReceipt,
 } from "./walletData.ts";
-import type { WalletTransactionHistoryState } from "./walletTransactions.ts";
+import type {
+  WalletAccountTransactionHistoryState,
+  WalletAccountTransactionRecord,
+} from "./walletTransactions.ts";
 import { walletTransferFailureIsAmbiguous } from "./walletTransfer.ts";
 
 export type WalletTransferPostChainCommit = Readonly<{
@@ -13,8 +16,8 @@ export type WalletTransferPostChainCommit = Readonly<{
   destinationAccount: WalletAccountRecord;
   sourceBalance: WalletBalanceRecord;
   destinationBalance: WalletBalanceRecord;
-  /** The public API is customer-and-asset scoped, so this one page covers both owned sides. */
-  transactions: WalletTransactionHistoryState;
+  sourceTransactions: WalletAccountTransactionHistoryState;
+  destinationTransactions: WalletAccountTransactionHistoryState;
 }>;
 
 export type WalletTransferInvalidatedCommit = Readonly<{
@@ -24,7 +27,8 @@ export type WalletTransferInvalidatedCommit = Readonly<{
   destinationAccount: null;
   sourceBalance: null;
   destinationBalance: null;
-  transactions: null;
+  sourceTransactions: null;
+  destinationTransactions: null;
 }>;
 
 export type WalletTransferPostChainResult =
@@ -50,7 +54,10 @@ export type WalletTransferPostChainInput = Readonly<{
   refresh: Readonly<{
     accounts: (signal?: AbortSignal) => Promise<readonly WalletAccountRecord[]>;
     balance: (account: WalletAccountRecord, signal?: AbortSignal) => Promise<WalletBalanceRecord>;
-    transactions: (signal?: AbortSignal) => Promise<WalletTransactionHistoryState>;
+    transactions: (
+      account: WalletAccountRecord,
+      signal?: AbortSignal,
+    ) => Promise<WalletAccountTransactionHistoryState>;
   }>;
   isCurrent: () => boolean;
   signal?: AbortSignal;
@@ -103,8 +110,58 @@ export function createWalletTransferInvalidatedCommit(
     destinationAccount: null,
     sourceBalance: null,
     destinationBalance: null,
-    transactions: null,
+    sourceTransactions: null,
+    destinationTransactions: null,
   });
+}
+
+function operationEntries(
+  history: WalletAccountTransactionHistoryState,
+  operationId: string,
+): readonly WalletAccountTransactionRecord[] {
+  return history.items.filter(item => item.operationId === operationId);
+}
+
+function entryMatchesConfirmedTransfer(
+  entry: WalletAccountTransactionRecord,
+  receipt: WalletTransferReceipt,
+  direction: "OUTGOING" | "INCOMING",
+): boolean {
+  return (
+    entry.type === "TRANSFER" &&
+    entry.status === "COMPLETED" &&
+    entry.assetCode === receipt.assetCode &&
+    entry.amount === receipt.amount &&
+    entry.direction === direction &&
+    entry.operationId === receipt.id &&
+    Date.parse(entry.createdAt) >= Date.parse(receipt.createdAt)
+  );
+}
+
+function historiesMatchConfirmedOperation(
+  receipt: WalletTransferReceipt,
+  source: WalletAccountRecord,
+  destination: WalletAccountRecord,
+  sourceHistory: WalletAccountTransactionHistoryState,
+  destinationHistory: WalletAccountTransactionHistoryState,
+): boolean {
+  if (
+    receipt.status !== "COMPLETED" ||
+    receipt.completedAt === null ||
+    sourceHistory.accountId !== source.id ||
+    destinationHistory.accountId !== destination.id ||
+    sourceHistory.accountId === destinationHistory.accountId ||
+    sourceHistory.filterKey !== destinationHistory.filterKey
+  ) return false;
+  const sourceEntries = operationEntries(sourceHistory, receipt.id);
+  const destinationEntries = operationEntries(destinationHistory, receipt.id);
+  return (
+    sourceEntries.length === 1 &&
+    destinationEntries.length === 1 &&
+    sourceEntries[0].id !== destinationEntries[0].id &&
+    entryMatchesConfirmedTransfer(sourceEntries[0], receipt, "OUTGOING") &&
+    entryMatchesConfirmedTransfer(destinationEntries[0], receipt, "INCOMING")
+  );
 }
 
 async function readWalletTransferPostChainRefresh(
@@ -122,14 +179,17 @@ async function readWalletTransferPostChainRefresh(
     source.assetCode !== input.assetCode ||
     destination.assetCode !== input.assetCode
   ) throw new WalletTransferRefreshError("Wallet transfer accounts changed after confirmation");
-  const [sourceBalance, destinationBalance, transactions] = await Promise.all([
+  const [sourceBalance, destinationBalance, sourceTransactions, destinationTransactions] = await Promise.all([
     input.refresh.balance(source, input.signal),
     input.refresh.balance(destination, input.signal),
-    input.refresh.transactions(input.signal),
+    input.refresh.transactions(source, input.signal),
+    input.refresh.transactions(destination, input.signal),
   ]);
   if (!input.isCurrent()) throw new DOMException("Wallet transfer refresh cancelled", "AbortError");
   if (!balanceMatchesAccount(sourceBalance, source) || !balanceMatchesAccount(destinationBalance, destination))
     throw new WalletTransferRefreshError("Wallet transfer account and balance generations disagree");
+  if (!historiesMatchConfirmedOperation(receipt, source, destination, sourceTransactions, destinationTransactions))
+    throw new WalletTransferRefreshError("Wallet transfer debit and credit histories do not confirm one operation");
   return Object.freeze({
     receipt,
     accounts: Object.freeze([...accounts]),
@@ -137,7 +197,8 @@ async function readWalletTransferPostChainRefresh(
     destinationAccount: destination,
     sourceBalance,
     destinationBalance,
-    transactions,
+    sourceTransactions,
+    destinationTransactions,
   });
 }
 
@@ -163,6 +224,8 @@ export async function runWalletTransferPostChain(
   }
   if (!input.isCurrent()) return null;
   try {
+    if (confirmed.status !== "COMPLETED" || confirmed.completedAt === null)
+      throw new WalletTransferRefreshError("Wallet transfer operation is not completed");
     const commit = await readWalletTransferPostChainRefresh(input, confirmed);
     if (!input.isCurrent()) return null;
     return Object.freeze({ status: "COMPLETE", commit });

@@ -35,6 +35,7 @@ const session = (overrides: Record<string, unknown> = {}) => ({
 
 const transaction = (id: string, minute: number, overrides: Record<string, unknown> = {}) => ({
   id,
+  operationId: "operation-transfer-public-01",
   type: "TRANSFER",
   status: "COMPLETED",
   assetCode: "USD",
@@ -51,7 +52,7 @@ const filters = normalizeWalletTransactionFilters({
   assetCode: "USD",
   limit: 25,
 });
-const cursorPage2 = "Y3Vyc29yLXBhZ2UtMg";
+const cursorPage2 = "Y3Vyc29yLXBhZ2UtMg.c2lnbmF0dXJlLXBhZ2UtMg";
 
 integration(`Wallet transaction history exact consumer (${environment ?? "ENVIRONMENT_REQUIRED"})`, async () => {
   const calls: WalletTransactionTransportRequest[] = [];
@@ -90,6 +91,7 @@ integration(`Wallet transaction history exact consumer (${environment ?? "ENVIRO
       "createdAt",
       "direction",
       "id",
+      "operationId",
       "status",
       "type",
       "updatedAt",
