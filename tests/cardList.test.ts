@@ -73,6 +73,14 @@ test("normalizes an exact public card page", () => {
   ]);
 });
 
+test("accepts and strips the backend effective fee extension from list records", () => {
+  const page = parseCardPage({
+    cards: [{ ...rawCard("card-1"), effectiveFees: { source: "PRODUCT_TEMPLATE" } }],
+    nextCursor: null,
+  });
+  assert.equal(Object.prototype.hasOwnProperty.call(page.cards[0], "effectiveFees"), false);
+});
+
 test("accepts an empty terminal page", () => {
   assert.deepEqual(parseCardPage({ cards: [], nextCursor: null }), { cards: [], nextCursor: null });
 });

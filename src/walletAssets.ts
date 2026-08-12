@@ -17,6 +17,7 @@ export type WalletAssetClass = (typeof WALLET_ASSET_CLASSES)[number];
 export type WalletAssetEnvironment = Extract<WalletTransferEnvironment, "SANDBOX" | "TEST">;
 
 export type WalletAssetMetadata = Readonly<{
+  assetId: string;
   assetCode: string;
   assetClass: WalletAssetClass;
 }>;
@@ -51,7 +52,7 @@ export type WalletAssetCatalogInitialization = Readonly<{
 }>;
 
 const responseFields = new Set(["environment", "items"]);
-const itemFields = new Set(["assetCode", "assetClass"]);
+const itemFields = new Set(["assetId", "assetCode", "assetClass"]);
 type OwnData = Readonly<Record<string, PropertyDescriptor>>;
 
 function invalid(label: string): never {
@@ -183,13 +184,17 @@ const valueOf = (source: OwnData, key: string): unknown => source[key]?.value;
 
 function parseItem(value: unknown): WalletAssetMetadata {
   const source = ordinaryOwnData(value, itemFields, "item");
+  const assetId = valueOf(source, "assetId");
   const assetCode = valueOf(source, "assetCode");
   const assetClass = valueOf(source, "assetClass");
+  if (typeof assetId !== "string" || !/^flp_asset_[a-z0-9]{2,12}$/.test(assetId)) {
+    invalid("assetId");
+  }
   if (typeof assetCode !== "string" || !/^[A-Z0-9]{2,12}$/.test(assetCode)) {
     invalid("assetCode");
   }
   if (assetClass !== "FIAT" && assetClass !== "DIGITAL") invalid("assetClass");
-  return Object.freeze({ assetCode, assetClass });
+  return Object.freeze({ assetId, assetCode, assetClass });
 }
 
 export function parseWalletAssetCatalog(

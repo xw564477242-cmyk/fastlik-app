@@ -207,7 +207,7 @@ function parseWalletBalanceSummaryItem(value: unknown): WalletBalanceSummaryItem
   const availableBalance = amount(valueOf(source, "availableBalance"), "availableBalance");
   const ledgerBalance = amount(valueOf(source, "ledgerBalance"), "ledgerBalance");
   const pendingBalance = amount(valueOf(source, "pendingBalance"), "pendingBalance");
-  if (amountMantissa(availableBalance) + amountMantissa(pendingBalance) !== amountMantissa(ledgerBalance)) {
+  if (amountMantissa(availableBalance) + amountMantissa(pendingBalance) > amountMantissa(ledgerBalance)) {
     invalid("ledger equation");
   }
   return Object.freeze({

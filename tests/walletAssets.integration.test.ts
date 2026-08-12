@@ -20,11 +20,11 @@ const NOW = Date.parse("2026-08-03T08:00:00.000Z");
 const payload = () => JSON.stringify({
   environment,
   items: [
-    { assetCode: "EUR", assetClass: "FIAT" },
-    { assetCode: "MYR", assetClass: "FIAT" },
-    { assetCode: "SGD", assetClass: "FIAT" },
-    { assetCode: "USD", assetClass: "FIAT" },
-    { assetCode: "USDT", assetClass: "DIGITAL" },
+    { assetId: "flp_asset_eur", assetCode: "EUR", assetClass: "FIAT" },
+    { assetId: "flp_asset_myr", assetCode: "MYR", assetClass: "FIAT" },
+    { assetId: "flp_asset_sgd", assetCode: "SGD", assetClass: "FIAT" },
+    { assetId: "flp_asset_usd", assetCode: "USD", assetClass: "FIAT" },
+    { assetId: "flp_asset_usdt", assetCode: "USDT", assetClass: "DIGITAL" },
   ],
 });
 

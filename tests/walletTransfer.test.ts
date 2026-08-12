@@ -120,6 +120,18 @@ test("accepts only bounded exact account JSON and validates ledger balances", ()
       ),
     /available balance/,
   );
+  assert.equal(
+    parseWalletTransferAccountsRaw(
+      JSON.stringify([account("account-frozen-01", { status: "FROZEN", availableBalance: "0" })]),
+    )[0].postedBalance,
+    "100.25",
+  );
+  assert.throws(
+    () => parseWalletTransferAccountsRaw(
+      JSON.stringify([account("account-frozen-01", { status: "FROZEN", availableBalance: "100.25" })]),
+    ),
+    /available balance/,
+  );
   assert.throws(
     () =>
       parseWalletTransferAccountsRaw(
