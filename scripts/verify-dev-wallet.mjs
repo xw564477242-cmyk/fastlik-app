@@ -155,7 +155,11 @@ assert(walletTransfer.includes('runtimeEnvironment !== "SANDBOX" && runtimeEnvir
 assert(walletTransfer.includes("exactDataRecord(value, receiptFields") && walletTransfer.includes("exactDataRecord(value, accountFields"), "Wallet transfer responses must use exact public field allowlists");
 assert(walletTransfer.includes("rejectDuplicateJsonObjectKeys(raw, name)") && walletTransfer.indexOf("rejectDuplicateJsonObjectKeys(raw, name)") < walletTransfer.indexOf("return JSON.parse(raw)"), "Wallet transfer raw JSON must reject duplicate and escaped-equivalent object keys before parsing");
 assert(walletTransfer.includes("value !== value.trim()") && walletTransfer.includes("new TextEncoder().encode(value).byteLength > maximum"), "Wallet transfer public text must be trimmed and bounded by UTF-8 bytes");
-assert(walletTransfer.includes("available.scaled !== posted.scaled"), "Wallet transfer accounts must require availableBalance to equal postedBalance");
+assert(
+  walletTransfer.includes('const expectedAvailable = record.status === "ACTIVE" ? posted.scaled : 0n') &&
+    walletTransfer.includes("available.scaled !== expectedAvailable"),
+  "Wallet transfer accounts must require posted balance for ACTIVE availability and zero availability for FROZEN/CLOSED accounts",
+);
 assert(walletTransfer.includes("beginWalletTransferSubmit") && walletTransfer.includes("activeRequestId !== null"), "Wallet transfer must synchronously reject duplicate submissions");
 assert(app.includes("walletTransferSubmitGate.current.activeRequestId=null") && app.includes("walletTransferStatusInFlight.current=false"), "Wallet transfer busy and status state must clear synchronously with scope invalidation");
 assert(app.includes("setTransferReceipt(null)") && app.includes("replaceAccounts([])"), "Wallet transfer receipt and account data must clear on session changes and logout");
