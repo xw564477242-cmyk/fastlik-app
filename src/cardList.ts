@@ -328,7 +328,7 @@ export function cardListRequestWasAborted(value: unknown): boolean {
 
 function parseCardRecordValue(value: unknown, exact: boolean): CardRecord {
   const record = exact
-    ? exactDataRecord(value, cardRequiredFields, ["availableBalanceMinor"], "card record")
+    ? exactDataRecord(value, cardRequiredFields, ["availableBalanceMinor", "effectiveFees"], "card record")
     : publicCardDataRecord(value);
   if (record.type !== "VIRTUAL" && record.type !== "PHYSICAL") throw new Error("Invalid card type");
   if (!(record.status === "PENDING" || record.status === "ACTIVE" || record.status === "FROZEN" || record.status === "CLOSED" || record.status === "FAILED"))

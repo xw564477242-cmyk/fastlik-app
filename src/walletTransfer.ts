@@ -334,10 +334,11 @@ function parseAccount(value: unknown): WalletAccountRecord {
   const available = decimalParts(record.availableBalance, "available balance");
   if (current.scaled !== posted.scaled + pending.scaled)
     throw new Error("Inconsistent Wallet transfer account balance");
-  if (available.scaled < 0n || available.scaled !== posted.scaled)
-    throw new Error("Inconsistent Wallet transfer available balance");
   if (!(["ACTIVE", "FROZEN", "CLOSED"] as unknown[]).includes(record.status))
     throw new Error("Invalid Wallet transfer account status");
+  const expectedAvailable = record.status === "ACTIVE" ? posted.scaled : 0n;
+  if (available.scaled < 0n || available.scaled !== expectedAvailable)
+    throw new Error("Inconsistent Wallet transfer available balance");
   return {
     id: publicId(record.id, "Wallet transfer account id"),
     accountCode: publicText(record.accountCode, "Wallet transfer account code", 128),

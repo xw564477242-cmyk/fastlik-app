@@ -27,11 +27,11 @@ const session = (overrides: Record<string, unknown> = {}) => ({
   ...overrides,
 });
 const items = [
-  { assetCode: "EUR", assetClass: "FIAT" },
-  { assetCode: "MYR", assetClass: "FIAT" },
-  { assetCode: "SGD", assetClass: "FIAT" },
-  { assetCode: "USD", assetClass: "FIAT" },
-  { assetCode: "USDT", assetClass: "DIGITAL" },
+  { assetId: "flp_asset_eur", assetCode: "EUR", assetClass: "FIAT" },
+  { assetId: "flp_asset_myr", assetCode: "MYR", assetClass: "FIAT" },
+  { assetId: "flp_asset_sgd", assetCode: "SGD", assetClass: "FIAT" },
+  { assetId: "flp_asset_usd", assetCode: "USD", assetClass: "FIAT" },
+  { assetId: "flp_asset_usdt", assetCode: "USDT", assetClass: "DIGITAL" },
 ] as const;
 const payload = (overrides: Record<string, unknown> = {}) => JSON.stringify({
   environment: "TEST",
@@ -58,7 +58,7 @@ test("parses only the exact environment-bound sorted asset catalog", () => {
   assert.equal(Object.isFrozen(catalog.items), true);
   assert.equal(Object.isFrozen(catalog.items[0]), true);
   assert.deepEqual(Object.keys(catalog), ["environment", "items"]);
-  assert.deepEqual(Object.keys(catalog.items[0]), ["assetCode", "assetClass"]);
+  assert.deepEqual(Object.keys(catalog.items[0]), ["assetId", "assetCode", "assetClass"]);
 });
 
 test("fails closed for missing, extra, duplicate, unsorted, empty or invalid metadata", () => {
@@ -70,6 +70,7 @@ test("fails closed for missing, extra, duplicate, unsorted, empty or invalid met
     JSON.stringify({ environment: "TEST", items: [items[1], items[0]] }),
     JSON.stringify({ environment: "TEST", items: [items[0], items[0]] }),
     JSON.stringify({ environment: "TEST", items: [{ assetCode: "usd", assetClass: "FIAT" }] }),
+    JSON.stringify({ environment: "TEST", items: [{ assetId: "USD", assetCode: "USD", assetClass: "FIAT" }] }),
     JSON.stringify({ environment: "TEST", items: [{ assetCode: "USD", assetClass: "CRYPTO" }] }),
     JSON.stringify({ environment: "TEST", items: [{ ...items[0], provider: "private" }] }),
     `{"environment":"TEST","items":${JSON.stringify(items)},"\\u0069tems":[]}`,

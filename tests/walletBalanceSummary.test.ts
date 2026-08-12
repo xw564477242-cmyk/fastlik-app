@@ -62,6 +62,12 @@ test("reconstructs exactly the five public summary fields and verifies ledger ar
   assert.equal(parseItem({
     ...rawItem(), availableBalance: "-1.5", pendingBalance: "2.25", ledgerBalance: "0.75",
   }).ledgerBalance, "0.75");
+  assert.equal(parseItem({
+    ...rawItem(), availableBalance: "0", pendingBalance: "0", ledgerBalance: "9000",
+  }).ledgerBalance, "9000");
+  assert.equal(parseItem({
+    ...rawItem(), availableBalance: "80", pendingBalance: "20", ledgerBalance: "150",
+  }).ledgerBalance, "150");
 });
 
 test("accepts only canonical bounded amount strings", () => {
