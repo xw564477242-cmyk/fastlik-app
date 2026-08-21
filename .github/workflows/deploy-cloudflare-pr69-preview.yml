@@ -16,6 +16,7 @@ jobs:
   deploy:
     if: github.ref == 'refs/heads/feature/phase2-onchain-client'
     runs-on: ubuntu-latest
+    environment: cloudflare-wallet-dev
     steps:
       - uses: actions/checkout@v4
         with:
