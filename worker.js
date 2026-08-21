@@ -1,5 +1,6 @@
 const BACKEND_ORIGIN_PATTERN = /^https:\/\/[^/]+$/;
 const ALLOWED_ENVIRONMENTS = new Set(["SANDBOX", "TEST", "PRODUCTION"]);
+const TRUSTED_SANDBOX_UPSTREAM_ORIGIN = "https://fastlink-wallet-dev.adhesive-snowshoe.workers.dev";
 
 function requiredBinding(env, name) {
   const value = env[name]?.trim();
@@ -37,7 +38,44 @@ function requireBackendOrigin(env) {
   return configured;
 }
 
-function proxyHeaders(request, publicUrl) {
+function optionalBinding(env, name) {
+  const value = env[name]?.trim();
+  return value || undefined;
+}
+
+function isExactHttpsOrigin(value) {
+  try {
+    const parsed = new URL(value);
+    return parsed.protocol === "https:" && parsed.origin === value && !parsed.username && !parsed.password;
+  } catch {
+    return false;
+  }
+}
+
+export function resolvePreviewOriginPolicy(env, publicUrl, requestOrigin) {
+  const publicOrigin = optionalBinding(env, "FASTLINK_PUBLIC_ORIGIN");
+  const upstreamOrigin = optionalBinding(env, "FASTLINK_UPSTREAM_ORIGIN");
+  if (!publicOrigin && !upstreamOrigin) return undefined;
+  if (!publicOrigin || !upstreamOrigin) {
+    throw new Error("FASTLINK_PUBLIC_ORIGIN and FASTLINK_UPSTREAM_ORIGIN must be configured together");
+  }
+  if (env.FASTLINK_ENVIRONMENT?.trim().toUpperCase() !== "SANDBOX") {
+    throw new Error("Preview Origin mapping is allowed only in SANDBOX");
+  }
+  if (!isExactHttpsOrigin(publicOrigin) || !isExactHttpsOrigin(upstreamOrigin)) {
+    throw new Error("Preview origins must be HTTPS origins without paths");
+  }
+  if (upstreamOrigin !== TRUSTED_SANDBOX_UPSTREAM_ORIGIN) {
+    throw new Error("Preview upstream Origin must be the trusted Dev Wallet Origin");
+  }
+  if (publicUrl.origin !== publicOrigin) {
+    throw new Error("Preview Worker request host does not match FASTLINK_PUBLIC_ORIGIN");
+  }
+  if (requestOrigin && requestOrigin !== publicOrigin) return { allowed: false };
+  return { allowed: true, upstreamOrigin };
+}
+
+export function proxyHeaders(request, publicUrl, previewPolicy) {
   const headers = new Headers(request.headers);
   headers.delete("host");
   headers.delete("forwarded");
@@ -46,6 +84,9 @@ function proxyHeaders(request, publicUrl) {
   headers.delete("x-forwarded-proto");
   headers.set("x-forwarded-host", publicUrl.host);
   headers.set("x-forwarded-proto", "https");
+  if (previewPolicy?.upstreamOrigin && headers.has("origin")) {
+    headers.set("origin", previewPolicy.upstreamOrigin);
+  }
   return headers;
 }
 
@@ -59,10 +100,20 @@ function secureHeaders(headers) {
 async function proxyBackend(request, env) {
   const identity = runtimeIdentity(env);
   const publicUrl = new URL(request.url);
+  const previewPolicy = resolvePreviewOriginPolicy(env, publicUrl, request.headers.get("origin"));
+  if (previewPolicy && !previewPolicy.allowed) {
+    return Response.json(
+      { code: "AUTH_ORIGIN_FORBIDDEN", message: "Request origin is not allowed" },
+      {
+        status: 403,
+        headers: secureHeaders(new Headers({ "cache-control": "no-store" })),
+      },
+    );
+  }
   const backendUrl = new URL(publicUrl.pathname + publicUrl.search, requireBackendOrigin(env));
   const response = await fetch(backendUrl, {
     method: request.method,
-    headers: proxyHeaders(request, publicUrl),
+    headers: proxyHeaders(request, publicUrl, previewPolicy),
     body: request.method === "GET" || request.method === "HEAD" ? undefined : request.body,
     redirect: "manual",
   });

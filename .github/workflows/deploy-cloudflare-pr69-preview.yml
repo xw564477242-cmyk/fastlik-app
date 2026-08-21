@@ -1,0 +1,95 @@
+name: Deploy Wallet PR 69 Preview
+
+on:
+  push:
+    branches: [feature/phase2-onchain-client]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: fastlink-wallet-pr-69-preview
+  cancel-in-progress: true
+
+jobs:
+  deploy:
+    if: github.ref == 'refs/heads/feature/phase2-onchain-client'
+    runs-on: ubuntu-latest
+    environment: cloudflare-wallet-dev
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+      - run: npm ci
+
+      - name: Assert isolated PR preview variables
+        shell: bash
+        env:
+          BACKEND_ORIGIN: ${{ vars.FASTLINK_DEV_BACKEND_ORIGIN }}
+        run: |
+          test "$BACKEND_ORIGIN" = 'https://fastlink-backend-dev-development-a.up.railway.app'
+          test "$BACKEND_ORIGIN" != 'https://fastlink-backend-test-test.up.railway.app'
+          test "$BACKEND_ORIGIN" != 'https://exquisite-surprise-production-309d.up.railway.app'
+
+      - name: Test immutable PR preview package
+        run: npm run test:wallet-uat
+
+      - name: Build immutable PR preview package
+        env:
+          FASTLINK_ENVIRONMENT: SANDBOX
+          FASTLINK_BUILD_SHA: ${{ github.sha }}
+        run: npm run build:cloudflare
+
+      - name: Deploy isolated PR preview Worker
+        uses: cloudflare/wrangler-action@v3
+        with:
+          apiToken: ${{ secrets.CLOUDFLARE_DEV_API_TOKEN }}
+          accountId: ${{ secrets.CLOUDFLARE_DEV_ACCOUNT_ID }}
+          wranglerVersion: "4.114.0"
+          command: >-
+            deploy --config wrangler.pr69.jsonc
+            --var FASTLINK_BACKEND_ORIGIN:${{ vars.FASTLINK_DEV_BACKEND_ORIGIN }}
+            --var FASTLINK_BUILD_SHA:${{ github.sha }}
+
+      - name: Verify isolated PR preview Worker
+        shell: bash
+        env:
+          PREVIEW_URL: https://fastlink-wallet-pr-69-dev.adhesive-snowshoe.workers.dev
+        run: |
+          health=''
+          runtime=''
+          for _ in {1..18}; do
+            health="$(curl --fail --silent --show-error --location --retry 2 --retry-delay 2 "$PREVIEW_URL/healthz" || true)"
+            runtime="$(curl --fail --silent --show-error --location --retry 2 --retry-delay 2 "$PREVIEW_URL/runtime-config.js" || true)"
+            if grep -Fq "\"buildSha\":\"${{ github.sha }}\"" <<<"$health" && grep -Fq "\"buildSha\":\"${{ github.sha }}\"" <<<"$runtime"; then
+              break
+            fi
+            sleep 5
+          done
+          grep -F '"service":"fastlink-wallet-pr-69-dev"' <<<"$health"
+          grep -F '"environment":"SANDBOX"' <<<"$health"
+          grep -F "\"buildSha\":\"${{ github.sha }}\"" <<<"$health"
+          grep -F '"environment":"SANDBOX"' <<<"$runtime"
+          grep -F '"apiUrl":"/api"' <<<"$runtime"
+          grep -F "\"buildSha\":\"${{ github.sha }}\"" <<<"$runtime"
+          curl --fail --silent --show-error --dump-header headers.txt --output health.json "$PREVIEW_URL/api/health"
+          grep -i -F 'x-fastlink-api-proxy: wallet-pr-69-dev' headers.txt
+
+      - name: Verify preview Origin guard is fail-closed
+        shell: bash
+        env:
+          PREVIEW_URL: https://fastlink-wallet-pr-69-dev.adhesive-snowshoe.workers.dev
+        run: |
+          status="$(curl --silent --show-error --output rejected.json --write-out '%{http_code}' \
+            -X POST \
+            -H 'content-type: application/json' \
+            -H 'origin: https://evil.example' \
+            --data '{"tenantId":"tenant-a","email":"nobody@example.invalid","password":"not-a-real-password"}' \
+            "$PREVIEW_URL/api/v1/auth/login")"
+          test "$status" = '403'
+          grep -F 'AUTH_ORIGIN_FORBIDDEN' rejected.json

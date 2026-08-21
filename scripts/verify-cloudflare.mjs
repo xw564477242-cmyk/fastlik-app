@@ -10,6 +10,7 @@ const assert = (condition, message) => {
 const worker = read("worker.js");
 const testConfig = read("wrangler.test.jsonc");
 const devConfig = read("wrangler.dev.jsonc");
+const previewConfig = read("wrangler.pr69.jsonc");
 const apiClient = read("src/apiClient.ts");
 const httpTransport = read("src/gateway/httpTransport.ts");
 const app = read("src/App.tsx");
@@ -183,6 +184,7 @@ assert(worker.includes('url.pathname === "/runtime-config.js"'), "Worker must pr
 assert(worker.includes('"x-fastlink-api-proxy"'), "Worker must expose its proxy identity");
 assert(worker.includes('headers.delete("x-forwarded-host")'), "Worker must remove spoofed forwarding headers");
 assert(worker.includes("FASTLINK_BACKEND_ORIGIN"), "Worker must require an explicit Backend origin");
+assert(worker.includes("FASTLINK_PUBLIC_ORIGIN") && worker.includes("FASTLINK_UPSTREAM_ORIGIN"), "Worker must support an exact isolated preview Origin policy");
 assert(!worker.includes("production-309d") && !worker.includes("fastlink-backend-dev-development-a"), "Worker must not embed Backend hosts");
 assert(testConfig.includes('"name": "fastlink-wallet-test"'), "Test Worker name must be isolated");
 assert(testConfig.includes('"FASTLINK_ENVIRONMENT": "TEST"'), "Test Worker must declare TEST");
@@ -190,6 +192,10 @@ assert(testConfig.includes('"FASTLINK_PROXY_ID": "wallet-test"'), "Test proxy id
 assert(devConfig.includes('"name": "fastlink-wallet-dev"'), "Dev Worker name must be isolated");
 assert(devConfig.includes('"FASTLINK_ENVIRONMENT": "SANDBOX"'), "Dev Worker must declare SANDBOX");
 assert(devConfig.includes('"FASTLINK_PROXY_ID": "wallet-dev"'), "Dev proxy identity must be wallet-dev");
+assert(previewConfig.includes('"name": "fastlink-wallet-pr-69-dev"'), "PR preview Worker name must be isolated");
+assert(previewConfig.includes('"FASTLINK_PROXY_ID": "wallet-pr-69-dev"'), "PR preview proxy identity must be isolated");
+assert(previewConfig.includes('"FASTLINK_PUBLIC_ORIGIN": "https://fastlink-wallet-pr-69-dev.adhesive-snowshoe.workers.dev"'), "PR preview must declare its exact public Origin");
+assert(previewConfig.includes('"FASTLINK_UPSTREAM_ORIGIN": "https://fastlink-wallet-dev.adhesive-snowshoe.workers.dev"'), "PR preview must map only to the trusted Dev Wallet Origin");
 
 const dist = join(root, "dist");
 if (statSync(dist, { throwIfNoEntry: false })?.isDirectory()) {
