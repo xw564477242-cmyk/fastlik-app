@@ -4,7 +4,7 @@ import {
   type WalletTransferSession,
 } from "./walletTransfer.ts";
 
-export const KYC_STATUS_PATH = "/api/v1/kyc/status";
+export const KYC_STATUS_PATH = "/v1/kyc/status";
 export const KYC_STATUS_RESPONSE_MAX_BYTES = 4_096;
 export const KYC_STATUS_REQUEST_DEADLINE_MS = 20_000;
 export const KYC_STATUSES = ["PENDING", "APPROVED", "REJECTED"] as const;
@@ -234,35 +234,24 @@ export async function sameOriginKycStatusTransport(
   )
     throw new KycStatusError("Invalid KYC status request");
 
-  const controller = new AbortController();
-  let timedOut = false;
-  const cancel = () => controller.abort();
-  if (request.signal.aborted) cancel();
-  else request.signal.addEventListener("abort", cancel, { once: true });
-  const timeout = window.setTimeout(() => {
-    timedOut = true;
-    controller.abort();
-  }, KYC_STATUS_REQUEST_DEADLINE_MS);
-
   try {
-    const response = await fetch(request.path, {
-      method: "GET",
-      cache: "no-store",
-      credentials: "include",
-      headers: { Accept: "application/json" },
-      signal: controller.signal,
+    const {walletGateway} = await import("./gateway/index.ts");
+    const response = await walletGateway.request<string>({
+      path: request.path,
+      method: request.method,
+      responseMode: "text",
+      maximumResponseBytes: KYC_STATUS_RESPONSE_MAX_BYTES,
+      signal: request.signal,
+      sessionInvalidation: "caller",
     });
-    if (!response.ok)
-      throw new KycStatusError("KYC status request failed", response.status);
-    return parseKycStatusJson(await response.text());
+    return parseKycStatusJson(response);
   } catch (value) {
     if (value instanceof KycStatusError) throw value;
-    if (value instanceof DOMException && value.name === "AbortError" && timedOut)
-      throw new KycStatusError("KYC status request timed out", 408);
+    if (value && typeof value === "object" && Object.getOwnPropertyDescriptor(value, "status")?.value !== undefined) {
+      const status = Object.getOwnPropertyDescriptor(value, "status")?.value;
+      if (typeof status === "number") throw new KycStatusError(status === 408 ? "KYC status request timed out" : "KYC status request failed", status);
+    }
     if (value instanceof DOMException && value.name === "AbortError") throw value;
     throw new KycStatusError("KYC status request unavailable");
-  } finally {
-    window.clearTimeout(timeout);
-    request.signal.removeEventListener("abort", cancel);
   }
 }

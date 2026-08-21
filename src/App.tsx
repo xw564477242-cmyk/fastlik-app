@@ -35,6 +35,7 @@ import {KycStatusPanel} from './KycStatusPanel'
 import {ConsumerTransferFlow} from './ConsumerTransferFlow'
 import {consumerTransferUiRequestIsCurrent,createConsumerTransferUiRequest} from './consumerTransferState'
 import {ConsumerOverview} from './ConsumerOverview'
+import {Phase2WalletPanel} from './Phase2WalletPanel'
 
 const sessionScope=(session:WalletSession)=>walletTransferSessionScope(session,walletRuntime.environment)??JSON.stringify([session.actorId,session.tenantId,session.customerId,session.environment,session.expiresAt??null])
 
@@ -1653,6 +1654,7 @@ export default function App(){
   {error&&<section className="panel"><h3>API unavailable</h3><p>{error}</p><p>Unavailable · no stale data displayed.</p></section>}
   {session&&<div className="wallet-grid">
    <ConsumerOverview session={session} summary={walletBalanceSummary} summaryLoading={walletBalanceSummaryLoading} summaryUnavailable={Boolean(walletBalanceSummaryError)} assetCatalog={walletAssets} accounts={accounts} selectedAccount={selectedAccount} cards={cards} selectedCard={selectedCard} operations={walletOperations} operationsLoading={walletOperationsLoading} operationsUnavailable={Boolean(walletOperationsError)}/>
+   <Phase2WalletPanel accounts={accounts} selectedCardId={selectedCard?.id??null}/>
    <div id="wallet-kyc"><KycStatusPanel session={session} runtimeEnvironment={walletRuntime.environment}/></div>
    <section id="wallet-assets" className="panel wallet-balance-summary"><h2><Landmark/> All Wallet balances · read only</h2><p className="card-action-note">Backend aggregate for this authenticated customer and environment. FIAT or DIGITAL labels come only from the exact authenticated asset catalog and never create holdings.</p>{walletAssetsLoading&&<p>Loading verified asset classifications…</p>}{walletAssetsError&&<div className="inline-error">{walletAssetsError} · Balances remain unclassified; no fallback asset assumption is used.</div>}{walletBalanceSummaryError&&<div className="inline-error">{walletBalanceSummaryError} · No unvalidated, stale or cross-session summary displayed.</div>}{walletBalanceSummaryLoading&&<p>Loading Wallet balance summary…</p>}<div className="record-list">{!walletBalanceSummaryLoading&&walletBalanceSummary?.items.length?walletBalanceSummary.items.map(item=><div className="balance-record" key={item.assetCode}><b>{item.assetCode} {item.availableBalance} available</b><small>{classifiedWalletBalancesByCode.get(item.assetCode)??'Classification unavailable'} · Ledger {item.ledgerBalance} · Pending {item.pendingBalance}</small><small>Updated {new Date(item.updatedAt).toLocaleString()}</small></div>):!walletBalanceSummaryLoading&&!walletBalanceSummaryError&&<p>No persisted Wallet balances returned.</p>}</div></section>
    <FxQuotePreview session={session} accounts={accounts}/>
