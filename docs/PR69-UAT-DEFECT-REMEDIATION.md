@@ -35,3 +35,9 @@
 2. Provision approved, tenant-scoped non-funding fixtures for one deposit address, one saved withdrawal address, one Card product, an existing test card and source wallet account. Do not use browser-side mock data.
 3. Publish an isolated authorized candidate containing the post-`e9400f6` source and matching paired local backend, then verify the immutable build SHA.
 4. Re-run only the read-only UAT path first. Financial write coverage requires separate explicit authorization and is not authorized by this remediation.
+
+## Candidate deployment gate — 2026-08-25
+
+| ID | Classification | Evidence | Status / next action |
+| --- | --- | --- | --- |
+| ENV-PR69-01 | Environment authorization | Candidate `a03ab50` triggered [preview run 32852980731](https://github.com/xw564477242-cmyk/fastlik-app/actions/runs/32852980731), which was rejected before steps began: the branch is not allowed to deploy to `cloudflare-wallet-dev`. | **Blocked** — environment owner must authorize the existing PR branch for the isolated preview. No bypass, workflow edit, retry, or shared-environment deployment is authorized. |

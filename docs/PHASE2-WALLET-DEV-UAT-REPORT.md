@@ -75,3 +75,24 @@ with trace `5123fb44-3e0c-47fa-b85f-357fd641c126`. The affected route is not
 identified by the UI, so this is additional evidence for UAT-01 rather than a
 claim that any specific API was repaired. The UI showed no cross-account or
 unvalidated response alongside the timeout.
+
+## 2026-08-25 authorized-candidate deployment attempt
+
+The complete candidate lineage through
+`a03ab50ec8617026ea90419e9f1e6ea650ceea6f` was pushed to
+`feature/phase2-onchain-client`. It is a descendant of the locked baseline
+and includes the actual frontend remediation commit `3a430fa`.
+
+The repository's `Deploy Wallet PR 69 Preview` workflow was automatically
+triggered as run
+[`32852980731`](https://github.com/xw564477242-cmyk/fastlik-app/actions/runs/32852980731).
+It failed before any job step or Worker deployment because GitHub environment
+protection rejected that branch for `cloudflare-wallet-dev`:
+
+> Branch `feature/phase2-onchain-client` is not allowed to deploy to
+> `cloudflare-wallet-dev` due to environment protection rules.
+
+No new preview URL or runtime SHA was produced. This is an **environment
+authorization blocker**, not a code, Cregis, migration, or financial-operation
+failure. Do not bypass the rule or retry until the environment owner explicitly
+authorizes this branch for the isolated PR #69 preview environment.

@@ -6,7 +6,7 @@
 | --- | --- | --- | --- |
 | M1 | PR #69 four FastLink-owned local APIs: onchain deposit preview, onchain transaction history, card top-up quote, and card issue `currencyId` | **Code complete, unmerged** | Frontend contract implementation `e9400f6`; paired backend implementation `c18409a`; focused backend 5 suites / 45 tests, build, and lint passed. Complete authorized browser UAT is still required. |
 | M2 | Cregis backend proxy, verified callback, local ledger posting, and post-funding coordination boundary | **Complete on isolated Cregis branch** | `feature/ucard-core-saas-platform` / `cb1f2e5`. A confirmed inbound writes local truth and a durable coordination event; it does not substitute for M1. |
-| M3 | Verifiable Worker preview access, authorized candidate build SHA, full SANDBOX UAT, and PR #69 merge to `dev` | **In progress; access gate passed, UAT failed/blocked** | Browser policy/access is verified. The observed runtime is baseline `b1b3e935…`, but it does not expose the `e9400f6` local-contract UI; SANDBOX data/API failures are recorded in [the DEV UAT report](PHASE2-WALLET-DEV-UAT-REPORT.md). |
+| M3 | Verifiable Worker preview access, authorized candidate build SHA, full SANDBOX UAT, and PR #69 merge to `dev` | **Blocked by environment authorization** | Browser policy/access is verified. Candidate `a03ab50` (including `3a430fa`) was pushed, but [preview run 32852980731](https://github.com/xw564477242-cmyk/fastlik-app/actions/runs/32852980731) was rejected before deployment because this branch is not authorized for `cloudflare-wallet-dev`. The old runtime remains `b1b3e935…`; no candidate SHA or new preview exists. |
 | M4 | Cregis Admin management UI and Lovable client UI | **Pending; can proceed independently** | May expose isolated third-party asset deposit/withdrawal views through FastLink backend. It cannot claim PR #69 local-chain/U-card functionality. |
 | M5 | End-to-end flow: Cregis inbound → local ledger balance → PR #69 local chain/U-card business | **Blocked** | Requires M1 accepted, M3 merged/UAT accepted, the exact production release gate, tenant opt-in, and a PR #69-owned consumer. Cregis still must not call or emulate the four local APIs. |
 
@@ -19,4 +19,4 @@
 
 ## Next authorized action
 
-Resolve the UAT report defects, deploy the authorized local-contract candidate with a verifiable runtime SHA, then rerun the runbook. Preserve PR #69 as Draft until every merge gate has a passing evidence record.
+Obtain explicit environment-owner authorization for the existing isolated PR preview branch, allow the already-pushed candidate `a03ab50` to deploy, verify its runtime SHA, then rerun the read-only UAT runbook. Preserve PR #69 as Draft until every merge gate has a passing evidence record.
