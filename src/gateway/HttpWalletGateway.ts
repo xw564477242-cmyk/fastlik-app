@@ -39,7 +39,7 @@ const decimalInput = (value: unknown, name: string): string => {
   return value
 }
 const localCurrencyId = (value: unknown): string => {
-  if (typeof value !== 'string' || !/^[A-Za-z0-9._:-]{2,128}$/.test(value)) throw new Error('currencyId is invalid')
+  if (typeof value !== 'string' || !/^[A-Za-z0-9._:-]{2,128}$/.test(value) || /^[A-Z]{3}$/.test(value)) throw new Error('currencyId is invalid')
   return value
 }
 

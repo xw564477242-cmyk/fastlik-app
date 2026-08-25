@@ -64,4 +64,5 @@ test('mock flow requires preview IDs and a quote ID; it never infers a local set
   assert.equal((await gateway.topupCard('card_mock_physical', {sourceWalletAccountId: 'wallet_mock_usd', quoteId: quote.quoteId}, 'card-topup:00000000-0000-4000-8000-000000000003')).status, 'COMPLETED')
   await assert.rejects(() => gateway.topupCard('different_card', {sourceWalletAccountId: 'wallet_mock_usd', quoteId: quote.quoteId}, 'card-topup:00000000-0000-4000-8000-000000000004'), /quote/)
   await assert.rejects(() => gateway.createPhysicalCard({currencyId: 'unknown_currency'}, 'physical-card:00000000-0000-4000-8000-000000000004'), /currencyId/)
+  await assert.rejects(() => gateway.createPhysicalCard({currencyId: 'USD'}, 'physical-card:00000000-0000-4000-8000-000000000005'), /currencyId/)
 })

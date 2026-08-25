@@ -78,6 +78,7 @@ const currencyId = (value: unknown): string => {
   if (
     typeof value !== "string" ||
     !/^[A-Za-z0-9._:-]{2,128}$/.test(value) ||
+    /^[A-Z]{3}$/.test(value) ||
     value !== value.trim()
   ) throw new Error("Invalid virtual card currencyId");
   return value;

@@ -2,6 +2,7 @@ import {FormEvent,useEffect,useRef,useState} from 'react'
 import {ArrowRightLeft} from 'lucide-react'
 import {WalletAccountRecord,walletApi,walletRuntime,WalletApiError,WalletSession} from './apiClient'
 import {FxQuote,FxQuoteInput,beginFxQuoteSubmit,createFxQuoteRequestIdentity,fxQuoteFailureCanInvalidateSession,fxQuoteFailureRetainsVerifiedQuote,fxQuoteRequestIsCurrent,fxQuoteRequestWasAborted,fxQuoteSessionScope,normalizeFxQuoteInput,settleFxQuoteSubmit} from './fxQuote'
+import {phase2FxUnavailableMessage} from './phase2WalletUat'
 
 type Props={session:WalletSession;accounts:readonly WalletAccountRecord[]}
 
@@ -95,7 +96,7 @@ export default function FxQuotePreview({session,accounts}:Props){
      return
     }
     if(!retryable(value))replaceQuote(null)
-    setError('FX quote unavailable for this session. No conversion was performed.')
+    setError(phase2FxUnavailableMessage(value))
    }
   }finally{
    const current=isCurrent()

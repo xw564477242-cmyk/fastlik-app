@@ -75,6 +75,7 @@ test("allows virtual card creation only for matching SANDBOX or TEST session and
 test("constructs only the strict public virtual card request fields", () => {
   assert.deepEqual(parseVirtualCardCreateInput(cardInput), cardInput);
   assert.deepEqual(parseVirtualCardCreateInput({ currencyId: "flp_asset_eur", alias: "" }), { currencyId: "flp_asset_eur" });
+  assert.throws(() => parseVirtualCardCreateInput({ currencyId: "USD" }), /currencyId/);
   assert.throws(() => parseVirtualCardCreateInput({ currencyId: " usd" }), /currencyId/);
   assert.throws(() => parseVirtualCardCreateInput({ currencyId: "bad/id" }), /currencyId/);
   assert.throws(() => parseVirtualCardCreateInput({ currencyId: "flp_asset_usd", alias: " x" }), /alias/);

@@ -2,6 +2,8 @@
 
 **Result:** browser access gate **PASS**; read-only SANDBOX UAT **not accepted**. PR #69 remains Draft and must not merge.
 
+Frontend remediation and the still-required SANDBOX/backend retest are tracked in [PR69-UAT-DEFECT-REMEDIATION.md](PR69-UAT-DEFECT-REMEDIATION.md).
+
 ## Candidate and execution evidence
 
 - Preview: `https://fastlink-wallet-pr-69-dev.adhesive-snowshoe.workers.dev/`

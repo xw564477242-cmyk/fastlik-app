@@ -207,7 +207,7 @@ When `state=REORGED`, the UI shows “account frozen — manual review”, `manu
 
 - `/cards/products` returns immutable `assetId` and presentation `currency`.
 - Product selection and fee quote are keyed by `templateId`; the UI presents `assetId` as the currency identity.
-- Both `POST /cards/virtual` and `POST /cards/physical` now accept exactly `{ "currencyId": "flp_asset_usd", "alias": "optional" }`; arbitrary ISO `currency` is not accepted. The response must echo public `currencyId` and public display `currency`, and the client verifies that the response `currencyId` exactly matches its request.
+- Both `POST /cards/virtual` and `POST /cards/physical` now accept exactly `{ "currencyId": "flp_asset_usd", "alias": "optional" }`; arbitrary ISO `currency` is not accepted. A bare three-letter ISO display value such as `USD` is not a local `currencyId` and is rejected before request construction. The response must echo public `currencyId` and public display `currency`, and the client verifies that the response `currencyId` exactly matches its request.
 
 ### Card top-up quote and execution
 

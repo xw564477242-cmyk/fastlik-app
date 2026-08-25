@@ -1,6 +1,13 @@
 import {useEffect, useMemo, useState} from 'react'
 import {ArrowDownToLine, ArrowUpFromLine, CreditCard, RefreshCw, ShieldCheck, WalletCards} from 'lucide-react'
 import {walletDataSource, walletGateway} from './gateway/index'
+import {
+  canManuallyRetryPhase2Read,
+  cardIssueInputFromLocalProduct,
+  phase2EmptyStateMessage,
+  phase2ReadFailureMessage,
+  type Phase2ReadResource,
+} from './phase2WalletUat'
 import type {
   CardOpeningQuote,
   CardProduct,
@@ -26,6 +33,12 @@ const USDT_ASSET_ID = 'flp_asset_usdt'
 const terminal = new Set(['SETTLED', 'REORGED', 'FAILED'])
 const idempotencyKey = (operation: string) => `${operation}:${crypto.randomUUID()}`
 const message = (value: unknown) => value instanceof Error ? value.message : 'Wallet request unavailable'
+type ReadError = {message: string; retryable: boolean}
+
+const phase2ReadError = (resource: Phase2ReadResource, value: unknown): ReadError => ({
+  message: phase2ReadFailureMessage(resource, value),
+  retryable: canManuallyRetryPhase2Read(value),
+})
 
 function FeeRows({transfer}: {transfer: OnchainTransfer}) {
   return <div className="phase2-fees">
@@ -62,6 +75,7 @@ export function Phase2WalletPanel({accounts, selectedCardId}: Props) {
   const [products, setProducts] = useState<CardProduct[]>([])
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState('')
+  const [readErrors, setReadErrors] = useState<Partial<Record<Phase2ReadResource, ReadError>>>({})
   const [depositAmount, setDepositAmount] = useState('')
   const [depositPreview, setDepositPreview] = useState<OnchainDepositPreview | null>(null)
   const [depositTransfer, setDepositTransfer] = useState<OnchainTransfer | null>(null)
@@ -92,8 +106,7 @@ export function Phase2WalletPanel({accounts, selectedCardId}: Props) {
   const load = async () => {
     setBusy(true)
     setError('')
-    try {
-      const [nextTotal, nextBalances, nextNetworks, nextAddresses, nextBook, nextProducts, nextTransfers] = await Promise.all([
+    const [totalResult, balancesResult, networksResult, addressesResult, bookResult, productsResult, transfersResult] = await Promise.allSettled([
         walletGateway.totalAssets(),
         walletGateway.balanceTriples(),
         walletGateway.onchainNetworks(),
@@ -102,21 +115,28 @@ export function Phase2WalletPanel({accounts, selectedCardId}: Props) {
         walletGateway.cardProducts(),
         walletGateway.onchainTransfers(),
       ])
-      setTotal(nextTotal)
-      setBalances(nextBalances)
-      setNetworks(nextNetworks)
-      setDepositAddresses(nextAddresses)
-      setWithdrawalAddresses(nextBook)
-      setProducts(nextProducts)
-      setOnchainTransfers(nextTransfers)
-      if (!withdrawalAddressId) setWithdrawalAddressId(nextBook.find((item) => item.networkId === networkId)?.id ?? '')
-      if (!productId) setProductId(nextProducts[0]?.templateId ?? '')
-      if (!topupAccountId) setTopupAccountId(accounts[0]?.id ?? '')
-    } catch (value) {
-      setError(message(value))
-    } finally {
-      setBusy(false)
-    }
+    const nextErrors: Partial<Record<Phase2ReadResource, ReadError>> = {}
+    if (totalResult.status === 'fulfilled') setTotal(totalResult.value)
+    else setError('Wallet overview refresh is temporarily unavailable. Previously verified values remain unchanged.')
+    if (balancesResult.status === 'fulfilled') setBalances(balancesResult.value)
+    else setError('Wallet balance refresh is temporarily unavailable. Previously verified values remain unchanged.')
+    if (networksResult.status === 'fulfilled') setNetworks(networksResult.value)
+    else setError('Network directory is temporarily unavailable. No unverified network selection is shown.')
+    if (addressesResult.status === 'fulfilled') setDepositAddresses(addressesResult.value)
+    else nextErrors['deposit-addresses'] = phase2ReadError('deposit-addresses', addressesResult.reason)
+    if (bookResult.status === 'fulfilled') {
+      setWithdrawalAddresses(bookResult.value)
+      if (!withdrawalAddressId) setWithdrawalAddressId(bookResult.value.find((item) => item.networkId === networkId)?.id ?? '')
+    } else nextErrors['withdrawal-addresses'] = phase2ReadError('withdrawal-addresses', bookResult.reason)
+    if (productsResult.status === 'fulfilled') {
+      setProducts(productsResult.value)
+      if (!productId) setProductId(productsResult.value[0]?.templateId ?? '')
+    } else nextErrors['card-products'] = phase2ReadError('card-products', productsResult.reason)
+    if (transfersResult.status === 'fulfilled') setOnchainTransfers(transfersResult.value)
+    else nextErrors['onchain-transactions'] = phase2ReadError('onchain-transactions', transfersResult.reason)
+    setReadErrors(nextErrors)
+    if (!topupAccountId) setTopupAccountId(accounts[0]?.id ?? '')
+    setBusy(false)
   }
 
   useEffect(() => { void load() }, [])
@@ -131,8 +151,19 @@ export function Phase2WalletPanel({accounts, selectedCardId}: Props) {
     try {
       const next = await walletGateway.depositAddresses({networkId: nextNetworkId, assetId: USDT_ASSET_ID})
       setDepositAddresses(next)
+      setReadErrors((current) => ({...current, 'deposit-addresses': undefined}))
       setWithdrawalAddressId(withdrawalAddresses.find((item) => item.networkId === nextNetworkId)?.id ?? '')
-    } catch (value) { setError(message(value)) } finally { setBusy(false) }
+    } catch (value) { setReadErrors((current) => ({...current, 'deposit-addresses': phase2ReadError('deposit-addresses', value)})) } finally { setBusy(false) }
+  }
+
+  const reloadOnchainTransfers = async () => {
+    setBusy(true)
+    try {
+      setOnchainTransfers(await walletGateway.onchainTransfers())
+      setReadErrors((current) => ({...current, 'onchain-transactions': undefined}))
+    } catch (value) {
+      setReadErrors((current) => ({...current, 'onchain-transactions': phase2ReadError('onchain-transactions', value)}))
+    } finally { setBusy(false) }
   }
 
   const allocateAddress = async () => {
@@ -214,7 +245,7 @@ export function Phase2WalletPanel({accounts, selectedCardId}: Props) {
     if (!selectedProduct || selectedProduct.cardType !== 'PHYSICAL') return
     setBusy(true); setError('')
     try {
-      const response = await walletGateway.createPhysicalCard({currencyId: selectedProduct.assetId, alias: cardAlias || undefined}, idempotencyKey('physical-card'))
+      const response = await walletGateway.createPhysicalCard(cardIssueInputFromLocalProduct(selectedProduct.assetId, cardAlias || undefined), idempotencyKey('physical-card'))
       setCardReceipt(`Physical Card request accepted: ${JSON.stringify(response)}`)
     } catch (value) { setError(message(value)) } finally { setBusy(false) }
   }
@@ -255,13 +286,14 @@ export function Phase2WalletPanel({accounts, selectedCardId}: Props) {
     {tab === 'overview' && <div className="phase2-overview">
       <div className="total-assets"><span>Total ledger value</span><b>{total ? `${total.totalLedgerValue} ${total.valuationAssetCode}` : 'Unavailable'}</b><small>Available: {total ? `${total.totalAvailableValue} ${total.valuationAssetCode}` : 'Unavailable'} · {total?.valuationMode ?? 'No fallback valuation'}</small></div>
       <div className="record-list">{balances.map((item) => <div className="balance-record" key={item.assetCode}><b>{item.assetCode}</b><small>Ledger {item.ledgerBalance} · Pending {item.pendingBalance} · Available {item.availableBalance}</small></div>)}</div>
-      <div className="record-list"><h3>Onchain transactions</h3>{onchainTransfers?.items.length ? onchainTransfers.items.map((item) => <div className="wallet-history-row" key={item.transferId}><span><b>{item.direction} · {item.assetCode}</b><small>{item.state} · {item.networkId} · {new Date(item.updatedAt).toLocaleString()}</small></span><b>{item.fees.netAmount} {item.assetCode}</b></div>) : <p>No tenant-scoped onchain transactions returned.</p>}</div>
+      <div className="record-list"><div className="panel-row"><h3>Onchain transactions</h3>{readErrors['onchain-transactions']?.retryable && <button type="button" onClick={() => void reloadOnchainTransfers()} disabled={busy}>Retry onchain history</button>}</div>{readErrors['onchain-transactions'] && <div className="inline-error">{readErrors['onchain-transactions']?.message}</div>}{onchainTransfers?.items.length ? onchainTransfers.items.map((item) => <div className="wallet-history-row" key={item.transferId}><span><b>{item.direction} · {item.assetCode}</b><small>{item.state} · {item.networkId} · {new Date(item.updatedAt).toLocaleString()}</small></span><b>{item.fees.netAmount} {item.assetCode}</b></div>) : !readErrors['onchain-transactions'] && <p>{phase2EmptyStateMessage['onchain-transactions']}</p>}</div>
       <p className="card-action-note">Frozen/closed accounts keep ledger value visible; Backend returns available balance as 0. The client performs no balance arithmetic.</p>
     </div>}
     {(tab === 'deposit' || tab === 'withdraw') && <label>CAIP-2 network<select value={networkId} onChange={(event) => void loadAddresses(event.target.value)} disabled={busy}>{networks.map((item) => <option key={item.caip2Id} value={item.caip2Id}>{item.displayName} · {item.caip2Id} · {item.confirmationTarget} confirmations</option>)}</select></label>}
     {tab === 'deposit' && <div className="phase2-flow">
       <div className="panel-row"><h3><ArrowDownToLine/> Onchain deposit</h3><div><button type="button" onClick={() => void allocateAddress()} disabled={busy}>Allocate address</button> <button type="button" onClick={() => void rotateAddress()} disabled={busy || !activeDepositAddress}>Rotate address</button></div></div>
-      {activeDepositAddress ? <div className="address-card"><b>{activeDepositAddress.address}</b><small>{activeDepositAddress.caip10AccountId} · rotation {activeDepositAddress.rotationIndex}</small></div> : <p>No active address. Allocate one before creating a deposit intent.</p>}
+      {readErrors['deposit-addresses'] && <div className="inline-error">{readErrors['deposit-addresses']?.message}</div>}
+      {activeDepositAddress ? <div className="address-card"><b>{activeDepositAddress.address}</b><small>{activeDepositAddress.caip10AccountId} · rotation {activeDepositAddress.rotationIndex}</small></div> : !readErrors['deposit-addresses'] && <p>{phase2EmptyStateMessage['deposit-addresses']}</p>}
       <form className="transfer-form" onSubmit={previewDeposit}><label>Expected gross amount<input value={depositAmount} onChange={(event) => {setDepositAmount(event.target.value); setDepositPreview(null)}} inputMode="decimal" pattern="^(?:0|[1-9][0-9]*)(?:\.[0-9]{1,18})?$" required/></label><button disabled={busy || !activeDepositAddress}>Preview Backend fees and confirmations</button></form>
       {depositPreview && <div className="phase2-preview"><div><span>Preview</span><b>{depositPreview.previewId}</b></div><div><span>Gross / net</span><b>{depositPreview.fees.grossAmount} / {depositPreview.fees.netAmount} {depositPreview.assetCode}</b></div><div><span>Fees</span><b>{depositPreview.fees.platformFee} / {depositPreview.fees.networkFee} / {depositPreview.fees.fxFee} {depositPreview.assetCode}</b></div><div><span>Confirmations</span><b>{depositPreview.confirmationTarget}</b></div><div><span>Expires</span><b>{new Date(depositPreview.expiresAt).toLocaleString()}</b></div><button type="button" onClick={() => void submitDeposit()} disabled={busy}>Create deposit intent with this preview</button></div>}
       {depositTransfer && <TransferDetail transfer={depositTransfer} onRefresh={() => void refreshDeposit()} busy={busy}/>}
@@ -269,15 +301,18 @@ export function Phase2WalletPanel({accounts, selectedCardId}: Props) {
     {tab === 'withdraw' && <div className="phase2-flow">
       <h3><ArrowUpFromLine/> Onchain withdrawal</h3>
       <form className="transfer-form" onSubmit={previewWithdrawal}><label>Saved address<select value={withdrawalAddressId} onChange={(event) => {setWithdrawalAddressId(event.target.value); setWithdrawalPreview(null)}} required><option value="">Select an address-book entry</option>{eligibleWithdrawalAddresses.map((item) => <option key={item.id} value={item.id}>{item.label} · {item.address}</option>)}</select></label><label>Net amount<input value={withdrawalAmount} onChange={(event) => {setWithdrawalAmount(event.target.value); setWithdrawalPreview(null)}} inputMode="decimal" pattern="^(?:0|[1-9][0-9]*)(?:\.[0-9]{1,18})?$" required/></label><button disabled={busy || !selectedWithdrawalAddress}>Preview Backend fees and gates</button></form>
-      {eligibleWithdrawalAddresses.length === 0 && <div className="inline-error">No saved address is eligible for this network. Direct address entry is intentionally disabled.</div>}
+      {readErrors['withdrawal-addresses'] && <div className="inline-error">{readErrors['withdrawal-addresses']?.message}</div>}
+      {eligibleWithdrawalAddresses.length === 0 && !readErrors['withdrawal-addresses'] && <div className="inline-error">{phase2EmptyStateMessage['withdrawal-addresses']}</div>}
       {withdrawalPreview && <div className="phase2-preview"><div><span>Approval threshold</span><b>{withdrawalPreview.approvalThreshold} USDT</b></div><div><span>Approval</span><b>{withdrawalPreview.approvalRequired ? 'Required' : 'Not required'}</b></div><div><span>Compliance gate</span><b>{withdrawalPreview.complianceGateEnabled ? 'Required' : 'Unavailable'}</b></div><div><span>Cooling period</span><b>{withdrawalPreview.addressCoolingPeriodSeconds} seconds · eligible {new Date(withdrawalPreview.addressEligibleAt).toLocaleString()}</b></div><div><span>Gross</span><b>{withdrawalPreview.fees.grossAmount} USDT</b></div><div><span>Platform / network / FX</span><b>{withdrawalPreview.fees.platformFee} / {withdrawalPreview.fees.networkFee} / {withdrawalPreview.fees.fxFee} USDT</b></div><div><span>Net</span><b>{withdrawalPreview.fees.netAmount} USDT</b></div><button type="button" onClick={() => void submitWithdrawal()} disabled={busy}><ShieldCheck/> Submit to compliance</button></div>}
       {withdrawalTransfer && <TransferDetail transfer={withdrawalTransfer} onRefresh={() => void refreshWithdrawal()} busy={busy}/>}
     </div>}
     {tab === 'cards' && <div className="phase2-flow">
       <h3><WalletCards/> Card products and funding</h3>
-      <label>Product<select value={productId} onChange={(event) => {setProductId(event.target.value); setOpeningQuote(null)}}><option value="">Select product</option>{products.map((item) => <option key={item.templateId} value={item.templateId}>{item.cardType} · {item.assetId} · {item.currency}</option>)}</select></label>
+      {readErrors['card-products'] && <div className="inline-error">{readErrors['card-products']?.message}</div>}
+      {products.length === 0 && !readErrors['card-products'] && <div className="inline-error">{phase2EmptyStateMessage['card-products']}</div>}
+      <label>Product<select value={productId} onChange={(event) => {setProductId(event.target.value); setOpeningQuote(null)}} disabled={busy || products.length === 0}><option value="">Select product</option>{products.map((item) => <option key={item.templateId} value={item.templateId}>{item.cardType} · currencyId {item.assetId} · {item.currency}</option>)}</select></label>
       <div className="panel-row"><button type="button" onClick={() => void quoteCard()} disabled={busy || !selectedProduct}>Get opening quote</button>{selectedProduct?.cardType === 'PHYSICAL' && <button type="button" onClick={() => void issuePhysical()} disabled={busy || !openingQuote}><CreditCard/> Issue physical Card</button>}</div>
-      {openingQuote && <div className="phase2-preview"><div><span>Product asset</span><b>{openingQuote.assetId}</b></div><div><span>Opening fee</span><b>{openingQuote.openingFee} {openingQuote.currency}</b></div><div><span>Provider called</span><b>{openingQuote.externalProviderCalled ? 'Yes' : 'No'}</b></div></div>}
+      {openingQuote && <div className="phase2-preview"><div><span>Product currencyId</span><b>{openingQuote.assetId}</b></div><div><span>Opening fee</span><b>{openingQuote.openingFee} {openingQuote.currency}</b></div><div><span>Provider called</span><b>{openingQuote.externalProviderCalled ? 'Yes' : 'No'}</b></div></div>}
       <label>Card alias<input value={cardAlias} onChange={(event) => setCardAlias(event.target.value)} maxLength={30}/></label>
       <form className="transfer-form" onSubmit={previewCardTopup}><label>Funding wallet<select value={topupAccountId} onChange={(event) => {setTopupAccountId(event.target.value); setTopupQuote(null)}}><option value="">Select owned account</option>{accounts.map((item) => <option value={item.id} key={item.id}>{item.assetCode} · {item.availableBalance} available</option>)}</select></label><label>Top-up amount<input value={topupAmount} onChange={(event) => {setTopupAmount(event.target.value); setTopupQuote(null)}} inputMode="decimal" pattern="^(?:0|[1-9][0-9]*)(?:\.[0-9]{1,2})?$" required/></label><button disabled={busy || !selectedCardId || !topupAccountId}>Preview Card top-up</button></form>
       {topupQuote && <div className="phase2-preview"><div><span>Quote</span><b>{topupQuote.quoteId}</b></div><div><span>Amount / debit</span><b>{topupQuote.amount} / {topupQuote.totalDebitAmount} {topupQuote.currency}</b></div><div><span>Fees</span><b>{topupQuote.fees.platformFee} / {topupQuote.fees.networkFee} / {topupQuote.fees.fxFee} {topupQuote.currency}</b></div><div><span>Expires</span><b>{new Date(topupQuote.expiresAt).toLocaleString()}</b></div><button type="button" onClick={() => void topup()} disabled={busy}>Top up selected Card with this quote</button></div>}
