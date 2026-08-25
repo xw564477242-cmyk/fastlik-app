@@ -4,6 +4,8 @@ Status: **do not merge while any item below is incomplete**.
 Locked frontend commit baseline: `b1b3e93506e9175159eea16805e43fe3bda831d2`.
 Scope: local FastLink onchain/U-card behavior only. Cregis and any third-party asset provider do not satisfy these checks.
 
+Use [PR69-FINAL-MERGE-VALIDATION.md](PR69-FINAL-MERGE-VALIDATION.md) as the final sign-off record and [PR69-AUTHORIZED-SANDBOX-UAT-RUNBOOK.md](PR69-AUTHORIZED-SANDBOX-UAT-RUNBOOK.md) for the exact browser execution procedure. Current combined delivery status is recorded in [PR69-M1-M5-MILESTONES.md](PR69-M1-M5-MILESTONES.md).
+
 ## Non-negotiable merge gates
 
 1. The four local APIs below are implemented, reviewed and tested in the paired Backend.

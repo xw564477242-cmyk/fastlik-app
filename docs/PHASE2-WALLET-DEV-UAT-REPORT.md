@@ -51,4 +51,4 @@ None confirmed. Live candidate UAT did not start, so automated PASS results must
 
 ## Resume gate
 
-After ENV-01 and ENV-03 are resolved, execute every unchecked item in `PHASE2-WALLET-UAT-CHECKLIST.md` against the exact authorized deployed candidate SHA. Record each failure with response status, trace ID, reproduction steps and either `FRONTEND` or `BACKEND_API_DEPENDENCY` ownership. Do not merge PR #69 until the four paired Backend local APIs and the complete browser DEV UAT are both accepted.
+After ENV-01 and ENV-03 are resolved, execute every unchecked item in `PHASE2-WALLET-UAT-CHECKLIST.md` against the exact authorized deployed candidate SHA. The ordered human procedure, including required fail-closed and isolated Cregis `DEFERRED` evidence, is [PR69-AUTHORIZED-SANDBOX-UAT-RUNBOOK.md](PR69-AUTHORIZED-SANDBOX-UAT-RUNBOOK.md). Record each failure with response status, trace ID, reproduction steps and either `FRONTEND` or `BACKEND_API_DEPENDENCY` ownership. Do not merge PR #69 until the four paired Backend local APIs and the complete browser DEV UAT are both accepted.
