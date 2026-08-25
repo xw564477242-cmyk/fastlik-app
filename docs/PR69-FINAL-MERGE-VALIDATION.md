@@ -4,9 +4,9 @@
 
 ## A. Scope and lineage
 
-- [ ] PR remains Draft throughout validation; no migration, deployment, push, or merge is initiated from this checklist.
+- [ ] PR remains Draft throughout validation; no migration, merge, or production deployment is initiated from this checklist.
 - [ ] Frontend candidate lineage is recorded: baseline `b1b3e93506e9175159eea16805e43fe3bda831d2`, implementation `e9400f60ae1559036bd7a34d394cc99ea3319005`, and UAT documentation `a620ab5e69fcf7c0e46ef8f7db9462a89b1bfb50`.
-- [ ] Paired local backend candidate `c18409aacca49d2f030ac3aaaef6d57626c31f27` is the one in the authorized candidate deployment.
+- [ ] Paired local backend candidate `d290d62aa174dd20f0b5ac9227096eb26ff39765` is the one in the authorized candidate deployment.
 - [ ] Cregis work remains isolated on `feature/ucard-core-saas-platform`; it neither implements nor invokes the four PR #69 local APIs.
 - [ ] No unrelated worktree change, shared DEV mutation, migration execution, or environment configuration edit is represented as PR #69 proof.
 
@@ -31,8 +31,8 @@
 ## D. Authorized environment gate
 
 - [x] Verifiable browser access to the Worker preview domain was observed in SANDBOX on 2026-08-25; no policy bypass was used.
-- [ ] The preview is an isolated, authorized PR #69 candidate deployment—not a shared DEV or an older preview.
-- [ ] Runtime build SHA is visible or otherwise independently verifiable and exactly matches the deployment manifest and the candidate lineage recorded above.
+- [x] The isolated PR #69 Worker candidate [run 32857121582](https://github.com/xw564477242-cmyk/fastlik-app/actions/runs/32857121582) is deployed with manifest SHA `1c38f54b7a0ac0abc5aad2e6b0d6068da5bdc383`; it is not shared DEV.
+- [ ] A paired backend candidate is deployed without a prohibited migration and its runtime SHA is independently verifiable. Backend CI `d290d62...` is green but the active SANDBOX backend remains older.
 - [ ] Dedicated SANDBOX tenant, dedicated end-user Cookie-Session, active deposit address, source wallet account, existing test card, enabled local card product, and saved withdrawal address are available through approved setup.
 - [ ] SANL-X fixture manifest proves the listed address, Card-product and local-chain-history records are tenant/customer/environment scoped and no test fixture enables a browser write action.
 - [ ] Evidence storage is approved and redacts cookies, CSRF values, secrets, callback signatures/raw bodies, and full financial identifiers.

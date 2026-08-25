@@ -141,3 +141,32 @@ conversion was performed for this repair.
 The next permitted browser action is the read-only list in
 [PR69-SANL-X-READONLY-RETEST.md](PR69-SANL-X-READONLY-RETEST.md), after an
 immutable paired candidate containing these backend fixes is made available.
+
+## 2026-08-25 paired-candidate and SANL-X fixture attempt
+
+**Decision:** **UAT not run / not accepted.** This is a deployment-and-fixture
+gate record, not a business-flow result.
+
+- The isolated Worker deployment [run 32857121582](https://github.com/xw564477242-cmyk/fastlik-app/actions/runs/32857121582) passed. Its read-only
+  `/healthz` and `/runtime-config.js` responses both report `SANDBOX` and
+  frontend build `1c38f54b7a0ac0abc5aad2e6b0d6068da5bdc383`.
+- The browser retained an already loaded `1f831ca...` document at the same
+  URL. That client-cache observation is not substituted for the Worker health
+  manifest and does not establish a paired backend runtime.
+- Backend candidate `d290d62aa174dd20f0b5ac9227096eb26ff39765` passed its
+  complete non-production CI in [run 32857933657](https://github.com/xw564477242-cmyk/fastlik-backend/actions/runs/32857933657), including unit, Card HTTP-safety, build,
+  integrity, and evidence stages. It has **not** been deployed.
+- Railway target verification showed `fastlink-backend-dev / development-A`
+  with `FASTLINK_ENVIRONMENT=SANDBOX`; its current deployment remains
+  `a953097...`. The candidate deployment manifest would execute
+  `prisma migrate deploy`. Because this task prohibits any migration command,
+  no backend deployment was attempted.
+- No SANL-X fixture was created. The available
+  `PHASE2_SANDBOX_TEST_FIXTURES_ENABLED` switch has no SANL-X tenant/customer
+  allowlist and would create deterministic records for any eligible empty
+  SANDBOX scope. Enabling it would violate fixture isolation. No test address,
+  Card product, source account, Card, or transfer was written.
+
+Accordingly, UAT-01/04/06 remain **backend candidate validated, pending paired
+deployment**, and UAT-02/03 remain **fixture blocked**. The ordered browser
+retest was intentionally not performed against the stale backend.

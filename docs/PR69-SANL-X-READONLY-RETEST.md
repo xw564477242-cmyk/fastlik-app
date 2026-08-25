@@ -16,6 +16,20 @@ test only. PR #69 stays Draft.
   raw callback bodies, full addresses, and financial identifiers are redacted.
 - [ ] Fixture setup is complete before the browser opens. The browser must not
   allocate an address, create an address-book entry, or create a fixture.
+- [ ] The fixture provisioner is restricted to the declared SANL-X
+  tenant/customer allowlist. A global "all empty SANDBOX scopes" switch is
+  not an acceptable substitute.
+
+### Current gate evidence (2026-08-25)
+
+- Worker candidate `1c38f54...` is healthy, and backend candidate
+  `d290d62...` passed non-production CI, but the backend candidate is not
+  deployed to that Worker origin.
+- The available Railway deployment route would execute a prohibited migration;
+  no deploy was attempted.
+- No dedicated SANL-X manifest or fixture allowlist exists, so no address,
+  withdrawal destination, Card product, Card, source account, or transfer
+  fixture has been written.
 
 ## Repair verification — read-only
 

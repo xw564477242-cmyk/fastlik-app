@@ -60,3 +60,17 @@ verified in SANDBOX.
 | ID | Classification | Evidence | Status / next action |
 | --- | --- | --- | --- |
 | ENV-PR69-01 | Environment authorization | Candidate `a03ab50` triggered [preview run 32852980731](https://github.com/xw564477242-cmyk/fastlik-app/actions/runs/32852980731), which was rejected before steps began: the branch is not allowed to deploy to `cloudflare-wallet-dev`. | **Blocked** — environment owner must authorize the existing PR branch for the isolated preview. No bypass, workflow edit, retry, or shared-environment deployment is authorized. |
+
+## Candidate evidence and remaining block — 2026-08-25
+
+The former Worker branch-authorization block is resolved: isolated preview
+[run 32857121582](https://github.com/xw564477242-cmyk/fastlik-app/actions/runs/32857121582) passed with
+`SANDBOX` Worker manifest build `1c38f54b7a0ac0abc5aad2e6b0d6068da5bdc383`.
+That does not deploy the backend candidate.
+
+| Item | Evidence | Current status |
+| --- | --- | --- |
+| Backend repair candidate | `d290d62aa174dd20f0b5ac9227096eb26ff39765` passed complete non-production CI in [run 32857933657](https://github.com/xw564477242-cmyk/fastlik-backend/actions/runs/32857933657). The CI also validates all public Card response contracts now including canonical `currencyId`. | **Validated, not deployed** |
+| Paired backend release | The configured SANDBOX Railway deployment path runs `prisma migrate deploy`; migrations are prohibited for this task. The active backend remains `a953097...`. | **Blocked by no-migration constraint** |
+| SANL-X deposit/withdrawal/Card fixtures | Existing fixture switch is global to an empty SANDBOX scope and has no dedicated tenant/customer allowlist. No safe manifest or isolated tenant was supplied. | **Blocked by fixture-isolation gate** |
+| Read-only retest | No case was run against an unpaired Worker/backend combination; no financial or fixture write occurred. | **Not started** |
