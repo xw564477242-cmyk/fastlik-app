@@ -11,7 +11,7 @@ Status: blocked before authenticated browser execution against the authorized PR
 - Artifact digest: `sha256:252bb04d5e37df82f8bbc220370f32b0af5925f6bd047c18b1dd36669e6bb663`
 - Current shared Wallet DEV SHA: `40766ae378ed23631e17bae107ffb974517c8e56`
 
-The browser Worker security policy is now permitted, but the currently opened preview still serves an older build. A browser result from that URL is therefore not valid acceptance evidence for this change. An authorized PR #69 deployment and runtime SHA verification are still required before UAT begins.
+The requested Worker allowlisting has not yet been independently verified: the current Browser session is still rejected because its admin-enforced policy cannot be verified. No bypass was attempted. Even after that access condition is demonstrably restored, the currently opened preview serves an older build, so it cannot be acceptance evidence for this change. An authorized PR #69 deployment and runtime SHA verification are still required before UAT begins.
 
 ## Automated frontend result
 
@@ -29,7 +29,7 @@ The browser Worker security policy is now permitted, but the currently opened pr
 | ID | Classification | Observation | Required resolution |
 |---|---|---|---|
 | ENV-01 | Environment | Opened preview still serves an older build; its runtime SHA is not the authorized PR #69 candidate | Deploy the authorized PR #69 build to an isolated preview, verify the runtime SHA, then run UAT against that exact URL |
-| ENV-02 | Environment | Browser Worker security policy is now permitted | Resolved as an access condition only; it is not substitute evidence for UAT of an older deployed build |
+| ENV-02 | Environment/security policy | Browser access to the opened Worker preview is still rejected because the admin-enforced policy cannot be verified | Security/admin owner must restore verifiable access. Do not bypass the policy; after recovery, it remains only an access condition and not UAT evidence for an older deployed build. |
 | ENV-03 | Credentials | Dedicated DEV end-user credentials are not present in the repository or local environment and GitHub Secret values are intentionally unreadable | Make the dedicated account available through an approved login handoff; do not place its password in Git, PR, CI logs or this report |
 
 No authenticated financial write was attempted while these conditions were unresolved.

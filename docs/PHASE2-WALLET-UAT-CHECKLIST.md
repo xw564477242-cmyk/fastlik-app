@@ -4,7 +4,7 @@ Use only a dedicated DEV SANDBOX end-user Session. Do not use production credent
 
 ## Build and security
 
-- [ ] Branch is `feature/phase2-onchain-client`; Backend repository has no changes.
+- [ ] Frontend branch is `feature/phase2-onchain-client`; the paired local Backend changes are isolated to `feature/phase2-onchain-wallet` and no Cregis branch, shared DEV or production deployment has changed.
 - [ ] Production build rejects `VITE_FASTLINK_DATA_SOURCE=mock`.
 - [ ] Cookie Session login/restoration succeeds; no token is stored in browser storage.
 - [ ] Mutating requests include CSRF and Idempotency-Key.
