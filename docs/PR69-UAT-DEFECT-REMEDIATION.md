@@ -36,6 +36,25 @@
 3. Publish an isolated authorized candidate containing the post-`e9400f6` source and matching paired local backend, then verify the immutable build SHA.
 4. Re-run only the read-only UAT path first. Financial write coverage requires separate explicit authorization and is not authorized by this remediation.
 
+## Local backend repair candidate — pending SANL-X retest
+
+This section records an un-deployed PR #69 core-backend repair. It does not
+alter the isolated Cregis branch, execute a migration, deploy an environment,
+or authorize a financial action.
+
+| ID | Local repair | Current status | Retest assertion |
+| --- | --- | --- | --- |
+| UAT-01 | Bounded `GET /api/v1/cards/products` read, one retry only for transient local failures, and stable `503 CARD_PRODUCT_READ_UNAVAILABLE` after retry exhaustion. The response remains tenant/environment scoped and does not synthesize a product. | **Backend fixed / pending paired preview** | A SANL-X tenant fixture with an enabled local Card product returns HTTP 200 and only that tenant's products. Forced/transient failure returns 503—not HTTP 408—and no provider call. |
+| UAT-02 | No code remediation; an empty tenant-owned deposit-address list remains safe. | **Fixture dependent** | SANL-X preloads one active tenant-owned deposit address. Browser only reads it; allocation remains unclicked. |
+| UAT-03 | No code remediation; no withdrawal destination is created from the browser. | **Fixture dependent** | SANL-X preloads one eligible, customer-owned saved withdrawal address satisfying cooling/compliance prerequisites. Browser only reads it; preview/submit remain unclicked. |
+| UAT-04 | Bounded `GET /api/v2/wallet/onchain/transactions` read now retries local HTTP 408/429/5xx and Prisma transient errors once, then returns `503 LOCAL_CHAIN_READ_UNAVAILABLE`. New cursors use the base64url form required by WalletGateway; previously-issued dotted cursors remain valid. | **Backend fixed / pending paired preview** | SANL-X preloads 0+ scoped `OnchainTransfer` rows. A read returns `{ items, nextCursor }` with canonical strings and a client-round-trippable cursor; foreign tenant/customer rows never appear. |
+| UAT-05 | No change in this repair: current source remains `currencyId` only. | **PASS (UI contract) / fixture dependent for later issue-readiness** | Verify local Card product reports its canonical `assetId`; do not invoke Card issue. |
+| UAT-06 | Quote-only endpoint normalizes transient quote failures to `503 FX_QUOTE_ONLY_UNAVAILABLE` and states that no conversion/funds movement occurred. | **Backend fixed / pending explicit quote-only authorization** | One separately approved, non-financial quote-only request observes the exact safe response. No conversion request, ledger write, or Card action follows. |
+
+Use [the SANL-X read-only retest checklist](PR69-SANL-X-READONLY-RETEST.md)
+for evidence capture. A repair is not accepted until that paired candidate is
+verified in SANDBOX.
+
 ## Candidate deployment gate — 2026-08-25
 
 | ID | Classification | Evidence | Status / next action |

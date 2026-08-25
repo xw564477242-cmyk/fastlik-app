@@ -4,7 +4,7 @@
 
 | Milestone | Deliverable | Current status | Evidence / next gate |
 | --- | --- | --- | --- |
-| M1 | PR #69 four FastLink-owned local APIs: onchain deposit preview, onchain transaction history, card top-up quote, and card issue `currencyId` | **Code complete, unmerged** | Frontend contract implementation `e9400f6`; paired backend implementation `c18409a`; focused backend 5 suites / 45 tests, build, and lint passed. Complete authorized browser UAT is still required. |
+| M1 | PR #69 four FastLink-owned local APIs: onchain deposit preview, onchain transaction history, card top-up quote, and card issue `currencyId` | **Code complete, unmerged; UAT repair candidate pending retest** | Frontend contract implementation `e9400f6`; paired backend implementation `c18409a` plus local UAT repair for Card-product bounded reads, onchain-history contract compatibility, and quote-only FX errors. No migration/deployment has occurred. Complete paired SANL-X browser UAT is still required. |
 | M2 | Cregis backend proxy, verified callback, local ledger posting, and post-funding coordination boundary | **Complete on isolated Cregis branch** | `feature/ucard-core-saas-platform` / `cb1f2e5`. A confirmed inbound writes local truth and a durable coordination event; it does not substitute for M1. |
 | M3 | Verifiable Worker preview access, authorized candidate build SHA, full SANDBOX UAT, and PR #69 merge to `dev` | **In progress; UAT not accepted** | Environment authorization was granted only for `feature/phase2-onchain-client`; [run 32853726327](https://github.com/xw564477242-cmyk/fastlik-app/actions/runs/32853726327) deployed and verified runtime `822ee22…`. Browser UAT verified the `currencyId` UI but found backend timeout/API and SANDBOX fixture failures; see [the DEV UAT report](PHASE2-WALLET-DEV-UAT-REPORT.md). |
 | M4 | Cregis Admin management UI and Lovable client UI | **Pending; can proceed independently** | May expose isolated third-party asset deposit/withdrawal views through FastLink backend. It cannot claim PR #69 local-chain/U-card functionality. |
@@ -19,4 +19,4 @@
 
 ## Next authorized action
 
-Resolve the remaining local-backend timeout/API and approved SANDBOX fixture gaps, then rerun the read-only UAT runbook against an immutable candidate SHA. Preserve PR #69 as Draft until every merge gate has a passing evidence record.
+Publish an immutable paired candidate with the local UAT repair, provide the approved SANL-X fixtures, then run [the read-only SANL-X checklist](PR69-SANL-X-READONLY-RETEST.md). Preserve PR #69 as Draft until every merge gate has a passing evidence record.

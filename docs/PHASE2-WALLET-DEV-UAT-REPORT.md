@@ -122,3 +122,22 @@ was absent.
 
 Cregis was not invoked and did not supply any fallback data or substitute for
 the four FastLink-owned local APIs.
+
+## 2026-08-25 local-backend repair prepared for SANL-X retest
+
+This is a **local code-completion record only**. It is not a deployment result:
+the currently observed Worker runtime remains
+`1f831ca49e778a5f69967bbe1b2f80e346a2ddd3`, and no backend deployment,
+migration, merge, funding action, address allocation, card action, or FX
+conversion was performed for this repair.
+
+| Defect | Local backend repair | Status for browser UAT |
+| --- | --- | --- |
+| UAT-01 Card product HTTP 408 | `GET /api/v1/cards/products` now uses a bounded, safe local read with one retry for transient Prisma/HTTP failures. A persistent failure becomes `503 CARD_PRODUCT_READ_UNAVAILABLE`; no tenant product is fabricated and no Card provider is called. | **Fixed in local backend candidate / pending paired SANL-X preview** |
+| UAT-04 onchain history unavailable | `GET /api/v2/wallet/onchain/transactions` now treats HTTP 408/429/5xx and additional transient Prisma failures as retryable local reads and returns the existing fail-closed `503 LOCAL_CHAIN_READ_UNAVAILABLE` envelope only after the bounded retry. Its newly issued signed cursor is opaque base64url, matching WalletGateway; dotted legacy cursors remain readable. | **Fixed in local backend candidate / pending paired SANL-X preview** |
+| UAT-06 quote-only FX error | `POST /api/v1/wallet/fx/quotes` now normalizes a transient quote failure to `503 FX_QUOTE_ONLY_UNAVAILABLE` with the explicit statement that no conversion or funds movement occurred. It performs no ledger, treasury, Card, or conversion write. | **Fixed in local backend candidate / pending explicitly authorized quote-only read** |
+| UAT-02 / UAT-03 addresses | No application-code change: missing deposit/withdrawal addresses remain intentional fail-closed states. | **SANL-X fixture dependency** |
+
+The next permitted browser action is the read-only list in
+[PR69-SANL-X-READONLY-RETEST.md](PR69-SANL-X-READONLY-RETEST.md), after an
+immutable paired candidate containing these backend fixes is made available.

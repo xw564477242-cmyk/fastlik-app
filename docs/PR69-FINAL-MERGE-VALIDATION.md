@@ -20,7 +20,8 @@
 
 ## C. Automated and review evidence
 
-- [ ] Paired backend focused tests: 5 suites / 45 tests pass (onchain service/OpenAPI; card top-up service; cards service/OpenAPI).
+- [ ] Paired backend focused tests: 8 suites / 72 tests pass (onchain service/OpenAPI; card top-up; cards service/OpenAPI; end-user FX quote/OpenAPI; fee policy).
+- [ ] Paired backend candidate includes the UAT-01 bounded Card-product read, UAT-04 local-chain history retry/base64url-cursor compatibility, and UAT-06 `FX_QUOTE_ONLY_UNAVAILABLE` non-financial response; the targeted service/OpenAPI suites and production build pass.
 - [ ] Paired backend production build and modified-file lint pass.
 - [ ] Frontend local API gateway/contract suite, full regression, production build, Cloudflare contract suite, and secret/architecture checks pass against the candidate source.
 - [ ] Review confirms every sensitive local database read/write uses server-derived tenant/customer/environment scope; every financial DTO field is a string; previews/quotes are HMAC-bound, expiry-bound, and fail closed.
@@ -33,6 +34,7 @@
 - [ ] The preview is an isolated, authorized PR #69 candidate deployment—not a shared DEV or an older preview.
 - [ ] Runtime build SHA is visible or otherwise independently verifiable and exactly matches the deployment manifest and the candidate lineage recorded above.
 - [ ] Dedicated SANDBOX tenant, dedicated end-user Cookie-Session, active deposit address, source wallet account, existing test card, enabled local card product, and saved withdrawal address are available through approved setup.
+- [ ] SANL-X fixture manifest proves the listed address, Card-product and local-chain-history records are tenant/customer/environment scoped and no test fixture enables a browser write action.
 - [ ] Evidence storage is approved and redacts cookies, CSRF values, secrets, callback signatures/raw bodies, and full financial identifiers.
 
 ## E. Browser SANDBOX UAT gate
