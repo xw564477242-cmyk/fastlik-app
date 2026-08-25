@@ -15,9 +15,13 @@ test('runs the preview deposit, withdrawal and Card flow through the shared Gate
   assert.equal(rotated.status, 'ACTIVE')
   assert.deepEqual(history.map((item) => item.status), ['RETIRED', 'ACTIVE'])
 
-  const deposit = await gateway.createDepositIntent({...selection, depositAddressId: rotated.addressId, grossAmount: '100'}, 'deposit:00000000-0000-4000-8000-000000000001')
+  const depositPreview = await gateway.previewDeposit({...selection, depositAddressId: rotated.addressId, grossAmount: '100'})
+  assert.equal(depositPreview.fees.grossAmount, '100')
+  assert.equal(depositPreview.confirmationTarget, 12)
+  const deposit = await gateway.createDepositIntent({...selection, depositAddressId: rotated.addressId, grossAmount: '100', previewId: depositPreview.previewId}, 'deposit:00000000-0000-4000-8000-000000000001')
   assert.equal(deposit.state, 'AWAITING_DETECTION')
   assert.equal((await gateway.depositStatus(deposit.transferId)).state, 'CONFIRMING')
+  assert.deepEqual((await gateway.onchainTransfers({assetId: selection.assetId})).items.map((item) => item.direction), ['DEPOSIT', 'WITHDRAWAL'])
 
   const addressBook = await gateway.withdrawalAddresses()
   const preview = await gateway.previewWithdrawal({...selection, withdrawalAddressId: addressBook[0].id, netAmount: '100'})
@@ -30,9 +34,11 @@ test('runs the preview deposit, withdrawal and Card flow through the shared Gate
   const products = await gateway.cardProducts()
   const quote = await gateway.cardOpeningQuote(products[0].templateId)
   assert.equal(quote.assetId, products[0].assetId)
-  const issued = await gateway.createPhysicalCard({currency: products[0].currency, alias: 'Travel'}, 'physical-card:00000000-0000-4000-8000-000000000003') as {status: string}
+  const issued = await gateway.createPhysicalCard({currencyId: products[0].assetId, alias: 'Travel'}, 'physical-card:00000000-0000-4000-8000-000000000003') as {status: string}
   assert.equal(issued.status, 'PENDING')
-  const topup = await gateway.topupCard('card_mock_physical', {sourceWalletAccountId: 'wallet_mock_usd', amount: '25'}, 'card-topup:00000000-0000-4000-8000-000000000004')
+  const topupQuote = await gateway.previewCardTopup('card_mock_physical', {sourceWalletAccountId: 'wallet_mock_usd', amount: '25'})
+  assert.equal(topupQuote.totalDebitAmount, '25')
+  const topup = await gateway.topupCard('card_mock_physical', {sourceWalletAccountId: 'wallet_mock_usd', quoteId: topupQuote.quoteId}, 'card-topup:00000000-0000-4000-8000-000000000004')
   assert.equal(topup.status, 'COMPLETED')
   assert.equal(topup.amount, '25')
 })

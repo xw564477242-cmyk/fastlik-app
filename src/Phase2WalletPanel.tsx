@@ -4,9 +4,12 @@ import {walletDataSource, walletGateway} from './gateway/index'
 import type {
   CardOpeningQuote,
   CardProduct,
+  CardTopupQuote,
   OnchainDepositAddress,
+  OnchainDepositPreview,
   OnchainNetwork,
   OnchainTransfer,
+  OnchainTransferPage,
   OnchainWithdrawalPreview,
   TotalAssets,
   WalletBalanceTriple,
@@ -60,7 +63,9 @@ export function Phase2WalletPanel({accounts, selectedCardId}: Props) {
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState('')
   const [depositAmount, setDepositAmount] = useState('')
+  const [depositPreview, setDepositPreview] = useState<OnchainDepositPreview | null>(null)
   const [depositTransfer, setDepositTransfer] = useState<OnchainTransfer | null>(null)
+  const [onchainTransfers, setOnchainTransfers] = useState<OnchainTransferPage | null>(null)
   const [withdrawalAmount, setWithdrawalAmount] = useState('')
   const [withdrawalAddressId, setWithdrawalAddressId] = useState('')
   const [withdrawalPreview, setWithdrawalPreview] = useState<OnchainWithdrawalPreview | null>(null)
@@ -70,6 +75,7 @@ export function Phase2WalletPanel({accounts, selectedCardId}: Props) {
   const [cardAlias, setCardAlias] = useState('')
   const [topupAmount, setTopupAmount] = useState('')
   const [topupAccountId, setTopupAccountId] = useState('')
+  const [topupQuote, setTopupQuote] = useState<CardTopupQuote | null>(null)
   const [cardReceipt, setCardReceipt] = useState('')
 
   const activeDepositAddress = useMemo(
@@ -87,13 +93,14 @@ export function Phase2WalletPanel({accounts, selectedCardId}: Props) {
     setBusy(true)
     setError('')
     try {
-      const [nextTotal, nextBalances, nextNetworks, nextAddresses, nextBook, nextProducts] = await Promise.all([
+      const [nextTotal, nextBalances, nextNetworks, nextAddresses, nextBook, nextProducts, nextTransfers] = await Promise.all([
         walletGateway.totalAssets(),
         walletGateway.balanceTriples(),
         walletGateway.onchainNetworks(),
         walletGateway.depositAddresses({networkId, assetId: USDT_ASSET_ID}),
         walletGateway.withdrawalAddresses(),
         walletGateway.cardProducts(),
+        walletGateway.onchainTransfers(),
       ])
       setTotal(nextTotal)
       setBalances(nextBalances)
@@ -101,6 +108,7 @@ export function Phase2WalletPanel({accounts, selectedCardId}: Props) {
       setDepositAddresses(nextAddresses)
       setWithdrawalAddresses(nextBook)
       setProducts(nextProducts)
+      setOnchainTransfers(nextTransfers)
       if (!withdrawalAddressId) setWithdrawalAddressId(nextBook.find((item) => item.networkId === networkId)?.id ?? '')
       if (!productId) setProductId(nextProducts[0]?.templateId ?? '')
       if (!topupAccountId) setTopupAccountId(accounts[0]?.id ?? '')
@@ -112,9 +120,11 @@ export function Phase2WalletPanel({accounts, selectedCardId}: Props) {
   }
 
   useEffect(() => { void load() }, [])
+  useEffect(() => { setTopupQuote(null) }, [selectedCardId])
 
   const loadAddresses = async (nextNetworkId: string) => {
     setNetworkId(nextNetworkId)
+    setDepositPreview(null)
     setWithdrawalPreview(null)
     setBusy(true)
     setError('')
@@ -129,6 +139,7 @@ export function Phase2WalletPanel({accounts, selectedCardId}: Props) {
     setBusy(true); setError('')
     try {
       const value = await walletGateway.allocateDepositAddress({networkId, assetId: USDT_ASSET_ID})
+      setDepositPreview(null)
       setDepositAddresses((current) => [...current.filter((item) => item.addressId !== value.addressId), value])
     } catch (value) { setError(message(value)) } finally { setBusy(false) }
   }
@@ -138,17 +149,26 @@ export function Phase2WalletPanel({accounts, selectedCardId}: Props) {
     setBusy(true); setError('')
     try {
       const value = await walletGateway.rotateDepositAddress(activeDepositAddress.addressId)
+      setDepositPreview(null)
       const history = await walletGateway.depositAddresses({networkId, assetId: USDT_ASSET_ID})
       setDepositAddresses(history.some((item) => item.addressId === value.addressId) ? history : [...history, value])
     } catch (value) { setError(message(value)) } finally { setBusy(false) }
   }
 
-  const submitDeposit = async (event: React.FormEvent) => {
+  const previewDeposit = async (event: React.FormEvent) => {
     event.preventDefault()
     if (!activeDepositAddress) return
     setBusy(true); setError('')
     try {
-      setDepositTransfer(await walletGateway.createDepositIntent({networkId, assetId: USDT_ASSET_ID, depositAddressId: activeDepositAddress.addressId, grossAmount: depositAmount}, idempotencyKey('deposit')))
+      setDepositPreview(await walletGateway.previewDeposit({networkId, assetId: USDT_ASSET_ID, depositAddressId: activeDepositAddress.addressId, grossAmount: depositAmount}))
+    } catch (value) { setDepositPreview(null); setError(message(value)) } finally { setBusy(false) }
+  }
+
+  const submitDeposit = async () => {
+    if (!activeDepositAddress || !depositPreview) return
+    setBusy(true); setError('')
+    try {
+      setDepositTransfer(await walletGateway.createDepositIntent({networkId, assetId: USDT_ASSET_ID, depositAddressId: activeDepositAddress.addressId, grossAmount: depositAmount, previewId: depositPreview.previewId}, idempotencyKey('deposit')))
     } catch (value) { setError(message(value)) } finally { setBusy(false) }
   }
 
@@ -194,7 +214,7 @@ export function Phase2WalletPanel({accounts, selectedCardId}: Props) {
     if (!selectedProduct || selectedProduct.cardType !== 'PHYSICAL') return
     setBusy(true); setError('')
     try {
-      const response = await walletGateway.createPhysicalCard({currency: selectedProduct.currency, alias: cardAlias || undefined}, idempotencyKey('physical-card'))
+      const response = await walletGateway.createPhysicalCard({currencyId: selectedProduct.assetId, alias: cardAlias || undefined}, idempotencyKey('physical-card'))
       setCardReceipt(`Physical Card request accepted: ${JSON.stringify(response)}`)
     } catch (value) { setError(message(value)) } finally { setBusy(false) }
   }
@@ -208,12 +228,20 @@ export function Phase2WalletPanel({accounts, selectedCardId}: Props) {
     } catch (value) { setError(message(value)) } finally { setBusy(false) }
   }
 
-  const topup = async (event: React.FormEvent) => {
+  const previewCardTopup = async (event: React.FormEvent) => {
     event.preventDefault()
     if (!selectedCardId || !topupAccountId) return
     setBusy(true); setError('')
     try {
-      const response = await walletGateway.topupCard(selectedCardId, {sourceWalletAccountId: topupAccountId, amount: topupAmount}, idempotencyKey('card-topup'))
+      setTopupQuote(await walletGateway.previewCardTopup(selectedCardId, {sourceWalletAccountId: topupAccountId, amount: topupAmount}))
+    } catch (value) { setTopupQuote(null); setError(message(value)) } finally { setBusy(false) }
+  }
+
+  const topup = async () => {
+    if (!selectedCardId || !topupAccountId || !topupQuote) return
+    setBusy(true); setError('')
+    try {
+      const response = await walletGateway.topupCard(selectedCardId, {sourceWalletAccountId: topupAccountId, quoteId: topupQuote.quoteId}, idempotencyKey('card-topup'))
       setCardReceipt(`Card top-up ${response.status}: ${response.amount} ${response.currency} · operation ${response.operationId}`)
     } catch (value) { setError(message(value)) } finally { setBusy(false) }
   }
@@ -227,13 +255,15 @@ export function Phase2WalletPanel({accounts, selectedCardId}: Props) {
     {tab === 'overview' && <div className="phase2-overview">
       <div className="total-assets"><span>Total ledger value</span><b>{total ? `${total.totalLedgerValue} ${total.valuationAssetCode}` : 'Unavailable'}</b><small>Available: {total ? `${total.totalAvailableValue} ${total.valuationAssetCode}` : 'Unavailable'} · {total?.valuationMode ?? 'No fallback valuation'}</small></div>
       <div className="record-list">{balances.map((item) => <div className="balance-record" key={item.assetCode}><b>{item.assetCode}</b><small>Ledger {item.ledgerBalance} · Pending {item.pendingBalance} · Available {item.availableBalance}</small></div>)}</div>
+      <div className="record-list"><h3>Onchain transactions</h3>{onchainTransfers?.items.length ? onchainTransfers.items.map((item) => <div className="wallet-history-row" key={item.transferId}><span><b>{item.direction} · {item.assetCode}</b><small>{item.state} · {item.networkId} · {new Date(item.updatedAt).toLocaleString()}</small></span><b>{item.fees.netAmount} {item.assetCode}</b></div>) : <p>No tenant-scoped onchain transactions returned.</p>}</div>
       <p className="card-action-note">Frozen/closed accounts keep ledger value visible; Backend returns available balance as 0. The client performs no balance arithmetic.</p>
     </div>}
     {(tab === 'deposit' || tab === 'withdraw') && <label>CAIP-2 network<select value={networkId} onChange={(event) => void loadAddresses(event.target.value)} disabled={busy}>{networks.map((item) => <option key={item.caip2Id} value={item.caip2Id}>{item.displayName} · {item.caip2Id} · {item.confirmationTarget} confirmations</option>)}</select></label>}
     {tab === 'deposit' && <div className="phase2-flow">
       <div className="panel-row"><h3><ArrowDownToLine/> Onchain deposit</h3><div><button type="button" onClick={() => void allocateAddress()} disabled={busy}>Allocate address</button> <button type="button" onClick={() => void rotateAddress()} disabled={busy || !activeDepositAddress}>Rotate address</button></div></div>
       {activeDepositAddress ? <div className="address-card"><b>{activeDepositAddress.address}</b><small>{activeDepositAddress.caip10AccountId} · rotation {activeDepositAddress.rotationIndex}</small></div> : <p>No active address. Allocate one before creating a deposit intent.</p>}
-      <form className="transfer-form" onSubmit={submitDeposit}><label>Expected gross amount<input value={depositAmount} onChange={(event) => setDepositAmount(event.target.value)} inputMode="decimal" pattern="^(?:0|[1-9][0-9]*)(?:\.[0-9]{1,18})?$" required/></label><button disabled={busy || !activeDepositAddress}>Create deposit intent</button></form>
+      <form className="transfer-form" onSubmit={previewDeposit}><label>Expected gross amount<input value={depositAmount} onChange={(event) => {setDepositAmount(event.target.value); setDepositPreview(null)}} inputMode="decimal" pattern="^(?:0|[1-9][0-9]*)(?:\.[0-9]{1,18})?$" required/></label><button disabled={busy || !activeDepositAddress}>Preview Backend fees and confirmations</button></form>
+      {depositPreview && <div className="phase2-preview"><div><span>Preview</span><b>{depositPreview.previewId}</b></div><div><span>Gross / net</span><b>{depositPreview.fees.grossAmount} / {depositPreview.fees.netAmount} {depositPreview.assetCode}</b></div><div><span>Fees</span><b>{depositPreview.fees.platformFee} / {depositPreview.fees.networkFee} / {depositPreview.fees.fxFee} {depositPreview.assetCode}</b></div><div><span>Confirmations</span><b>{depositPreview.confirmationTarget}</b></div><div><span>Expires</span><b>{new Date(depositPreview.expiresAt).toLocaleString()}</b></div><button type="button" onClick={() => void submitDeposit()} disabled={busy}>Create deposit intent with this preview</button></div>}
       {depositTransfer && <TransferDetail transfer={depositTransfer} onRefresh={() => void refreshDeposit()} busy={busy}/>}
     </div>}
     {tab === 'withdraw' && <div className="phase2-flow">
@@ -249,7 +279,8 @@ export function Phase2WalletPanel({accounts, selectedCardId}: Props) {
       <div className="panel-row"><button type="button" onClick={() => void quoteCard()} disabled={busy || !selectedProduct}>Get opening quote</button>{selectedProduct?.cardType === 'PHYSICAL' && <button type="button" onClick={() => void issuePhysical()} disabled={busy || !openingQuote}><CreditCard/> Issue physical Card</button>}</div>
       {openingQuote && <div className="phase2-preview"><div><span>Product asset</span><b>{openingQuote.assetId}</b></div><div><span>Opening fee</span><b>{openingQuote.openingFee} {openingQuote.currency}</b></div><div><span>Provider called</span><b>{openingQuote.externalProviderCalled ? 'Yes' : 'No'}</b></div></div>}
       <label>Card alias<input value={cardAlias} onChange={(event) => setCardAlias(event.target.value)} maxLength={30}/></label>
-      <form className="transfer-form" onSubmit={topup}><label>Funding wallet<select value={topupAccountId} onChange={(event) => setTopupAccountId(event.target.value)}><option value="">Select owned account</option>{accounts.map((item) => <option value={item.id} key={item.id}>{item.assetCode} · {item.availableBalance} available</option>)}</select></label><label>Top-up amount<input value={topupAmount} onChange={(event) => setTopupAmount(event.target.value)} inputMode="decimal" pattern="^(?:0|[1-9][0-9]*)(?:\.[0-9]{1,2})?$"/></label><button disabled={busy || !selectedCardId || !topupAccountId}>Top up selected Card</button></form>
+      <form className="transfer-form" onSubmit={previewCardTopup}><label>Funding wallet<select value={topupAccountId} onChange={(event) => {setTopupAccountId(event.target.value); setTopupQuote(null)}}><option value="">Select owned account</option>{accounts.map((item) => <option value={item.id} key={item.id}>{item.assetCode} · {item.availableBalance} available</option>)}</select></label><label>Top-up amount<input value={topupAmount} onChange={(event) => {setTopupAmount(event.target.value); setTopupQuote(null)}} inputMode="decimal" pattern="^(?:0|[1-9][0-9]*)(?:\.[0-9]{1,2})?$" required/></label><button disabled={busy || !selectedCardId || !topupAccountId}>Preview Card top-up</button></form>
+      {topupQuote && <div className="phase2-preview"><div><span>Quote</span><b>{topupQuote.quoteId}</b></div><div><span>Amount / debit</span><b>{topupQuote.amount} / {topupQuote.totalDebitAmount} {topupQuote.currency}</b></div><div><span>Fees</span><b>{topupQuote.fees.platformFee} / {topupQuote.fees.networkFee} / {topupQuote.fees.fxFee} {topupQuote.currency}</b></div><div><span>Expires</span><b>{new Date(topupQuote.expiresAt).toLocaleString()}</b></div><button type="button" onClick={() => void topup()} disabled={busy}>Top up selected Card with this quote</button></div>}
       <button type="button" className="danger-button" onClick={() => void reportLost()} disabled={busy || !selectedCardId}>Report selected Card lost</button>
       <p className="card-action-note">Card limits and transaction timeline remain in the P1 Card panel below. All writes use a fresh Idempotency-Key.</p>
       {cardReceipt && <div className="transfer-receipt">{cardReceipt}</div>}

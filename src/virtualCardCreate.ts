@@ -3,7 +3,8 @@ import type { CardRecord } from "./cardList";
 export type VirtualCardCreateEnvironment = "LOCAL" | "SANDBOX" | "TEST" | "UAT" | "PRODUCTION";
 
 export type VirtualCardCreateInput = {
-  currency: string;
+  /** Immutable local asset/currency ID; the browser never submits a free-text ISO code. */
+  currencyId: string;
   alias?: string;
 };
 
@@ -70,6 +71,15 @@ const maxSigned64 = 2n ** 63n - 1n;
 const currency = (value: unknown): string => {
   if (typeof value !== "string" || !/^[A-Z]{3}$/.test(value) || !iso4217Currencies.has(value))
     throw new Error("Invalid virtual card currency");
+  return value;
+};
+
+const currencyId = (value: unknown): string => {
+  if (
+    typeof value !== "string" ||
+    !/^[A-Za-z0-9._:-]{2,128}$/.test(value) ||
+    value !== value.trim()
+  ) throw new Error("Invalid virtual card currencyId");
   return value;
 };
 
@@ -169,12 +179,12 @@ export function virtualCardCreateDecision(
 }
 
 export function parseVirtualCardCreateInput(value: {
-  currency: unknown;
+  currencyId: unknown;
   alias?: unknown;
 }): VirtualCardCreateInput {
   const normalizedAlias = alias(value.alias);
   return {
-    currency: currency(value.currency),
+    currencyId: currencyId(value.currencyId),
     ...(normalizedAlias === undefined ? {} : { alias: normalizedAlias }),
   };
 }
@@ -250,7 +260,7 @@ export function captureVirtualCardGeneration(
 
 function virtualCardInputVersion(input: VirtualCardCreateInput): string {
   const normalized = parseVirtualCardCreateInput(input);
-  return JSON.stringify([normalized.currency, normalized.alias ?? null]);
+  return JSON.stringify([normalized.currencyId, normalized.alias ?? null]);
 }
 
 export function beginVirtualCardCreate(gate: VirtualCardCreateSubmitGate, requestId: number): boolean {
@@ -296,6 +306,7 @@ export function parseVirtualCardCreateResponse(
   const last4 = ownDataProperty(response, "last4", "last4");
   const expiryMonth = ownDataProperty(response, "expiryMonth", "expiryMonth");
   const expiryYear = ownDataProperty(response, "expiryYear", "expiryYear");
+  const responseCurrencyId = ownDataProperty(response, "currencyId", "currencyId");
   const responseCurrency = ownDataProperty(response, "currency", "currency");
   const responseAlias = ownDataProperty(response, "alias", "alias");
   const createdAt = ownDataProperty(response, "createdAt", "createdAt");
@@ -313,8 +324,10 @@ export function parseVirtualCardCreateResponse(
     throw new Error("Invalid virtual card status");
   if (last4 !== null && (typeof last4 !== "string" || !/^\d{4}$/.test(last4)))
     throw new Error("Invalid virtual card last4");
-  if (typeof responseCurrency !== "string" || responseCurrency !== currency(expected.currency))
-    throw new Error("Created card currency does not match the request");
+  if (currencyId(responseCurrencyId) !== currencyId(expected.currencyId))
+    throw new Error("Created card currencyId does not match the request");
+  if (typeof responseCurrency !== "string") throw new Error("Invalid virtual card currency");
+  currency(responseCurrency);
   const expectedAlias = alias(expected.alias) ?? null;
   if (responseAlias !== expectedAlias) throw new Error("Created card alias does not match the request");
 

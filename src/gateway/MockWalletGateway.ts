@@ -3,17 +3,31 @@ import {
   parseCardOpeningQuote,
   parseCardProducts,
   parseCardTopup,
+  parseCardTopupQuote,
   parseDepositAddress,
   parseDepositAddresses,
+  parseDepositPreview,
   parseOnchainFxQuote,
   parseOnchainNetworks,
   parseOnchainTransfer,
+  parseOnchainTransferPage,
   parseTotalAssets,
   parseWithdrawalAddresses,
   parseWithdrawalPreview,
 } from './contracts.ts'
 import type {GatewayRequest} from './httpTransport.ts'
-import type {AddressSelection, DepositIntentInput, FxQuoteInputV2, WalletGateway, WithdrawalInput} from './WalletGateway.ts'
+import type {
+  AddressSelection,
+  CardIssueInput,
+  CardTopupInput,
+  CardTopupQuoteInput,
+  DepositIntentInput,
+  DepositPreviewInput,
+  FxQuoteInputV2,
+  OnchainTransferListInput,
+  WalletGateway,
+  WithdrawalInput,
+} from './WalletGateway.ts'
 
 const now = '2026-08-21T08:00:00.000Z'
 const activeAddress = {
@@ -22,6 +36,11 @@ const activeAddress = {
   rotationIndex: 1, status: 'ACTIVE', allocatedAt: now, retiredAt: null, externalProviderCalled: false,
 }
 const fees = {grossAmount: '101.1', platformFee: '1', networkFee: '0.1', fxFee: '0', netAmount: '100'}
+const mockCurrency = (currencyId: string): string => {
+  if (currencyId === 'flp_asset_usd') return 'USD'
+  if (currencyId === 'flp_asset_usdt') return 'USDT'
+  throw new Error('Mock currencyId is not a supported local asset')
+}
 const transfer = (direction: 'DEPOSIT' | 'WITHDRAWAL', state = direction === 'DEPOSIT' ? 'AWAITING_DETECTION' : 'PENDING_COMPLIANCE') => ({
   transferId: `transfer_mock_${direction.toLowerCase()}`, direction, state, networkId: 'eip155:1', assetId: 'flp_asset_usdt', assetCode: 'USDT',
   fees, confirmations: 0, confirmationTarget: 12, transactionHash: null, approvalRequired: direction === 'WITHDRAWAL',
@@ -32,6 +51,14 @@ const transfer = (direction: 'DEPOSIT' | 'WITHDRAWAL', state = direction === 'DE
 export class MockWalletGateway implements WalletGateway {
   readonly source = 'mock' as const
   private addressHistory: Array<Record<string, unknown>> = [{...activeAddress}]
+  private readonly depositPreviews = new Map<string, DepositPreviewInput>()
+  private readonly usedDepositPreviews = new Set<string>()
+  private readonly depositIntents = new Map<string, {input: DepositIntentInput; transfer: ReturnType<typeof transfer>}>()
+  private readonly topupQuotes = new Map<string, {cardId: string; input: CardTopupQuoteInput}>()
+  private readonly usedTopupQuotes = new Set<string>()
+  private readonly cardTopups = new Map<string, {cardId: string; input: CardTopupInput; receipt: Record<string, unknown>}>()
+  private previewSequence = 0
+  private topupQuoteSequence = 0
 
   async request<T>(input: GatewayRequest): Promise<T> {
     if (input.path === '/v1/auth/logout') return undefined as T
@@ -86,8 +113,43 @@ export class MockWalletGateway implements WalletGateway {
     return parseOnchainFxQuote({quoteId: 'quote_mock_1', ...input, targetAmount: input.sourceAmount, rate: '1', fxFee: '0', expiresAt: '2026-08-21T08:05:00.000Z', externalProviderCalled: false})
   }
 
-  async createDepositIntent(_input: DepositIntentInput, _idempotencyKey: string) { return parseOnchainTransfer(transfer('DEPOSIT')) }
+  async previewDeposit(input: DepositPreviewInput) {
+    const previewId = `deposit_preview_mock_${++this.previewSequence}`
+    const preview = parseDepositPreview({
+      previewId, depositAddressId: input.depositAddressId,
+      networkId: input.networkId, assetId: input.assetId, assetCode: 'USDT',
+      fees: {grossAmount: input.grossAmount, platformFee: '0', networkFee: '0', fxFee: '0', netAmount: input.grossAmount},
+      confirmationTarget: 12, expiresAt: '2026-08-21T08:05:00.000Z', externalProviderCalled: false,
+    })
+    this.depositPreviews.set(previewId, {...input})
+    return preview
+  }
+
+  async createDepositIntent(input: DepositIntentInput, idempotencyKey: string) {
+    const previous = this.depositIntents.get(idempotencyKey)
+    if (previous) {
+      if (JSON.stringify(previous.input) !== JSON.stringify(input)) throw new Error('Mock deposit idempotency conflict')
+      return parseOnchainTransfer(previous.transfer)
+    }
+    const preview = this.depositPreviews.get(input.previewId)
+    if (!preview || this.usedDepositPreviews.has(input.previewId) ||
+      preview.networkId !== input.networkId || preview.assetId !== input.assetId ||
+      preview.depositAddressId !== input.depositAddressId || preview.grossAmount !== input.grossAmount || preview.fxQuoteId !== input.fxQuoteId)
+      throw new Error('Mock deposit preview is unavailable')
+    this.usedDepositPreviews.add(input.previewId)
+    const next = transfer('DEPOSIT')
+    this.depositIntents.set(idempotencyKey, {input: {...input}, transfer: next})
+    return parseOnchainTransfer(next)
+  }
   async depositStatus(_transferId: string) { return parseOnchainTransfer({...transfer('DEPOSIT'), state: 'CONFIRMING', confirmations: 6}) }
+  async onchainTransfers(input: OnchainTransferListInput = {}) {
+    const items = [transfer('DEPOSIT'), transfer('WITHDRAWAL')]
+      .filter((item) => input.direction === undefined || item.direction === input.direction)
+      .filter((item) => input.networkId === undefined || item.networkId === input.networkId)
+      .filter((item) => input.assetId === undefined || item.assetId === input.assetId)
+      .filter((item) => input.state === undefined || item.state === input.state)
+    return parseOnchainTransferPage({items, nextCursor: null})
+  }
 
   async withdrawalAddresses() {
     return parseWithdrawalAddresses({items: [{id: 'book_mock_1', assetId: 'flp_asset_usdt', assetCode: 'USDT', networkId: 'eip155:1', address: '0x3333333333333333333333333333333333333333', label: 'Primary', isDefault: true, createdAt: '2026-08-21T07:40:00.000Z'}]})
@@ -108,15 +170,38 @@ export class MockWalletGateway implements WalletGateway {
     return parseCardOpeningQuote({productTemplateId, assetId: 'flp_asset_usd', cardType: 'PHYSICAL', currency: 'USD', openingFee: '6', effectiveFees: {}, externalProviderCalled: false})
   }
 
-  async createPhysicalCard(input: {currency: string; alias?: string}) {
-    return {id: 'card_mock_physical', type: 'PHYSICAL', status: 'PENDING', currency: input.currency, alias: input.alias ?? null}
+  async createPhysicalCard(input: CardIssueInput) {
+    return {id: 'card_mock_physical', type: 'PHYSICAL', status: 'PENDING', currency: mockCurrency(input.currencyId), alias: input.alias ?? null}
   }
 
   async reportCardLost(cardId: string) {
     return {id: `${cardId}_replacement`, type: 'PHYSICAL', status: 'PENDING'}
   }
 
-  async topupCard(cardId: string, input: {sourceWalletAccountId: string; amount: string}) {
-    return parseCardTopup({operationId: 'operation_mock_topup', cardId, assetId: 'flp_asset_usd', currency: 'USD', amount: input.amount, availableBalanceMinor: '2500', status: 'COMPLETED', externalProviderCalled: false})
+  async previewCardTopup(cardId: string, input: CardTopupQuoteInput) {
+    const quoteId = `topup_quote_mock_${++this.topupQuoteSequence}`
+    const quote = parseCardTopupQuote({
+      quoteId, cardId, sourceWalletAccountId: input.sourceWalletAccountId,
+      assetId: 'flp_asset_usd', currency: 'USD', amount: input.amount,
+      fees: {grossAmount: input.amount, platformFee: '0', networkFee: '0', fxFee: '0', netAmount: input.amount},
+      totalDebitAmount: input.amount, expiresAt: '2026-08-21T08:05:00.000Z', externalProviderCalled: false,
+    })
+    this.topupQuotes.set(quoteId, {cardId, input: {...input}})
+    return quote
+  }
+
+  async topupCard(cardId: string, input: CardTopupInput, idempotencyKey: string) {
+    const previous = this.cardTopups.get(idempotencyKey)
+    if (previous) {
+      if (previous.cardId !== cardId || JSON.stringify(previous.input) !== JSON.stringify(input)) throw new Error('Mock Card top-up idempotency conflict')
+      return parseCardTopup(previous.receipt)
+    }
+    const quote = this.topupQuotes.get(input.quoteId)
+    if (!quote || this.usedTopupQuotes.has(input.quoteId) || quote.cardId !== cardId || quote.input.sourceWalletAccountId !== input.sourceWalletAccountId)
+      throw new Error('Mock card top-up quote is unavailable')
+    this.usedTopupQuotes.add(input.quoteId)
+    const receipt = {operationId: `operation_mock_topup_${input.quoteId}`, cardId, assetId: 'flp_asset_usd', currency: 'USD', amount: quote.input.amount, availableBalanceMinor: '2500', status: 'COMPLETED', externalProviderCalled: false}
+    this.cardTopups.set(idempotencyKey, {cardId, input: {...input}, receipt})
+    return parseCardTopup(receipt)
   }
 }

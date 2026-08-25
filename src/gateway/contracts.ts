@@ -109,6 +109,28 @@ export type OnchainWithdrawalPreview = {
   externalProviderCalled: false
 }
 
+/**
+ * Backend-calculated deposit facts. A preview is never a credit, reservation,
+ * or proof that a chain transaction has been detected.
+ */
+export type OnchainDepositPreview = {
+  previewId: string
+  depositAddressId: string
+  networkId: string
+  assetId: string
+  assetCode: string
+  fees: OnchainFeeBreakdown
+  confirmationTarget: number
+  expiresAt: string
+  externalProviderCalled: false
+}
+
+/** A tenant-scoped, opaque-cursor page of persisted onchain transfers. */
+export type OnchainTransferPage = {
+  items: OnchainTransfer[]
+  nextCursor: string | null
+}
+
 export type OnchainFxQuote = {
   quoteId: string
   sourceAssetId: string
@@ -162,12 +184,35 @@ export type CardTopupReceipt = {
   externalProviderCalled: false
 }
 
+/**
+ * An immutable backend quote for moving funds from one owned wallet account to
+ * one card. The browser must submit the quote ID unchanged; it must not derive
+ * fees, debit totals, or expiry itself.
+ */
+export type CardTopupQuote = {
+  quoteId: string
+  cardId: string
+  sourceWalletAccountId: string
+  assetId: string
+  currency: string
+  amount: DecimalString
+  fees: OnchainFeeBreakdown
+  totalDebitAmount: DecimalString
+  expiresAt: string
+  externalProviderCalled: false
+}
+
 const record = (value: unknown, name: string): Record<string, unknown> => {
   if (!value || typeof value !== 'object' || Array.isArray(value)) throw new Error(`${name} must be an object`)
   return value as Record<string, unknown>
 }
 const string = (value: unknown, name: string): string => {
   if (typeof value !== 'string' || value.length === 0) throw new Error(`${name} must be a non-empty string`)
+  return value
+}
+const decimalString = (value: unknown, name: string): DecimalString => {
+  if (typeof value !== 'string' || !/^(?:0|[1-9]\d{0,35})(?:\.\d{1,18})?$/.test(value))
+    throw new Error(`${name} must be a canonical decimal string`)
   return value
 }
 const nullableString = (value: unknown, name: string): string | null => value === null ? null : string(value, name)
@@ -195,11 +240,11 @@ const falseOnly = (value: unknown, name: string): false => {
 export const parseFeeBreakdown = (value: unknown): OnchainFeeBreakdown => {
   const input = record(value, 'fees')
   return {
-    grossAmount: string(input.grossAmount, 'fees.grossAmount'),
-    platformFee: string(input.platformFee, 'fees.platformFee'),
-    networkFee: string(input.networkFee, 'fees.networkFee'),
-    fxFee: string(input.fxFee, 'fees.fxFee'),
-    netAmount: string(input.netAmount, 'fees.netAmount'),
+    grossAmount: decimalString(input.grossAmount, 'fees.grossAmount'),
+    platformFee: decimalString(input.platformFee, 'fees.platformFee'),
+    networkFee: decimalString(input.networkFee, 'fees.networkFee'),
+    fxFee: decimalString(input.fxFee, 'fees.fxFee'),
+    netAmount: decimalString(input.netAmount, 'fees.netAmount'),
   }
 }
 
@@ -318,6 +363,31 @@ export const parseWithdrawalPreview = (value: unknown): OnchainWithdrawalPreview
   }
 }
 
+export const parseDepositPreview = (value: unknown): OnchainDepositPreview => {
+  const input = record(value, 'deposit preview')
+  return {
+    previewId: string(input.previewId, 'previewId'),
+    depositAddressId: string(input.depositAddressId, 'depositAddressId'),
+    networkId: string(input.networkId, 'networkId'),
+    assetId: string(input.assetId, 'assetId'),
+    assetCode: string(input.assetCode, 'assetCode'),
+    fees: parseFeeBreakdown(input.fees),
+    confirmationTarget: integer(input.confirmationTarget, 'confirmationTarget'),
+    expiresAt: string(input.expiresAt, 'expiresAt'),
+    externalProviderCalled: falseOnly(input.externalProviderCalled, 'externalProviderCalled'),
+  }
+}
+
+export const parseOnchainTransferPage = (value: unknown): OnchainTransferPage => {
+  const input = record(value, 'onchain transfer page')
+  const nextCursor = nullableString(input.nextCursor, 'nextCursor')
+  if (nextCursor !== null && (nextCursor.length > 512 || !/^[A-Za-z0-9_-]+$/.test(nextCursor)))
+    throw new Error('nextCursor is invalid')
+  const items = array(input.items, 'items')
+  if (items.length > 100) throw new Error('onchain transfer page exceeds the consumer limit')
+  return {items: items.map(parseOnchainTransfer), nextCursor}
+}
+
 export const parseOnchainFxQuote = (value: unknown): OnchainFxQuote => {
   const input = record(value, 'onchain FX quote')
   return {
@@ -385,9 +455,25 @@ export const parseCardTopup = (value: unknown): CardTopupReceipt => {
     cardId: string(input.cardId, 'cardId'),
     assetId: string(input.assetId, 'assetId'),
     currency: string(input.currency, 'currency'),
-    amount: string(input.amount, 'amount'),
+    amount: decimalString(input.amount, 'amount'),
     availableBalanceMinor: string(input.availableBalanceMinor, 'availableBalanceMinor'),
     status: oneOf(input.status, ['COMPLETED'] as const, 'status'),
+    externalProviderCalled: falseOnly(input.externalProviderCalled, 'externalProviderCalled'),
+  }
+}
+
+export const parseCardTopupQuote = (value: unknown): CardTopupQuote => {
+  const input = record(value, 'card top-up quote')
+  return {
+    quoteId: string(input.quoteId, 'quoteId'),
+    cardId: string(input.cardId, 'cardId'),
+    sourceWalletAccountId: string(input.sourceWalletAccountId, 'sourceWalletAccountId'),
+    assetId: string(input.assetId, 'assetId'),
+    currency: string(input.currency, 'currency'),
+    amount: decimalString(input.amount, 'amount'),
+    fees: parseFeeBreakdown(input.fees),
+    totalDebitAmount: decimalString(input.totalDebitAmount, 'totalDebitAmount'),
+    expiresAt: string(input.expiresAt, 'expiresAt'),
     externalProviderCalled: falseOnly(input.externalProviderCalled, 'externalProviderCalled'),
   }
 }

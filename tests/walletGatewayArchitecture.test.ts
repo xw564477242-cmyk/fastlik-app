@@ -57,3 +57,18 @@ test('Phase2 client includes address rotation, saved-address withdrawal gates, r
     assert.match(panel, new RegExp(marker.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')))
   }
 })
+
+test('PR #69 local API additions remain typed Gateway calls with no tenant query or browser financial logic', () => {
+  const gateway = sources.get(join(sourceRoot, 'gateway', 'HttpWalletGateway.ts')) ?? ''
+  const contracts = sources.get(join(sourceRoot, 'gateway', 'contracts.ts')) ?? ''
+  const panel = sources.get(join(sourceRoot, 'Phase2WalletPanel.tsx')) ?? ''
+  const virtualCard = sources.get(join(sourceRoot, 'virtualCardCreate.ts')) ?? ''
+  for (const marker of ['/deposits/preview', '/transactions?', '/topup-quotes', 'previewDeposit', 'previewCardTopup'])
+    assert.match(gateway, new RegExp(marker.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')))
+  assert.match(contracts, /parseDepositPreview/)
+  assert.match(contracts, /parseOnchainTransferPage/)
+  assert.match(contracts, /parseCardTopupQuote/)
+  assert.match(virtualCard, /currencyId/)
+  assert.doesNotMatch(gateway, /tenantId/)
+  assert.doesNotMatch(panel, /parseFloat|parseInt|Number\s*\(|Math\./)
+})
