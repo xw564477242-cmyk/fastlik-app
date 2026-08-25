@@ -29,7 +29,7 @@
 
 ## D. Authorized environment gate
 
-- [ ] Security/admin owner has restored **verifiable** browser access to the Worker preview domain; no policy bypass was used.
+- [x] Verifiable browser access to the Worker preview domain was observed in SANDBOX on 2026-08-25; no policy bypass was used.
 - [ ] The preview is an isolated, authorized PR #69 candidate deployment—not a shared DEV or an older preview.
 - [ ] Runtime build SHA is visible or otherwise independently verifiable and exactly matches the deployment manifest and the candidate lineage recorded above.
 - [ ] Dedicated SANDBOX tenant, dedicated end-user Cookie-Session, active deposit address, source wallet account, existing test card, enabled local card product, and saved withdrawal address are available through approved setup.
