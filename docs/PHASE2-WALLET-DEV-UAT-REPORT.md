@@ -96,3 +96,29 @@ No new preview URL or runtime SHA was produced. This is an **environment
 authorization blocker**, not a code, Cregis, migration, or financial-operation
 failure. Do not bypass the rule or retry until the environment owner explicitly
 authorizes this branch for the isolated PR #69 preview environment.
+
+## 2026-08-25 authorized candidate read-only UAT
+
+**Candidate:** [workflow run 32853726327](https://github.com/xw564477242-cmyk/fastlik-app/actions/runs/32853726327)
+passed the isolated SANDBOX variables, immutable UAT package, build, Worker
+deployment, runtime SHA verification, and fail-closed Origin check. Browser
+evidence confirmed the same isolated preview URL, authenticated Cookie-Session,
+`SANDBOX`, and runtime SHA
+`822ee2223738a7be0cd84724c63cdb3216cdb392`.
+
+**Decision:** **not accepted**. No financial, address-allocation, card quote,
+card issue, transfer, withdrawal, or FX quote/conversion control was clicked.
+All recorded controls stayed in their safe disabled state when required data
+was absent.
+
+| Ordered module | Observed candidate behavior | Result |
+| --- | --- | --- |
+| Assets | Authenticated asset snapshot rendered EUR, MYR, SGD, USD and USDT balance data. | **PASS** for page rendering. |
+| Deposit | New local-preview UI rendered, but no tenant-scoped SANDBOX deposit address was returned. Preview remained disabled; allocation was not clicked. | **FAIL / safe block** — UAT-02. |
+| Withdrawal | No eligible tenant-scoped SANDBOX saved address was returned. Direct entry and backend-fee preview remained disabled. | **FAIL / safe block** — UAT-03. |
+| Onchain history | The new `Onchain transactions` panel rendered, but returned a safe unavailable state with reference `7194b040-d706-4544-abf8-a4eccc2c83a0`. The old session-unavailable copy was not shown. | **FAIL** — UAT-04 remains a local-backend API/contract issue. |
+| Cards | The card-products read timed out safely: HTTP 408, reference `9f3828b7-4488-4c49-af34-1b1536c27e9c`; quote/top-up controls stayed disabled. The virtual-card form now says `Local currency asset ID, e.g. flp_asset_usd`, and no ISO-currency field was rendered. | **UAT-01 FAIL; UAT-05 PASS (UI contract)**. |
+| FX | FX controls rendered but quote remained disabled without a verified executable input; no quote or conversion was requested. | **Partial pass** — fail-closed behavior is correct; UAT-06 error-response copy was not re-exercised under the read-only restriction. |
+
+Cregis was not invoked and did not supply any fallback data or substitute for
+the four FastLink-owned local APIs.
