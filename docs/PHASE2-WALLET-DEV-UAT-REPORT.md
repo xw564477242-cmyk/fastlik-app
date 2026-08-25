@@ -51,3 +51,27 @@ The preview reports the locked baseline SHA, but it does not expose the newer lo
 3. Complete the remaining positive and negative cases in [PR69-AUTHORIZED-SANDBOX-UAT-RUNBOOK.md](PR69-AUTHORIZED-SANDBOX-UAT-RUNBOOK.md) and record the final decision in [PR69-FINAL-MERGE-VALIDATION.md](PR69-FINAL-MERGE-VALIDATION.md).
 
 PR #69 cannot merge until the four FastLink-owned local APIs are accepted in the authorized runtime **and** the complete SANDBOX UAT passes.
+
+## 2026-08-25 read-only retest evidence
+
+**Result:** **not accepted**. The preview was reachable, the authenticated
+SANDBOX session loaded, and the runtime banner still identified
+`b1b3e93506e9175159eea16805e43fe3bda831d2`. This is the locked baseline,
+not an authorized candidate containing the subsequent local remediation
+commits. No address allocation, deposit intent, withdrawal preview/submit,
+Card quote/top-up/issue, transfer, FX quote, or conversion was clicked.
+
+| Ordered module | Observed result | Retest decision |
+| --- | --- | --- |
+| Assets | After the initial load, EUR, MYR, SGD, USD and USDT backend balances rendered. | **PASS** for read-only rendering. |
+| Deposit | Module navigation worked. There was no active address; network/allocation/intent controls were disabled. | **FAIL, safely blocked** — UAT-02 remains. |
+| Withdrawal | Module navigation worked. No saved address was eligible and the fee-preview control remained disabled; direct destination entry was absent. | **FAIL, safely blocked** — UAT-03 remains. |
+| Transactions | Activity navigation worked, but the scoped Wallet-history panel ended at `Wallet transaction history unavailable for this session`. | **FAIL** — UAT-04 remains. |
+| Cards | Card module rendered a product display with `flp_asset_usd`, but the legacy virtual-card form still rendered `ISO currency, e.g. USD`. The opening-quote action was deliberately not invoked. | **FAIL** — UAT-05 remains; runtime/build mismatch is directly reproduced. |
+| FX | FX rendered but the quote button remained disabled; no quote or conversion was requested. | **FAIL, safely blocked** — UAT-06 remains. |
+
+During the settled read, the wallet panel also showed `API timeout · HTTP 408`
+with trace `5123fb44-3e0c-47fa-b85f-357fd641c126`. The affected route is not
+identified by the UI, so this is additional evidence for UAT-01 rather than a
+claim that any specific API was repaired. The UI showed no cross-account or
+unvalidated response alongside the timeout.
