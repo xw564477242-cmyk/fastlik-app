@@ -35,6 +35,7 @@ import {KycStatusPanel} from './KycStatusPanel'
 import {ConsumerTransferFlow} from './ConsumerTransferFlow'
 import {consumerTransferUiRequestIsCurrent,createConsumerTransferUiRequest} from './consumerTransferState'
 import {ConsumerOverview} from './ConsumerOverview'
+import {Phase2WalletPanel} from './Phase2WalletPanel'
 
 const sessionScope=(session:WalletSession)=>walletTransferSessionScope(session,walletRuntime.environment)??JSON.stringify([session.actorId,session.tenantId,session.customerId,session.environment,session.expiresAt??null])
 
@@ -113,7 +114,7 @@ export default function App(){
  const[cardTimelineRefreshing,setCardTimelineRefreshing]=useState(false)
  const[cardTimelineRefreshAttempt,setCardTimelineRefreshAttempt]=useState(0)
  const[cardTimelineError,setCardTimelineError]=useState('')
- const[virtualCardCurrency,setVirtualCardCurrency]=useState('USD')
+ const[virtualCardCurrencyId,setVirtualCardCurrencyId]=useState('flp_asset_usd')
  const[virtualCardAlias,setVirtualCardAlias]=useState('')
  const[virtualCardCreating,setVirtualCardCreating]=useState(false)
  const[virtualCardCreateError,setVirtualCardCreateError]=useState('')
@@ -175,7 +176,7 @@ export default function App(){
  const virtualCardCreateAbortController=useRef<AbortController|null>(null)
  const virtualCardCreateInFlight=useRef(false)
  const virtualCardCreateBlockedRef=useRef(false)
- const virtualCardCurrencyRef=useRef('USD')
+ const virtualCardCurrencyIdRef=useRef('flp_asset_usd')
  const virtualCardAliasRef=useRef('')
  const cardReplacementRequestSequence=useRef(0)
  const cardReplacementTarget=useRef<string|null>(null)
@@ -285,7 +286,7 @@ export default function App(){
  const resetCardTimelineRefresh=()=>{cardTimelineRefreshAttemptRef.current=0;setCardTimelineRefreshAttempt(0);setCardTimelineRefreshing(false)}
  const clearCardTimeline=()=>{abortCardTimelineRequest();cardTimelineRequestSequence.current+=1;cardTimelineTarget.current=null;cardTimelineCursorTarget.current=null;replaceCardTimelineHistory(null);setCardTimelineLoadingMore(false);resetCardTimelineRefresh();setCardTimelineError('')}
  const resetCardTransactionFilter=()=>{cardTransactionFilterRef.current='ALL';setCardTransactionFilterState('ALL')}
- const clearVirtualCardCreate=()=>{virtualCardCreateAbortController.current?.abort();virtualCardCreateAbortController.current=null;virtualCardCreateRequestSequence.current+=1;virtualCardCreateSubmitGate.current.activeRequestId=null;virtualCardCreateInFlight.current=false;virtualCardCreateBlockedRef.current=false;virtualCardCurrencyRef.current='USD';virtualCardAliasRef.current='';setVirtualCardCreating(false);setVirtualCardCreateBlocked(false);setVirtualCardCreateError('');setVirtualCardCurrency('USD');setVirtualCardAlias('')}
+ const clearVirtualCardCreate=()=>{virtualCardCreateAbortController.current?.abort();virtualCardCreateAbortController.current=null;virtualCardCreateRequestSequence.current+=1;virtualCardCreateSubmitGate.current.activeRequestId=null;virtualCardCreateInFlight.current=false;virtualCardCreateBlockedRef.current=false;virtualCardCurrencyIdRef.current='flp_asset_usd';virtualCardAliasRef.current='';setVirtualCardCreating(false);setVirtualCardCreateBlocked(false);setVirtualCardCreateError('');setVirtualCardCurrencyId('flp_asset_usd');setVirtualCardAlias('')}
  const clearCardReplacement=()=>{cardReplacementAbortController.current?.abort();cardReplacementAbortController.current=null;cardReplacementRequestSequence.current+=1;cardReplacementTarget.current=null;cardReplacementSubmitGate.current.activeRequestId=null;cardReplacementInFlight.current=false;cardReplacementReasonRef.current='LOST';setCardReplacing(false);setCardReplacementError('');setCardReplacementReasonState('LOST')}
  const clearCardRenewal=()=>{cardRenewalAbortController.current?.abort();cardRenewalAbortController.current=null;cardRenewalRequestSequence.current+=1;cardRenewalTarget.current=null;cardRenewalSubmitGate.current.activeRequestId=null;cardRenewalInFlight.current=false;setCardRenewing(false);setCardRenewalError('')}
  const replaceAccounts=(rows:WalletAccountRecord[])=>{accountsRef.current=rows;setAccounts(rows)}
@@ -301,7 +302,7 @@ export default function App(){
  const updateTransferAmount=(value:string)=>{if(walletTransferRetryRequest.current||value===transferAmountRef.current)return;walletTransferInputGeneration.current+=1;transferAmountRef.current=value;invalidateTransferForInputChange();setTransferAmount(value)}
  const clearAcceptedTransferAmount=()=>{walletTransferRetryRequest.current=null;transferAmountRef.current='';walletTransferInputGeneration.current+=1;setTransferAmount('')}
  const updateCardReplacementReason=(reason:CardReplacementReason)=>{if(cardReplacementInFlight.current&&cardReplacementReasonRef.current!==reason)clearCardReplacement();cardReplacementReasonRef.current=reason;setCardReplacementReasonState(reason)}
- const updateVirtualCardCurrency=(value:string)=>{const next=value.toUpperCase();if(virtualCardCreateInFlight.current&&virtualCardCurrencyRef.current!==next)clearVirtualCardCreate();virtualCardCurrencyRef.current=next;setVirtualCardCurrency(next)}
+ const updateVirtualCardCurrencyId=(value:string)=>{const next=value.trim();if(virtualCardCreateInFlight.current&&virtualCardCurrencyIdRef.current!==next)clearVirtualCardCreate();virtualCardCurrencyIdRef.current=next;setVirtualCardCurrencyId(next)}
  const updateVirtualCardAlias=(value:string)=>{if(virtualCardCreateInFlight.current&&virtualCardAliasRef.current!==value)clearVirtualCardCreate();virtualCardAliasRef.current=value;setVirtualCardAlias(value)}
  const setSelectedCard=(card:CardRecord|null)=>{const previous=selectedCardRef.current;const versionChanged=Boolean(previous&&!cardReplacementVersionMatches(captureCardReplacementVersion(previous),card));if(cardReplacementInFlight.current&&versionChanged)clearCardReplacement();if(cardRenewalInFlight.current&&previous&&!cardRenewalVersionMatches(captureCardRenewalVersion(previous),card))clearCardRenewal();if(cardLimitsUpdateInFlight.current&&versionChanged)clearCardLimitsUpdate();if((cardStatusInFlight.current||cardStatusRetryRequest.current||cardStatusConflictRequest.current)&&previous!==card)clearCardStatusAction();selectedCardRef.current=card;setSelectedCardState(card)}
  const invalidateWalletDetail=()=>{abortWalletHistoryRequest();abortWalletTransactionDetailRequest();abortWalletAccountBalanceRequest();abortWalletBalanceSummaryRequest();abortWalletAssetCatalogRequest();abortWalletTransferRequest();walletAccountRequestSequence.current+=1;walletAccountTarget.current=null;walletHistoryRequestSequence.current+=1;walletHistoryAssetTarget.current=null;walletHistoryFilterTarget.current=null;walletHistoryCursorTarget.current=null;walletHistoryInFlight.current=false;walletTransactionDetailRequestSequence.current+=1;walletTransactionDetailAssetTarget.current=null;walletTransactionDetailTarget.current=null;walletTransferRequestSequence.current+=1;walletTransferTarget.current=null;walletTransferSubmitGate.current.activeRequestId=null;walletTransferStatusRequestSequence.current+=1;walletTransferStatusTarget.current=null;walletTransferStatusInFlight.current=false;walletBalanceSummaryRequestSequence.current+=1;walletAssetCatalogRequestSequence.current+=1}
@@ -714,8 +715,8 @@ export default function App(){
   const decision=virtualCardCreateDecision(activeSession.environment,walletRuntime.environment)
   if(!decision.allowed||!scope||scope!==cardScope.current){setVirtualCardCreateError('Virtual card creation unavailable for this session');return}
   let input:VirtualCardCreateInput
-  try{input=parseVirtualCardCreateInput({currency:virtualCardCurrencyRef.current,alias:virtualCardAliasRef.current})}
-  catch{setVirtualCardCreateError('Use a valid ISO currency and an optional alias of 30 characters or fewer.');return}
+  try{input=parseVirtualCardCreateInput({currencyId:virtualCardCurrencyIdRef.current,alias:virtualCardAliasRef.current})}
+  catch{setVirtualCardCreateError('Use a valid local currency asset ID and an optional alias of 30 characters or fewer.');return}
   const existingCards=[...cardsRef.current]
   const existingNextCursor=cardNextCursorRef.current
   const existingSelectedCard=selectedCardRef.current
@@ -733,7 +734,7 @@ export default function App(){
   virtualCardCreateAbortController.current=controller
   const isCurrent=()=>{
    let currentInput:VirtualCardCreateInput
-   try{currentInput=parseVirtualCardCreateInput({currency:virtualCardCurrencyRef.current,alias:virtualCardAliasRef.current})}
+   try{currentInput=parseVirtualCardCreateInput({currencyId:virtualCardCurrencyIdRef.current,alias:virtualCardAliasRef.current})}
    catch{return false}
    return Boolean(
     walletRequestMounted.current&&
@@ -1653,6 +1654,7 @@ export default function App(){
   {error&&<section className="panel"><h3>API unavailable</h3><p>{error}</p><p>Unavailable · no stale data displayed.</p></section>}
   {session&&<div className="wallet-grid">
    <ConsumerOverview session={session} summary={walletBalanceSummary} summaryLoading={walletBalanceSummaryLoading} summaryUnavailable={Boolean(walletBalanceSummaryError)} assetCatalog={walletAssets} accounts={accounts} selectedAccount={selectedAccount} cards={cards} selectedCard={selectedCard} operations={walletOperations} operationsLoading={walletOperationsLoading} operationsUnavailable={Boolean(walletOperationsError)}/>
+   <Phase2WalletPanel accounts={accounts} selectedCardId={selectedCard?.id??null}/>
    <div id="wallet-kyc"><KycStatusPanel session={session} runtimeEnvironment={walletRuntime.environment}/></div>
    <section id="wallet-assets" className="panel wallet-balance-summary"><h2><Landmark/> All Wallet balances · read only</h2><p className="card-action-note">Backend aggregate for this authenticated customer and environment. FIAT or DIGITAL labels come only from the exact authenticated asset catalog and never create holdings.</p>{walletAssetsLoading&&<p>Loading verified asset classifications…</p>}{walletAssetsError&&<div className="inline-error">{walletAssetsError} · Balances remain unclassified; no fallback asset assumption is used.</div>}{walletBalanceSummaryError&&<div className="inline-error">{walletBalanceSummaryError} · No unvalidated, stale or cross-session summary displayed.</div>}{walletBalanceSummaryLoading&&<p>Loading Wallet balance summary…</p>}<div className="record-list">{!walletBalanceSummaryLoading&&walletBalanceSummary?.items.length?walletBalanceSummary.items.map(item=><div className="balance-record" key={item.assetCode}><b>{item.assetCode} {item.availableBalance} available</b><small>{classifiedWalletBalancesByCode.get(item.assetCode)??'Classification unavailable'} · Ledger {item.ledgerBalance} · Pending {item.pendingBalance}</small><small>Updated {new Date(item.updatedAt).toLocaleString()}</small></div>):!walletBalanceSummaryLoading&&!walletBalanceSummaryError&&<p>No persisted Wallet balances returned.</p>}</div></section>
    <FxQuotePreview session={session} accounts={accounts}/>
@@ -1681,7 +1683,7 @@ export default function App(){
    </section>
    <section id="wallet-cards" className="panel">
     <div className="panel-row"><h2><WalletCards/> Real cards</h2><button onClick={reloadCard} disabled={busy||!selectedCard||virtualCardCreating||cardReplacing||cardRenewing}><RefreshCw/> Refresh</button></div>
-    {virtualCardDecision.allowed&&<form className="transfer-form" onSubmit={createVirtualCard}><h3><CreditCard/> Create virtual card · {session?.environment}</h3><input value={virtualCardCurrency} onChange={event=>updateVirtualCardCurrency(event.target.value)} placeholder="ISO currency, e.g. USD" pattern="^[A-Z]{3}$" minLength={3} maxLength={3} disabled={virtualCardCreating||virtualCardCreateBlocked||cardReplacing||cardRenewing} required/><input value={virtualCardAlias} onChange={event=>updateVirtualCardAlias(event.target.value)} placeholder="Alias (optional, max 30 characters)" maxLength={30} disabled={virtualCardCreating||virtualCardCreateBlocked||cardReplacing||cardRenewing}/><button disabled={busy||virtualCardCreating||virtualCardCreateBlocked||cardReplacing||cardRenewing}>{virtualCardCreating?'Creating once…':virtualCardCreateBlocked?'Refresh before creating':'Create virtual card'}</button>{virtualCardCreateError&&<div className="inline-error">{virtualCardCreateError} · No Provider or internal error details displayed.</div>}<p className="card-action-note">Manual SANDBOX/TEST only · one canonical UUIDv4 Idempotency-Key · exactly one POST · no retries. Selection and all Card resources change only after exact persisted created Card and bounded list reads agree.</p></form>}
+    {virtualCardDecision.allowed&&<form className="transfer-form" onSubmit={createVirtualCard}><h3><CreditCard/> Create virtual card · {session?.environment}</h3><input value={virtualCardCurrencyId} onChange={event=>updateVirtualCardCurrencyId(event.target.value)} placeholder="Local currency asset ID, e.g. flp_asset_usd" pattern="^[A-Za-z0-9._:-]{2,128}$" minLength={2} maxLength={128} disabled={virtualCardCreating||virtualCardCreateBlocked||cardReplacing||cardRenewing} required/><input value={virtualCardAlias} onChange={event=>updateVirtualCardAlias(event.target.value)} placeholder="Alias (optional, max 30 characters)" maxLength={30} disabled={virtualCardCreating||virtualCardCreateBlocked||cardReplacing||cardRenewing}/><button disabled={busy||virtualCardCreating||virtualCardCreateBlocked||cardReplacing||cardRenewing}>{virtualCardCreating?'Creating once…':virtualCardCreateBlocked?'Refresh before creating':'Create virtual card'}</button>{virtualCardCreateError&&<div className="inline-error">{virtualCardCreateError} · No Provider or internal error details displayed.</div>}<p className="card-action-note">The local currency asset ID is resolved by Backend; the browser never chooses a free-text ISO currency. Manual SANDBOX/TEST only · one canonical UUIDv4 Idempotency-Key · exactly one POST · no retries. Selection and all Card resources change only after exact persisted created Card and bounded list reads agree.</p></form>}
     {cards.length===0?<p>Unavailable · no cards returned by Backend.</p>:<select value={selectedCard?.id||''} disabled={virtualCardCreating||cardReplacing||cardRenewing} onChange={event=>{const card=cards.find(row=>row.id===event.target.value);if(card)void selectCard(card)}}>{cards.map(card=><option key={card.id} value={card.id}>{card.last4?`•••• ${card.last4}`:card.id} · {card.status}</option>)}</select>}
     {cardListError&&<p className="inline-error">{cardListError} · Current cards remain scoped to this session.</p>}
     {cardRefreshError&&<p className="inline-error">{cardRefreshError} · No partial Card data was applied.</p>}

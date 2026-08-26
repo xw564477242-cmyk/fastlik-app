@@ -36,10 +36,11 @@ import {FX_QUOTE_RESPONSE_MAX_JSON_BYTES,readFxQuote} from './fxQuote'
 import type {FxQuoteInput,FxQuoteTransportRequest} from './fxQuote'
 import {WALLET_TRANSACTION_MAX_JSON_BYTES,readWalletAccountTransactionHistory,readWalletTransactionDetail,readWalletTransactionHistory} from './walletTransactions'
 import type {WalletAccountTransactionHistoryState,WalletTransactionFilters,WalletTransactionHistoryState,WalletTransactionRecord,WalletTransactionTransportRequest} from './walletTransactions'
-import {API_REQUEST_DEADLINE_MS} from './requestPolicy'
-import {sessionFailureRequiresClear} from './sessionLifecycle'
 import {readCardTimelinePage} from './cardTimeline'
 import type {CardTimelineTransportRequest} from './cardTimeline'
+import {createTraceId,readCsrfToken,walletGateway,walletRuntime,WalletGatewayError as WalletApiError} from './gateway/index'
+
+export {walletRuntime,WalletApiError}
 
 export type {WalletAccountRecord,WalletBalanceRecord,WalletTransferReceipt} from './walletData'
 export type {WalletAccountTransactionHistoryState as WalletAccountTransactionPage,WalletTransactionHistoryState as WalletTransactionPage,WalletTransactionRecord} from './walletTransactions'
@@ -59,60 +60,8 @@ export type WalletSession={actorId:string;tenantId:string;customerId:string;envi
 export type WalletCredentials={tenantId:string;email:string;password:string}
 export type InternalTransferInput=WalletTransferInput
 
-const buildApiUrl=(import.meta.env.VITE_FASTLINK_API_URL as string|undefined)?.trim()
-const buildEnvironment=(import.meta.env.VITE_FASTLINK_ENVIRONMENT as FastLinkEnvironment|undefined)
-const apiUrl=(window.__FASTLINK_RUNTIME__?.apiUrl?.trim()||buildApiUrl||'').replace(/\/$/,'')
-const environment=(window.__FASTLINK_RUNTIME__?.environment?.trim()||buildEnvironment) as FastLinkEnvironment|undefined
-if(!apiUrl)throw new Error('Missing VITE_FASTLINK_API_URL')
-if(!environment||!['LOCAL','SANDBOX','TEST','UAT','PRODUCTION'].includes(environment))throw new Error('Invalid VITE_FASTLINK_ENVIRONMENT')
-if(['SANDBOX','TEST','PRODUCTION'].includes(environment)&&apiUrl!=='/api')throw new Error(`${environment} Cloudflare Wallet must use same-origin /api`)
-
-const runtimeBuildSha=window.__FASTLINK_RUNTIME__?.buildSha?.trim()
-const verifiedRuntimeBuildSha=runtimeBuildSha&&/^[0-9a-f]{40}$/i.test(runtimeBuildSha)?runtimeBuildSha:undefined
-export const walletRuntime=Object.freeze({apiUrl,environment,buildSha:verifiedRuntimeBuildSha||(import.meta.env.VITE_FASTLINK_BUILD_SHA as string|undefined)?.trim()||'unknown'})
-export class WalletApiError extends Error{constructor(public status:number,public traceId:string,message:string){super(message)}}
-const trace=()=>crypto.randomUUID()
-const csrfToken=()=>document.cookie.split(';').map(value=>value.trim()).find(value=>value.startsWith('fastlink_csrf='))?.slice('fastlink_csrf='.length)
-
-async function boundedResponseText(response:Response,maximumBytes:number):Promise<string>{
- const declared=response.headers.get('content-length')
- if(declared!==null){const length=Number(declared);if(Number.isFinite(length)&&length>maximumBytes){await response.body?.cancel();throw new Error('API response exceeds the consumer limit')}}
- if(!response.body){const value=await response.text();if(new TextEncoder().encode(value).byteLength>maximumBytes)throw new Error('API response exceeds the consumer limit');return value}
- const reader=response.body.getReader();const decoder=new TextDecoder();let received=0;let value=''
- try{for(;;){const chunk=await reader.read();if(chunk.done)break;received+=chunk.value.byteLength;if(received>maximumBytes){await reader.cancel();throw new Error('API response exceeds the consumer limit')}value+=decoder.decode(chunk.value,{stream:true})}return value+decoder.decode()}finally{reader.releaseLock()}
-}
-
 async function request<T>(path:string,method='GET',body?:unknown,idempotencyKey?:string,responseMode:'json'|'text'='json',externalSignal?:AbortSignal,maximumResponseBytes?:number,sessionInvalidation:'broadcast'|'caller'='broadcast'):Promise<T>{
- const id=trace();const controller=new AbortController();let timedOut=false;const cancel=()=>controller.abort();if(externalSignal?.aborted)cancel();else externalSignal?.addEventListener('abort',cancel,{once:true});const timeout=window.setTimeout(()=>{timedOut=true;controller.abort()},API_REQUEST_DEADLINE_MS)
- try{
-  const csrf=csrfToken()
-  const mutating=!['GET','HEAD','OPTIONS'].includes(method)
-  const response=await fetch(`${apiUrl}${path}`,{
-   method,cache:'no-store',credentials:'include',signal:controller.signal,
-   headers:{
-    Accept:'application/json',
-    'X-Trace-Id':id,
-    ...(body?{'Content-Type':'application/json'}:{}),
-    ...(idempotencyKey?{'Idempotency-Key':idempotencyKey}:{}),
-    ...(mutating&&csrf?{'X-CSRF-Token':decodeURIComponent(csrf)}:{}),
-   },
-   ...(body?{body:JSON.stringify(body)}:{})
-  })
-  const returned=response.headers.get('x-trace-id')||id
-  if(!response.ok){
-   let message=`HTTP ${response.status}`
-   try{const payload=maximumResponseBytes===undefined?await response.json():JSON.parse(await boundedResponseText(response,Math.min(maximumResponseBytes,16_384)));message=Array.isArray(payload.message)?payload.message.join(', '):(payload.message||message)}catch{}
-   throw new WalletApiError(response.status,returned,`${message} · HTTP ${response.status} · Trace ${returned}`)
-  }
-  if(response.status===204)return undefined as T
-  return (responseMode==='text'?(maximumResponseBytes===undefined?response.text():boundedResponseText(response,maximumResponseBytes)):response.json()) as Promise<T>
- }catch(error){
-  if(error instanceof WalletApiError){if(externalSignal?.aborted)throw new DOMException('Wallet request cancelled','AbortError');if(sessionInvalidation==='broadcast'&&sessionFailureRequiresClear(error))window.dispatchEvent(new CustomEvent('fastlink:session-invalid',{detail:error}));throw error}
-  if(error instanceof DOMException&&error.name==='AbortError'&&timedOut)throw new WalletApiError(408,id,`API timeout · HTTP 408 · Trace ${id}`)
-  if(error instanceof DOMException&&error.name==='AbortError'&&externalSignal?.aborted)throw new DOMException('Wallet transaction request cancelled','AbortError')
-  const message=error instanceof Error?error.message:'Network failure'
-  throw new WalletApiError(0,id,`${message} · HTTP 0 · Trace ${id}`)
- }finally{window.clearTimeout(timeout);externalSignal?.removeEventListener('abort',cancel)}
+ return walletGateway.request<T>({path,method,body,idempotencyKey,responseMode,signal:externalSignal,maximumResponseBytes,sessionInvalidation})
 }
 
 const walletTransferTransport=({path,method,body,idempotencyKey,signal}:WalletTransferTransportRequest)=>request<string>(path,method,body,idempotencyKey,'text',signal,path===WALLET_TRANSFER_ACCOUNTS_PATH?WALLET_TRANSFER_ACCOUNT_MAX_JSON_BYTES:WALLET_TRANSFER_RESPONSE_MAX_JSON_BYTES,'caller')
@@ -127,7 +76,7 @@ const walletOperationTransport=({path,method,signal}:WalletOperationTransportReq
 const cardTransactionDetailTransport=({path,method,signal}:CardTransactionDetailTransportRequest)=>request<unknown>(path,method,undefined,undefined,'json',signal)
 const cardLimitsUpdateTransport=({path,method,body,idempotencyKey}:CardLimitsUpdateTransportRequest)=>request<unknown>(path,method,body,idempotencyKey)
 const cardStatusTransport=({path,method,idempotencyKey,signal}:CardStatusTransportRequest)=>{
- if(!csrfToken())return Promise.reject(new WalletApiError(400,trace(),'Card status security context unavailable'))
+ if(!readCsrfToken())return Promise.reject(new WalletApiError(400,createTraceId(),'Card status security context unavailable'))
  return request<unknown>(path,method,undefined,idempotencyKey,'json',signal,undefined,'caller')
 }
 const cardActivationListTransport=({path,method,signal}:CardListTransportRequest)=>request<string>(path,method,undefined,undefined,'text',signal,CARD_LIST_MAX_JSON_BYTES,'caller')

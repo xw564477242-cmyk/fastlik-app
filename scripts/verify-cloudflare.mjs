@@ -10,7 +10,9 @@ const assert = (condition, message) => {
 const worker = read("worker.js");
 const testConfig = read("wrangler.test.jsonc");
 const devConfig = read("wrangler.dev.jsonc");
+const previewConfig = read("wrangler.pr69.jsonc");
 const apiClient = read("src/apiClient.ts");
+const httpTransport = read("src/gateway/httpTransport.ts");
 const app = read("src/App.tsx");
 const cardBalance = read("src/cardBalance.ts");
 const cardLimits = read("src/cardLimits.ts");
@@ -47,9 +49,9 @@ const virtualCardCreatePostChainIntegrationTests = read("tests/virtualCardCreate
 const index = read("index.html");
 
 assert(index.includes('src="./runtime-config.js"'), "runtime config must load before the Wallet app");
-assert(apiClient.includes("Cloudflare Wallet must use same-origin /api"), "Wallet must require same-origin Cloudflare /api");
-assert(apiClient.includes("credentials:'include'"), "Wallet must retain HttpOnly Cookie sessions");
-assert(apiClient.includes("fastlink_csrf"), "Wallet must retain the CSRF cookie/header contract");
+assert(httpTransport.includes("Cloudflare Wallet must use same-origin /api"), "Wallet must require same-origin Cloudflare /api");
+assert(httpTransport.includes("credentials: 'include'"), "Wallet must retain HttpOnly Cookie sessions");
+assert(httpTransport.includes("fastlink_csrf"), "Wallet must retain the CSRF cookie/header contract");
 assert(walletTransfer.includes('WALLET_TRANSFER_ACCOUNTS_PATH = "/v1/wallet/accounts"'), "Wallet must read persisted wallet accounts");
 assert(walletTransfer.includes('WALLET_TRANSFER_PATH = "/v1/wallet/transfers"'), "Wallet must use the authenticated internal-transfer contract");
 assert(apiClient.includes("readWalletTransferAccounts(walletTransferTransport,session,walletRuntime.environment,signal)"), "Wallet account reads must use the bounded caller-cancelled transfer contract");
@@ -97,7 +99,7 @@ assert(cardStatusAction.includes("request.session !== currentSession") && cardSt
 assert(cardStatusAction.includes("cardStatusFailureIsAmbiguous") && cardStatusAction.includes("cardStatusRetryKey") && cardStatusAction.includes("cardStatusConflictIsCurrent"), "Card status writes must allow one exact same-key ambiguous retry then require refresh");
 assert(cardStatusAction.includes("Object.getOwnPropertyDescriptor") && cardStatusAction.includes("parseCardStatusResponse"), "Card status responses must reconstruct only safe public fields");
 assert(apiClient.includes("submitCardStatusAction(cardStatusTransport") && apiClient.includes("cardStatusTransport=({path,method,idempotencyKey,signal}"), "Card status writes must use the typed cancellable bodyless POST contract");
-assert(apiClient.includes("if(!csrfToken())return Promise.reject") && apiClient.includes("'caller')"), "Card status writes must require CSRF and leave exact 401 invalidation to the caller");
+assert(apiClient.includes("if(!readCsrfToken())return Promise.reject") && apiClient.includes("'caller')"), "Card status writes must require CSRF and leave exact 401 invalidation to the caller");
 assert(app.includes("retryKey??createCardStatusIdempotencyKey(decision.operation,crypto.randomUUID())") && app.includes("Boolean(retryKey)"), "Card status writes must use one operation-bound fresh key or the one exact retained retry key");
 assert(app.includes("cardStatusFailureIsExplicit401(value)") && app.includes("sessionRef.current===activeSession"), "Only an exact current Card Session 401 may invalidate authentication");
 assert(cardStatusAction.includes('return operation === "activate" ? `activate:${randomUuid}` : randomUuid') && cardStatusAction.includes('status !== (operation === "freeze" ? "FROZEN" : "ACTIVE")'), "Card activation must use an operation-bound UUID and only accept an ACTIVE POST response");
@@ -170,7 +172,7 @@ assert(cardTimeline.includes("walletTransferSessionScope(session, runtimeEnviron
 assert(cardTimeline.includes("status === 401 || status === 403 || status === 404") && cardTimeline.includes("cardTimelineFailureCanInvalidateSession"), "Card timeline must clear only its snapshot on current 403/404 and invalidate only on current 401");
 assert(cardTimelineRefresh.includes("CARD_TIMELINE_REFRESH_MAX_ATTEMPTS = 3"), "Card timeline manual refresh must remain bounded without automatic retries");
 assert(app.includes("Card lifecycle timeline · read only") && app.includes("signed opaque cursor"), "Wallet UI must expose only the read-only public Card timeline");
-assert(kycStatus.includes('KYC_STATUS_PATH = "/api/v1/kyc/status"') && kycStatus.includes('method: "GET"') && kycStatus.includes('credentials: "include"'), "KYC status must use one exact same-origin Cookie-authenticated GET");
+assert(kycStatus.includes('KYC_STATUS_PATH = "/v1/kyc/status"') && kycStatus.includes('method: "GET"') && kycStatus.includes('credentials: "include"'), "KYC status must use one exact Gateway-routed Cookie-authenticated GET");
 assert(kycStatus.includes("KYC_STATUSES = [\"PENDING\", \"APPROVED\", \"REJECTED\"]") && kycStatus.includes("status and reviewedAt"), "KYC status must expose only the closed public status and reviewedAt contract");
 assert(kycStatus.includes("walletTransferSessionScope(session, runtimeEnvironment, now()) !== expectedScopeKey") && kycStatus.includes("sessionGeneration"), "KYC status must bind actor, tenant, customer, expiry, environment and exact session generation");
 assert(kycStatus.includes("kycStatusFailureClearsSnapshot") && kycStatus.includes("status === 401 || status === 403 || status === 404") && kycStatus.includes("kycStatusFailureCanInvalidateSession"), "KYC status must clear current 401/403/404 snapshots and invalidate the session only on current 401");
@@ -182,6 +184,7 @@ assert(worker.includes('url.pathname === "/runtime-config.js"'), "Worker must pr
 assert(worker.includes('"x-fastlink-api-proxy"'), "Worker must expose its proxy identity");
 assert(worker.includes('headers.delete("x-forwarded-host")'), "Worker must remove spoofed forwarding headers");
 assert(worker.includes("FASTLINK_BACKEND_ORIGIN"), "Worker must require an explicit Backend origin");
+assert(worker.includes("FASTLINK_PUBLIC_ORIGIN") && worker.includes("FASTLINK_UPSTREAM_ORIGIN"), "Worker must support an exact isolated preview Origin policy");
 assert(!worker.includes("production-309d") && !worker.includes("fastlink-backend-dev-development-a"), "Worker must not embed Backend hosts");
 assert(testConfig.includes('"name": "fastlink-wallet-test"'), "Test Worker name must be isolated");
 assert(testConfig.includes('"FASTLINK_ENVIRONMENT": "TEST"'), "Test Worker must declare TEST");
@@ -189,6 +192,10 @@ assert(testConfig.includes('"FASTLINK_PROXY_ID": "wallet-test"'), "Test proxy id
 assert(devConfig.includes('"name": "fastlink-wallet-dev"'), "Dev Worker name must be isolated");
 assert(devConfig.includes('"FASTLINK_ENVIRONMENT": "SANDBOX"'), "Dev Worker must declare SANDBOX");
 assert(devConfig.includes('"FASTLINK_PROXY_ID": "wallet-dev"'), "Dev proxy identity must be wallet-dev");
+assert(previewConfig.includes('"name": "fastlink-wallet-pr-69-dev"'), "PR preview Worker name must be isolated");
+assert(previewConfig.includes('"FASTLINK_PROXY_ID": "wallet-pr-69-dev"'), "PR preview proxy identity must be isolated");
+assert(previewConfig.includes('"FASTLINK_PUBLIC_ORIGIN": "https://fastlink-wallet-pr-69-dev.adhesive-snowshoe.workers.dev"'), "PR preview must declare its exact public Origin");
+assert(previewConfig.includes('"FASTLINK_UPSTREAM_ORIGIN": "https://fastlink-wallet-dev.adhesive-snowshoe.workers.dev"'), "PR preview must map only to the trusted Dev Wallet Origin");
 
 const dist = join(root, "dist");
 if (statSync(dist, { throwIfNoEntry: false })?.isDirectory()) {

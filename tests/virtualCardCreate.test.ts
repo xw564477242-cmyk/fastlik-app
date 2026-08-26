@@ -50,6 +50,7 @@ const rawCreatedCard = (): Record<string, unknown> => ({
   last4: "4242",
   expiryMonth: 12,
   expiryYear: 2030,
+  currencyId: "flp_asset_usd",
   currency: "USD",
   alias: "Daily",
   createdAt: "2026-07-31T01:02:03.000Z",
@@ -59,6 +60,8 @@ const rawCreatedCard = (): Record<string, unknown> => ({
   tenantId: "tenant-private",
   customerId: "customer-private",
 });
+
+const cardInput = { currencyId: "flp_asset_usd", alias: "Daily" } as const;
 
 test("allows virtual card creation only for matching SANDBOX or TEST session and runtime", () => {
   assert.equal(virtualCardCreateDecision("SANDBOX", "SANDBOX").allowed, true);
@@ -70,13 +73,14 @@ test("allows virtual card creation only for matching SANDBOX or TEST session and
 });
 
 test("constructs only the strict public virtual card request fields", () => {
-  assert.deepEqual(parseVirtualCardCreateInput({ currency: "USD", alias: "Daily" }), { currency: "USD", alias: "Daily" });
-  assert.deepEqual(parseVirtualCardCreateInput({ currency: "EUR", alias: "" }), { currency: "EUR" });
-  assert.throws(() => parseVirtualCardCreateInput({ currency: "usd" }), /currency/);
-  assert.throws(() => parseVirtualCardCreateInput({ currency: "ZZZ" }), /currency/);
-  assert.throws(() => parseVirtualCardCreateInput({ currency: "USD", alias: " x" }), /alias/);
-  assert.throws(() => parseVirtualCardCreateInput({ currency: "USD", alias: "x".repeat(31) }), /alias/);
-  assert.throws(() => parseVirtualCardCreateInput({ currency: "USD", alias: "bad\nvalue" }), /alias/);
+  assert.deepEqual(parseVirtualCardCreateInput(cardInput), cardInput);
+  assert.deepEqual(parseVirtualCardCreateInput({ currencyId: "flp_asset_eur", alias: "" }), { currencyId: "flp_asset_eur" });
+  assert.throws(() => parseVirtualCardCreateInput({ currencyId: "USD" }), /currencyId/);
+  assert.throws(() => parseVirtualCardCreateInput({ currencyId: " usd" }), /currencyId/);
+  assert.throws(() => parseVirtualCardCreateInput({ currencyId: "bad/id" }), /currencyId/);
+  assert.throws(() => parseVirtualCardCreateInput({ currencyId: "flp_asset_usd", alias: " x" }), /alias/);
+  assert.throws(() => parseVirtualCardCreateInput({ currencyId: "flp_asset_usd", alias: "x".repeat(31) }), /alias/);
+  assert.throws(() => parseVirtualCardCreateInput({ currencyId: "flp_asset_usd", alias: "bad\nvalue" }), /alias/);
 });
 
 test("uses the existing virtual-card route and validates one caller-provided idempotency key", () => {
@@ -88,7 +92,7 @@ test("uses the existing virtual-card route and validates one caller-provided ide
 });
 
 test("reconstructs only the public Card response DTO", () => {
-  const card = parseVirtualCardCreateResponse(rawCreatedCard(), { currency: "USD", alias: "Daily" });
+  const card = parseVirtualCardCreateResponse(rawCreatedCard(), cardInput);
   assert.deepEqual(Object.keys(card).sort(), [
     "alias", "capabilities", "createdAt", "currency", "expiryMonth", "expiryYear", "id", "last4", "status", "type",
   ]);
@@ -99,19 +103,19 @@ test("reconstructs only the public Card response DTO", () => {
 test("accepts the shared opaque Card ID grammar", () => {
   const card = parseVirtualCardCreateResponse(
     { ...rawCreatedCard(), id: "card.created:1" },
-    { currency: "USD", alias: "Daily" },
+    cardInput,
   );
   assert.equal(card.id, "card.created:1");
 });
 
 test("requires ordinary JSON objects and own data properties without executing accessors", () => {
   assert.throws(
-    () => parseVirtualCardCreateResponse(Object.create(rawCreatedCard()), { currency: "USD", alias: "Daily" }),
+    () => parseVirtualCardCreateResponse(Object.create(rawCreatedCard()), cardInput),
     /response/,
   );
   const nullPrototype = Object.assign(Object.create(null), rawCreatedCard());
   assert.throws(
-    () => parseVirtualCardCreateResponse(nullPrototype, { currency: "USD", alias: "Daily" }),
+    () => parseVirtualCardCreateResponse(nullPrototype, cardInput),
     /response/,
   );
   class ProviderCard {
@@ -120,14 +124,14 @@ test("requires ordinary JSON objects and own data properties without executing a
     }
   }
   assert.throws(
-    () => parseVirtualCardCreateResponse(new ProviderCard(), { currency: "USD", alias: "Daily" }),
+    () => parseVirtualCardCreateResponse(new ProviderCard(), cardInput),
     /response/,
   );
 
   const missingId = rawCreatedCard();
   delete missingId.id;
   assert.throws(
-    () => parseVirtualCardCreateResponse(missingId, { currency: "USD", alias: "Daily" }),
+    () => parseVirtualCardCreateResponse(missingId, cardInput),
     /id/,
   );
 
@@ -141,7 +145,7 @@ test("requires ordinary JSON objects and own data properties without executing a
     },
   });
   assert.throws(
-    () => parseVirtualCardCreateResponse(accessorId, { currency: "USD", alias: "Daily" }),
+    () => parseVirtualCardCreateResponse(accessorId, cardInput),
     /id/,
   );
   assert.equal(getterCalls, 0);
@@ -165,7 +169,7 @@ test("does not reflect or read unknown provider, PAN, token, scope or environmen
         throw new Error(`Unknown field ${key} was read`);
       },
     });
-  const card = parseVirtualCardCreateResponse(response, { currency: "USD", alias: "Daily" });
+  const card = parseVirtualCardCreateResponse(response, cardInput);
   assert.equal(card.id, "card_created-1");
   assert.equal(getterCalls, 0);
 });
@@ -181,7 +185,7 @@ test("rejects capabilities accessors and non-ordinary capability objects without
     },
   });
   assert.throws(
-    () => parseVirtualCardCreateResponse(capabilitiesAccessor, { currency: "USD", alias: "Daily" }),
+    () => parseVirtualCardCreateResponse(capabilitiesAccessor, cardInput),
     /capabilities/,
   );
   assert.equal(getterCalls, 0);
@@ -196,7 +200,7 @@ test("rejects capabilities accessors and non-ordinary capability objects without
     },
   });
   assert.throws(
-    () => parseVirtualCardCreateResponse(capabilityFieldAccessor, { currency: "USD", alias: "Daily" }),
+    () => parseVirtualCardCreateResponse(capabilityFieldAccessor, cardInput),
     /capability freeze/,
   );
   assert.equal(getterCalls, 0);
@@ -211,7 +215,7 @@ test("rejects capabilities accessors and non-ordinary capability objects without
   assert.throws(
     () => parseVirtualCardCreateResponse(
       { ...rawCreatedCard(), capabilities: new ProviderCapabilities() },
-      { currency: "USD", alias: "Daily" },
+      cardInput,
     ),
     /capabilities/,
   );
@@ -222,7 +226,7 @@ test("accepts only canonical signed-64 available balances", () => {
     assert.equal(
       parseVirtualCardCreateResponse(
         { ...rawCreatedCard(), availableBalanceMinor },
-        { currency: "USD", alias: "Daily" },
+        cardInput,
       ).availableBalanceMinor,
       availableBalanceMinor,
     );
@@ -238,18 +242,19 @@ test("accepts only canonical signed-64 available balances", () => {
     assert.throws(
       () => parseVirtualCardCreateResponse(
         { ...rawCreatedCard(), availableBalanceMinor },
-        { currency: "USD", alias: "Daily" },
+        cardInput,
       ),
       /balance/,
     );
 });
 
 test("requires the created response to match the virtual-card request", () => {
-  assert.throws(() => parseVirtualCardCreateResponse({ ...rawCreatedCard(), id: "bad/id" }, { currency: "USD", alias: "Daily" }), /card id/);
-  assert.throws(() => parseVirtualCardCreateResponse({ ...rawCreatedCard(), type: "PHYSICAL" }, { currency: "USD", alias: "Daily" }), /not virtual/);
-  assert.throws(() => parseVirtualCardCreateResponse({ ...rawCreatedCard(), currency: "EUR" }, { currency: "USD", alias: "Daily" }), /currency/);
-  assert.throws(() => parseVirtualCardCreateResponse({ ...rawCreatedCard(), alias: "Other" }, { currency: "USD", alias: "Daily" }), /alias/);
-  assert.throws(() => parseVirtualCardCreateResponse({ ...rawCreatedCard(), createdAt: "2026-02-30T00:00:00Z" }, { currency: "USD", alias: "Daily" }), /createdAt/);
+  assert.throws(() => parseVirtualCardCreateResponse({ ...rawCreatedCard(), id: "bad/id" }, cardInput), /card id/);
+  assert.throws(() => parseVirtualCardCreateResponse({ ...rawCreatedCard(), type: "PHYSICAL" }, cardInput), /not virtual/);
+  assert.throws(() => parseVirtualCardCreateResponse({ ...rawCreatedCard(), currencyId: "flp_asset_eur" }, cardInput), /currencyId/);
+  assert.throws(() => parseVirtualCardCreateResponse({ ...rawCreatedCard(), currency: "ZZZ" }, cardInput), /currency/);
+  assert.throws(() => parseVirtualCardCreateResponse({ ...rawCreatedCard(), alias: "Other" }, cardInput), /alias/);
+  assert.throws(() => parseVirtualCardCreateResponse({ ...rawCreatedCard(), createdAt: "2026-02-30T00:00:00Z" }, cardInput), /createdAt/);
 });
 
 test("requires one unexpired exact actor, tenant, customer and environment scope", () => {
@@ -276,7 +281,7 @@ test("one accepted action owns one caller-cancelled POST and rejects pretranspor
     activeSession,
     "TEST",
     scope,
-    { currency: "USD", alias: "Daily" },
+    cardInput,
     key,
     now,
     controller.signal,
@@ -285,7 +290,7 @@ test("one accepted action owns one caller-cancelled POST and rejects pretranspor
   assert.deepEqual(calls, [{
     path: "/v1/cards/virtual",
     method: "POST",
-    body: { currency: "USD", alias: "Daily" },
+    body: cardInput,
     idempotencyKey: key,
     signal: controller.signal,
   }]);
@@ -294,7 +299,7 @@ test("one accepted action owns one caller-cancelled POST and rejects pretranspor
     session({ expiresAt: "2026-08-01T00:00:00Z" }),
     "TEST",
     scope,
-    { currency: "USD", alias: "Daily" },
+    cardInput,
     key,
     now,
   ));
@@ -307,7 +312,7 @@ test("submit gate and exact input, session, list, selection and mounted generati
   assert.ok(scope);
   const cards = [existingCard()];
   const selected = cards[0];
-  const input = { currency: "USD", alias: "Daily" };
+  const input = cardInput;
   const gate = { activeRequestId: null as number | null };
   assert.equal(beginVirtualCardCreate(gate, 7), true);
   assert.equal(beginVirtualCardCreate(gate, 8), false);
@@ -331,7 +336,7 @@ test("submit gate and exact input, session, list, selection and mounted generati
   assert.equal(current(8), false);
   assert.equal(current(7, session({ tenantId: "other" })), false);
   assert.equal(current(7, activeSession, `${scope}-old`), false);
-  assert.equal(current(7, activeSession, scope, { currency: "EUR", alias: "Daily" }), false);
+  assert.equal(current(7, activeSession, scope, { currencyId: "flp_asset_eur", alias: "Daily" }), false);
   assert.equal(current(7, activeSession, scope, input, [existingCard({ alias: "changed" })]), false);
   assert.equal(current(7, activeSession, scope, input, cards, null), false);
   assert.equal(current(7, activeSession, scope, input, cards, "next", null), false);

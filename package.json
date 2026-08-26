@@ -9,6 +9,8 @@
     "build:cloudflare": "bash scripts/build-cloudflare.sh",
     "preview": "vite preview",
     "test": "node --experimental-strip-types --test tests/*.test.ts",
+    "test:wallet-gateway": "node --experimental-strip-types --test tests/walletGatewayContracts.test.ts tests/walletGatewayArchitecture.test.ts tests/walletGatewayFlow.integration.test.ts",
+    "test:wallet-uat": "npm run test:wallet-gateway && npm run test && npm run build && npm run test:cloudflare",
     "test:transfer:sandbox": "FASTLINK_TEST_ENVIRONMENT=SANDBOX node --experimental-strip-types --test tests/walletTransfer.integration.test.ts",
     "test:transfer:test": "FASTLINK_TEST_ENVIRONMENT=TEST node --experimental-strip-types --test tests/walletTransfer.integration.test.ts",
     "test:wallet-transfer-postchain:sandbox": "FASTLINK_TEST_ENVIRONMENT=SANDBOX node --experimental-strip-types --test tests/walletTransferPostChain.integration.test.ts",
