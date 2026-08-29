@@ -43,7 +43,7 @@ test('defers TEST before the request-owning Sandbox component can mount', () => 
   assert.match(panel, /phase2Availability\(walletRuntime\.environment, props\.sessionEnvironment\)/)
   assert.match(panel, /availability\.mode === 'ACTIVE'\) return <SandboxPhase2WalletPanel/)
   assert.match(panel, /availability\.mode === 'CARD_PRODUCTS_READ_ONLY'/)
-  assert.match(panel, /<Phase2TestCardProductsPanel availability=\{availability\} sessionKey=\{props\.sessionKey\} gateway=\{walletGateway\}/)
+  assert.match(panel, /<Phase2TestCardProductsPanel availability=\{availability\} sessionKey=\{props\.sessionKey\} gateway=\{walletGateway\} readEnabled=\{props\.catalogReadEnabled\}/)
   assert.match(panel, /return <Phase2DeferredPanel availability=\{availability\}/)
   assert.match(panel, /data-phase2-state=\{availability\.code\}/)
 })
@@ -66,6 +66,7 @@ test('the mounted TEST panel performs exactly one Card catalogue GET and renders
       availability,
       sessionKey: 'test-session-a',
       gateway,
+      readEnabled: true,
     }))
     await Promise.resolve()
   })
@@ -75,6 +76,7 @@ test('the mounted TEST panel performs exactly one Card catalogue GET and renders
   assert.equal(renderer.root.findAllByType('select').length, 0)
   const rendered = JSON.stringify(renderer.toJSON())
   assert.match(rendered, /B_DEFERRED/)
+  assert.match(rendered, /CARD_PRODUCTS_READ_ONLY/)
   assert.match(rendered, /No tenant-enabled local Card product was returned/)
   assert.match(rendered, /No Card quote, issue, funding, address, transfer, FX, or Provider action/)
   act(() => renderer.unmount())
@@ -97,6 +99,7 @@ test('a TEST Card catalogue failure is fail-closed and is never retried automati
       availability,
       sessionKey: 'test-session-b',
       gateway,
+      readEnabled: true,
     }))
     await Promise.resolve()
   })
@@ -106,5 +109,50 @@ test('a TEST Card catalogue failure is fail-closed and is never retried automati
   assert.match(rendered, /card products is temporarily unavailable/)
   assert.match(rendered, /catalog-safe-trace-0001/)
   assert.doesNotMatch(rendered, /password|cookie|token/i)
+  act(() => renderer.unmount())
+})
+
+test('the TEST catalogue waits for completed authenticated initialization before its one GET', async () => {
+  const availability = phase2Availability('TEST', 'TEST')
+  assert.equal(availability.mode, 'CARD_PRODUCTS_READ_ONLY')
+  let calls = 0
+  const gateway = {
+    async cardProducts() {
+      calls += 1
+      return []
+    },
+  }
+  let renderer!: TestRenderer.ReactTestRenderer
+  await act(async () => {
+    renderer = TestRenderer.create(React.createElement(Phase2TestCardProductsPanel, {
+      availability,
+      sessionKey: 'test-session-c',
+      gateway,
+      readEnabled: false,
+    }))
+  })
+  assert.equal(calls, 0)
+  assert.match(JSON.stringify(renderer.toJSON()), /Waiting for authenticated Wallet initialization/)
+  assert.doesNotMatch(JSON.stringify(renderer.toJSON()), /No tenant-enabled local Card product was returned/)
+  await act(async () => {
+    renderer.update(React.createElement(Phase2TestCardProductsPanel, {
+      availability,
+      sessionKey: 'test-session-c',
+      gateway,
+      readEnabled: true,
+    }))
+    await Promise.resolve()
+  })
+  assert.equal(calls, 1)
+  await act(async () => {
+    renderer.update(React.createElement(Phase2TestCardProductsPanel, {
+      availability,
+      sessionKey: 'test-session-c',
+      gateway,
+      readEnabled: true,
+    }))
+    await Promise.resolve()
+  })
+  assert.equal(calls, 1)
   act(() => renderer.unmount())
 })

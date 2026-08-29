@@ -7,6 +7,7 @@ type WalletRenderBoundaryProps={
  resetKey:string
  title:string
  message:string
+ retryEnabled?:boolean
 }
 
 type WalletRenderBoundaryState={failed:boolean}
@@ -41,7 +42,7 @@ export class WalletRenderBoundary extends Component<WalletRenderBoundaryProps,Wa
    React.createElement('h2',null,this.props.title),
    React.createElement('p',null,this.props.message),
    React.createElement('p',null,'No stale data displayed.'),
-   React.createElement('button',{type:'button',onClick:this.retry},'Retry wallet view'),
+   this.props.retryEnabled===false?null:React.createElement('button',{type:'button',onClick:this.retry},'Retry wallet view'),
   )
  }
 }

@@ -11,6 +11,7 @@
   },
   "vars": {
     "FASTLINK_ENVIRONMENT": "SANDBOX",
+    "FASTLINK_INTERACTION_MODE": "FULL",
     "FASTLINK_API_URL": "/api",
     "FASTLINK_SERVICE_NAME": "fastlink-wallet-dev",
     "FASTLINK_PROXY_ID": "wallet-dev"

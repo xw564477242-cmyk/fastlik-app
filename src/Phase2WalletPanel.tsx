@@ -31,6 +31,7 @@ type Props = {
   selectedCardId: string | null
   sessionEnvironment: FastLinkEnvironment
   sessionKey: string
+  catalogReadEnabled: boolean
 }
 
 const USDT_ASSET_ID = 'flp_asset_usdt'
@@ -81,7 +82,7 @@ export function Phase2WalletPanel(props: Props) {
   const availability = phase2Availability(walletRuntime.environment, props.sessionEnvironment)
   if (availability.mode === 'ACTIVE') return <SandboxPhase2WalletPanel {...props}/>
   if (availability.mode === 'CARD_PRODUCTS_READ_ONLY') {
-    return <Phase2TestCardProductsPanel availability={availability} sessionKey={props.sessionKey} gateway={walletGateway}/>
+    return <Phase2TestCardProductsPanel availability={availability} sessionKey={props.sessionKey} gateway={walletGateway} readEnabled={props.catalogReadEnabled}/>
   }
   return <Phase2DeferredPanel availability={availability}/>
 }

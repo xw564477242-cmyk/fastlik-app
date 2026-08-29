@@ -1,5 +1,6 @@
-import {API_REQUEST_DEADLINE_MS} from '../requestPolicy'
-import {sessionFailureRequiresClear} from '../sessionLifecycle'
+import {API_REQUEST_DEADLINE_MS} from '../requestPolicy.ts'
+import {sessionFailureRequiresClear} from '../sessionLifecycle.ts'
+import {parseInteractionMode, readOnlyUatRequestAllowed, validateInteractionMode} from '../interactionMode.ts'
 
 export type FastLinkEnvironment = 'LOCAL' | 'SANDBOX' | 'TEST' | 'UAT' | 'PRODUCTION'
 export type GatewayResponseMode = 'json' | 'text'
@@ -26,18 +27,29 @@ if (!apiUrl) throw new Error('Missing VITE_FASTLINK_API_URL')
 if (!environment || !['LOCAL', 'SANDBOX', 'TEST', 'UAT', 'PRODUCTION'].includes(environment)) throw new Error('Invalid VITE_FASTLINK_ENVIRONMENT')
 if (['SANDBOX', 'TEST', 'PRODUCTION'].includes(environment) && apiUrl !== '/api') throw new Error(`${environment} Cloudflare Wallet must use same-origin /api`)
 
+const interactionMode = validateInteractionMode(
+  environment,
+  parseInteractionMode(window.__FASTLINK_RUNTIME__?.interactionMode || env?.VITE_FASTLINK_INTERACTION_MODE),
+)
+
 const runtimeBuildSha = window.__FASTLINK_RUNTIME__?.buildSha?.trim()
 const verifiedRuntimeBuildSha = runtimeBuildSha && /^[0-9a-f]{40}$/i.test(runtimeBuildSha) ? runtimeBuildSha : undefined
 
 export const walletRuntime = Object.freeze({
   apiUrl,
   environment,
+  interactionMode,
   buildSha: verifiedRuntimeBuildSha || env?.VITE_FASTLINK_BUILD_SHA?.trim() || 'unknown',
 })
 
 export class WalletGatewayError extends Error {
-  constructor(public status: number, public traceId: string, message: string) {
+  readonly status: number
+  readonly traceId: string
+
+  constructor(status: number, traceId: string, message: string) {
     super(message)
+    this.status = status
+    this.traceId = traceId
   }
 }
 
@@ -86,7 +98,10 @@ const boundedResponseText = async (response: Response, maximumBytes: number): Pr
 export async function walletHttpRequest<T>(input: GatewayRequest): Promise<T> {
   if (!/^\/v(?:1|2)\//.test(input.path)) throw new Error('WalletGateway rejected a path outside /api/v1 or /api/v2')
   const id = createTraceId()
-  const method = input.method ?? 'GET'
+  const method = (input.method ?? 'GET').trim().toUpperCase()
+  if (interactionMode === 'READ_ONLY_UAT' && !readOnlyUatRequestAllowed(input.path, method)) {
+    throw new WalletGatewayError(403, id, `READ_ONLY_UAT blocked a business write before transport · HTTP 403 · Trace ${id}`)
+  }
   const responseMode = input.responseMode ?? 'json'
   const sessionInvalidation = input.sessionInvalidation ?? 'broadcast'
   const controller = new AbortController()

@@ -10,9 +10,27 @@ const text=(value:TestRenderer.ReactTestRendererJSON|TestRenderer.ReactTestRende
 test('the application root and authenticated Wallet tree are both wired through a boundary',()=>{
  const app=readFileSync(new URL('../src/App.tsx',import.meta.url),'utf8')
  const main=readFileSync(new URL('../src/main.tsx',import.meta.url),'utf8')
- assert.match(app,/session&&<WalletRenderBoundary resetKey=\{sessionScope\(session\)\}/)
+ assert.match(app,/session&&!readOnlyUatAuthenticated&&<WalletRenderBoundary resetKey=\{sessionScope\(session\)\}/)
  assert.match(app,/<\/div><\/WalletRenderBoundary>}/)
  assert.match(main,/<WalletRenderBoundary resetKey=\{`wallet-root:\$\{walletDataSource}`}[^>]*>\{walletDataSource/)
+})
+
+test('the restricted authenticated fallback never introduces a control',()=>{
+ const originalConsoleError=console.error
+ console.error=()=>undefined
+ const Broken=()=>{throw new Error('restricted render failed')}
+ try{
+  const renderer=TestRenderer.create(React.createElement(
+   WalletRenderBoundary,
+   {resetKey:'readonly-session',title:'Read-only Wallet view unavailable',message:'Safe restricted fallback.',retryEnabled:false},
+   React.createElement(Broken),
+  ))
+  assert.match(text(renderer.toJSON()),/Read-only Wallet view unavailable/)
+  assert.equal(renderer.root.findAllByType('button').length,0)
+  assert.equal(renderer.root.findAllByType('form').length,0)
+  assert.equal(renderer.root.findAllByType('select').length,0)
+  assert.equal(renderer.root.findAllByType('input').length,0)
+ }finally{console.error=originalConsoleError}
 })
 
 test('a post-login render exception becomes a safe recoverable panel',()=>{
