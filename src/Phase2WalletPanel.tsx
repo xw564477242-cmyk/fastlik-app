@@ -1,6 +1,8 @@
 import {useEffect, useMemo, useState} from 'react'
 import {ArrowDownToLine, ArrowUpFromLine, CreditCard, RefreshCw, ShieldCheck, WalletCards} from 'lucide-react'
-import {walletDataSource, walletGateway} from './gateway/index'
+import {walletDataSource, walletGateway, walletRuntime, type FastLinkEnvironment} from './gateway/index'
+import {Phase2TestCardProductsPanel} from './Phase2TestCardProductsPanel'
+import {phase2Availability, type Phase2Availability} from './phase2Availability'
 import {
   canManuallyRetryPhase2Read,
   cardIssueInputFromLocalProduct,
@@ -27,6 +29,8 @@ import type {WalletAccountRecord} from './walletData'
 type Props = {
   accounts: readonly WalletAccountRecord[]
   selectedCardId: string | null
+  sessionEnvironment: FastLinkEnvironment
+  sessionKey: string
 }
 
 const USDT_ASSET_ID = 'flp_asset_usdt'
@@ -64,7 +68,25 @@ function TransferDetail({transfer, onRefresh, busy}: {transfer: OnchainTransfer;
   </div>
 }
 
-export function Phase2WalletPanel({accounts, selectedCardId}: Props) {
+function Phase2DeferredPanel({availability}: {availability: Extract<Phase2Availability, {mode: 'DEFERRED'}>}) {
+  return <section id="phase2-wallet" className="panel phase2-wallet" data-phase2-state={availability.code}>
+    <div className="panel-row"><div><h2>Prime Wallet · P1 + Phase2</h2><p className="card-action-note">Runtime: {availability.environment} · Session: {availability.sessionEnvironment} · Phase2 capability gate</p></div></div>
+    <div className="inline-error"><b>{availability.code}</b> · Phase2 is deferred in this environment.</div>
+    <p className="card-action-note">{availability.message}</p>
+    <p className="card-action-note">Verified Wallet balances, activity and real Card reads remain available in their dedicated read-only panels.</p>
+  </section>
+}
+
+export function Phase2WalletPanel(props: Props) {
+  const availability = phase2Availability(walletRuntime.environment, props.sessionEnvironment)
+  if (availability.mode === 'ACTIVE') return <SandboxPhase2WalletPanel {...props}/>
+  if (availability.mode === 'CARD_PRODUCTS_READ_ONLY') {
+    return <Phase2TestCardProductsPanel availability={availability} sessionKey={props.sessionKey} gateway={walletGateway}/>
+  }
+  return <Phase2DeferredPanel availability={availability}/>
+}
+
+function SandboxPhase2WalletPanel({accounts, selectedCardId}: Props) {
   const [tab, setTab] = useState<'overview' | 'deposit' | 'withdraw' | 'cards'>('overview')
   const [total, setTotal] = useState<TotalAssets | null>(null)
   const [balances, setBalances] = useState<WalletBalanceTriple[]>([])

@@ -17,6 +17,6 @@ const previewAccounts: WalletAccountRecord[] = [{
 export function MockWalletPreview() {
   return <main>
     <header><div><h1>FastLink Wallet Preview</h1><p>Deterministic UI fixture · no Backend or external-provider call.</p></div></header>
-    <Phase2WalletPanel accounts={previewAccounts} selectedCardId="card_mock_physical"/>
+    <Phase2WalletPanel accounts={previewAccounts} selectedCardId="card_mock_physical" sessionEnvironment="SANDBOX" sessionKey="mock-sandbox-session"/>
   </main>
 }
