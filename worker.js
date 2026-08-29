@@ -1,5 +1,11 @@
 const BACKEND_ORIGIN_PATTERN = /^https:\/\/[^/]+$/;
 const ALLOWED_ENVIRONMENTS = new Set(["SANDBOX", "TEST", "PRODUCTION"]);
+const ALLOWED_INTERACTION_MODES = new Set(["FULL", "READ_ONLY_UAT"]);
+const READ_ONLY_UAT_AUTH_POST_PATHS = new Set([
+  "/api/v1/auth/login",
+  "/api/v1/auth/refresh",
+  "/api/v1/auth/logout",
+]);
 const TRUSTED_SANDBOX_UPSTREAM_ORIGIN = "https://fastlink-wallet-dev.adhesive-snowshoe.workers.dev";
 
 function requiredBinding(env, name) {
@@ -8,7 +14,7 @@ function requiredBinding(env, name) {
   return value;
 }
 
-function runtimeIdentity(env) {
+export function runtimeIdentity(env) {
   const environment = requiredBinding(env, "FASTLINK_ENVIRONMENT").toUpperCase();
   if (!ALLOWED_ENVIRONMENTS.has(environment)) {
     throw new Error("FASTLINK_ENVIRONMENT must be SANDBOX, TEST, or PRODUCTION");
@@ -18,8 +24,15 @@ function runtimeIdentity(env) {
   const proxyId = requiredBinding(env, "FASTLINK_PROXY_ID");
   const apiUrl = requiredBinding(env, "FASTLINK_API_URL");
   const buildSha = requiredBinding(env, "FASTLINK_BUILD_SHA");
+  const interactionMode = (optionalBinding(env, "FASTLINK_INTERACTION_MODE") || "FULL").toUpperCase();
   if (apiUrl !== "/api") throw new Error("Cloudflare frontend API URL must be same-origin /api");
   if (!/^[0-9a-f]{40}$/i.test(buildSha)) throw new Error("FASTLINK_BUILD_SHA must be a full Git SHA");
+  if (!ALLOWED_INTERACTION_MODES.has(interactionMode)) {
+    throw new Error("FASTLINK_INTERACTION_MODE must be FULL or READ_ONLY_UAT");
+  }
+  if (interactionMode === "READ_ONLY_UAT" && environment !== "TEST") {
+    throw new Error("READ_ONLY_UAT is allowed only in TEST");
+  }
   if (environment === "TEST" && (!serviceName.endsWith("-test") || !proxyId.endsWith("-test"))) {
     throw new Error("TEST Worker identity must use isolated -test names");
   }
@@ -27,7 +40,15 @@ function runtimeIdentity(env) {
     throw new Error("SANDBOX Worker identity must use isolated -dev names");
   }
 
-  return { environment, serviceName, proxyId, apiUrl, buildSha };
+  return { environment, serviceName, proxyId, apiUrl, buildSha, interactionMode };
+}
+
+export function readOnlyUatProxyRequestAllowed(pathname, method = "GET", search = "") {
+  const normalizedMethod = method.trim().toUpperCase();
+  if (normalizedMethod === "GET" || normalizedMethod === "HEAD" || normalizedMethod === "OPTIONS") {
+    return true;
+  }
+  return normalizedMethod === "POST" && search === "" && READ_ONLY_UAT_AUTH_POST_PATHS.has(pathname);
 }
 
 function requireBackendOrigin(env) {
@@ -100,6 +121,19 @@ function secureHeaders(headers) {
 async function proxyBackend(request, env) {
   const identity = runtimeIdentity(env);
   const publicUrl = new URL(request.url);
+  if (identity.interactionMode === "READ_ONLY_UAT"
+    && !readOnlyUatProxyRequestAllowed(publicUrl.pathname, request.method, publicUrl.search)) {
+    return Response.json(
+      {
+        code: "READ_ONLY_UAT_WRITE_BLOCKED",
+        message: "This isolated TEST preview permits authenticated reads only",
+      },
+      {
+        status: 403,
+        headers: secureHeaders(new Headers({ "cache-control": "no-store" })),
+      },
+    );
+  }
   const previewPolicy = resolvePreviewOriginPolicy(env, publicUrl, request.headers.get("origin"));
   if (previewPolicy && !previewPolicy.allowed) {
     return Response.json(
@@ -135,6 +169,7 @@ function runtimeConfig(env) {
     environment: identity.environment,
     apiUrl: identity.apiUrl,
     buildSha: identity.buildSha,
+    interactionMode: identity.interactionMode,
   })});\n`;
   return new Response(script, {
     headers: secureHeaders(new Headers({
@@ -155,6 +190,7 @@ export default {
           service: identity.serviceName,
           environment: identity.environment,
           buildSha: identity.buildSha,
+          interactionMode: identity.interactionMode,
         },
         {
           headers: secureHeaders(new Headers({ "cache-control": "no-store" })),

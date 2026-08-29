@@ -65,6 +65,7 @@ assert(vite.includes("VITE_PUBLIC_BASE"), "Vite public base must be deployment-c
 assert(httpTransport.includes("window.__FASTLINK_RUNTIME__?.environment"), "Wallet must accept the runtime environment");
 assert(httpTransport.includes("window.__FASTLINK_RUNTIME__?.apiUrl"), "Wallet must accept the runtime API URL");
 assert(httpTransport.includes("window.__FASTLINK_RUNTIME__?.buildSha"), "Wallet must accept the runtime Build SHA");
+assert(httpTransport.includes("window.__FASTLINK_RUNTIME__?.interactionMode"), "Wallet must accept the runtime interaction mode");
 assert(httpTransport.includes("Cloudflare Wallet must use same-origin /api"), "Wallet browser runtime must require the Cloudflare same-origin API");
 assert(app.includes("walletRuntime.apiUrl"), "Wallet UI must expose the runtime API base");
 assert(app.includes("<ConsumerOverview") && app.includes('id="wallet-assets"') && app.includes('id="wallet-cards"') && app.includes('id="wallet-activity"') && app.includes('id="wallet-kyc"'), "The real-data consumer overview must remain mounted and link only to reachable Wallet sections");
@@ -77,11 +78,14 @@ assert(styles.includes(".consumer-overview{grid-column:1/-1") && styles.includes
 assert(runtimeTemplate.includes("$VITE_FASTLINK_ENVIRONMENT"), "runtime template must expose the environment");
 assert(runtimeTemplate.includes("$VITE_FASTLINK_API_URL"), "runtime template must expose the API URL");
 assert(runtimeTemplate.includes("$RAILWAY_GIT_COMMIT_SHA"), "runtime template must expose the Railway Release SHA");
+assert(runtimeTemplate.includes("$VITE_FASTLINK_INTERACTION_MODE"), "runtime template must expose the explicit interaction mode");
 assert(entrypoint.includes("VITE_FASTLINK_ENVIRONMENT is required"), "container startup must fail closed without environment");
 assert(entrypoint.includes("VITE_FASTLINK_API_URL is required"), "container startup must fail closed without API URL");
 assert(entrypoint.includes("RAILWAY_GIT_COMMIT_SHA is required"), "container startup must fail closed without Release SHA");
+assert(entrypoint.includes('VITE_FASTLINK_INTERACTION_MODE:-FULL') && entrypoint.includes("READ_ONLY_UAT is allowed only in TEST"), "container runtime must default to FULL and restrict READ_ONLY_UAT to TEST");
 assert(entrypoint.includes("SANDBOX Wallet must use the same-origin /api proxy"), "container startup must require the same-origin Dev API proxy");
 assert(dockerfile.includes("/docker-entrypoint.d/40-fastlink-runtime.sh"), "runtime generation must execute before nginx starts");
+assert(dockerfile.includes("ARG VITE_FASTLINK_INTERACTION_MODE=FULL") && dockerfile.includes("ENV VITE_FASTLINK_INTERACTION_MODE=$VITE_FASTLINK_INTERACTION_MODE"), "container builds must preserve FULL by default while accepting an explicit interaction profile");
 assert(httpTransport.includes("credentials: 'include'"), "Wallet API must include Cookie credentials");
 assert(httpTransport.includes("sessionFailureRequiresClear(error)") && httpTransport.includes("fastlink:session-invalid"), "Only explicit authentication failures may broadcast global session invalidation");
 assert(kycStatus.includes("kycStatusFailureCanInvalidateSession") && kycStatus.includes("kycStatusFailureClearsSnapshot") && kycStatus.includes("status === 401 || status === 403 || status === 404"), "KYC failures must invalidate only on current 401 and clear only the current 401/403/404 snapshot");
