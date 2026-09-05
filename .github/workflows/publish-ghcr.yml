@@ -1,3 +1,4 @@
+
 name: Publish private GHCR image
 
 on:
@@ -33,6 +34,8 @@ jobs:
         with:
           context: .
           push: true
+          build-args: |
+            FASTLINK_BUILD_SHA=${{ github.sha }}
           tags: |
             ghcr.io/${{ github.repository }}:latest
             ghcr.io/${{ github.repository }}:${{ github.sha }}
