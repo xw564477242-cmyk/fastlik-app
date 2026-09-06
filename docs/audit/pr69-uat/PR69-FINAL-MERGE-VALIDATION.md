@@ -6,7 +6,7 @@
 
 - [ ] PR remains Draft throughout validation; no migration, merge, or production deployment is initiated from this checklist.
 - [ ] Frontend candidate lineage is recorded: baseline `b1b3e93506e9175159eea16805e43fe3bda831d2`, implementation `e9400f60ae1559036bd7a34d394cc99ea3319005`, and UAT documentation `a620ab5e69fcf7c0e46ef8f7db9462a89b1bfb50`.
-- [ ] Paired local backend candidate `d290d62aa174dd20f0b5ac9227096eb26ff39765` is the one in the authorized candidate deployment.
+- [ ] Paired local backend candidate `4fb069c180f736f312a282218dc1610b509aaf79` is the one in the authorized candidate deployment.
 - [ ] Cregis work remains isolated on `feature/ucard-core-saas-platform`; it neither implements nor invokes the four PR #69 local APIs.
 - [ ] No unrelated worktree change, shared DEV mutation, migration execution, or environment configuration edit is represented as PR #69 proof.
 
@@ -20,6 +20,7 @@
 
 ## C. Automated and review evidence
 
+- [x] Backend candidate `4fb069c...` passed the local no-migration Backend PR Gate: 158/158 suites and 1411/1411 tests; lint, build, and secret scan passed.
 - [ ] Paired backend focused tests: 8 suites / 72 tests pass (onchain service/OpenAPI; card top-up; cards service/OpenAPI; end-user FX quote/OpenAPI; fee policy).
 - [ ] Paired backend candidate includes the UAT-01 bounded Card-product read, UAT-04 local-chain history retry/base64url-cursor compatibility, and UAT-06 `FX_QUOTE_ONLY_UNAVAILABLE` non-financial response; the targeted service/OpenAPI suites and production build pass.
 - [ ] Paired backend production build and modified-file lint pass.
@@ -31,10 +32,16 @@
 ## D. Authorized environment gate
 
 - [x] Verifiable browser access to the Worker preview domain was observed in SANDBOX on 2026-08-25; no policy bypass was used.
-- [x] The isolated PR #69 Worker candidate [run 32857121582](https://github.com/xw564477242-cmyk/fastlik-app/actions/runs/32857121582) is deployed with manifest SHA `1c38f54b7a0ac0abc5aad2e6b0d6068da5bdc383`; it is not shared DEV.
-- [ ] A paired backend candidate is deployed without a prohibited migration and its runtime SHA is independently verifiable. Backend CI `d290d62...` is green but the active SANDBOX backend remains older.
-- [ ] Dedicated SANDBOX tenant, dedicated end-user Cookie-Session, active deposit address, source wallet account, existing test card, enabled local card product, and saved withdrawal address are available through approved setup.
-- [ ] SANL-X fixture manifest proves the listed address, Card-product and local-chain-history records are tenant/customer/environment scoped and no test fixture enables a browser write action.
+- [x] The isolated PR #69 Worker candidate [run 32858471506](https://github.com/xw564477242-cmyk/fastlik-app/actions/runs/32858471506) is deployed with manifest SHA `1f2d794d367dea471e7db128d87be3179de1365e`; it is not shared DEV.
+- [ ] Candidate backend release uses the separately reviewed [no-migration deployment design](PR69-CANDIDATE-RELEASE-AND-SANLX-FIXTURE-DESIGN.md): its descriptor omits `preDeployCommand`, uses only a sealed database-enforced read-only connection to the existing shared DEV schema, and no migration/DDL/reset/seed command was run.
+- [ ] Candidate routing is isolated: Worker build `1f2d794...` reaches only the candidate backend, `GET /api/health` proves backend `releaseSha` `4fb069c...`, and both runtimes report `SANDBOX`. Neither current shared DEV route nor production route is changed.
+- [ ] A paired backend candidate is deployed without a prohibited migration and its runtime SHA is independently verifiable. The local no-migration Backend PR Gate for `4fb069c...` is green, but the active SANDBOX backend remains older.
+- [ ] An allowlisted SANDBOX Cookie-Session and scoped in-memory SANL-X
+  deposit-address, withdrawal-address, Card-product, and optional history
+  fixture objects are available through approved setup. No source wallet,
+  Card, ledger, address, or other DEV database record is created for UAT.
+- [ ] SANL-X fixture manifest is signed, expiring, release/read-only-database-scope-bound, and allows only the exact server-derived tenant/customer/environment scope. The legacy global fixture switch is disabled; both a second customer in the candidate tenant and a neighboring SANDBOX tenant prove they receive no fixtures.
+- [ ] SANL-X fixture manifest proves the listed address, Card-product and local-chain-history fixture objects are tenant/customer/environment scoped and no test fixture enables a browser write action. Fixture provisioning is non-public, idempotent, audited, process-memory-only, and calls no external provider or database write path.
 - [ ] Evidence storage is approved and redacts cookies, CSRF values, secrets, callback signatures/raw bodies, and full financial identifiers.
 
 ## E. Browser SANDBOX UAT gate
@@ -55,7 +62,7 @@
 ## Approval
 
 - [ ] Engineering owner confirms Sections A–C.
-- [ ] Security/environment owner confirms Section D.
+- [ ] User authorization and Codex execution record confirm Section D.
 - [ ] UAT owner confirms Sections E–F and attaches the completed result table.
 - [ ] Release owner confirms the two PR #69 merge prerequisites are both met: **(1) all four local APIs are complete and accepted; (2) the authorized SANDBOX browser UAT is complete and accepted.**
 

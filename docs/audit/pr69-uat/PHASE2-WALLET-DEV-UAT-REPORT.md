@@ -153,9 +153,11 @@ gate record, not a business-flow result.
 - The browser retained an already loaded `1f831ca...` document at the same
   URL. That client-cache observation is not substituted for the Worker health
   manifest and does not establish a paired backend runtime.
-- Backend candidate `d290d62aa174dd20f0b5ac9227096eb26ff39765` passed its
-  complete non-production CI in [run 32857933657](https://github.com/xw564477242-cmyk/fastlik-backend/actions/runs/32857933657), including unit, Card HTTP-safety, build,
-  integrity, and evidence stages. It has **not** been deployed.
+- Backend candidate `ac2433008acdfc9ba3098aa8763dd9f3dd6d5b30` passed the
+  local no-migration Backend PR Gate: 158/158 suites, 1411/1411 tests, lint,
+  build, and secret scan. Its Card top-up signing-config failure path fails
+  closed before Card/Wallet reads or a transaction, and it has **not** been
+  deployed.
 - Railway target verification showed `fastlink-backend-dev / development-A`
   with `FASTLINK_ENVIRONMENT=SANDBOX`; its current deployment remains
   `a953097...`. The candidate deployment manifest would execute

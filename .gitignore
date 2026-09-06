@@ -6,3 +6,9 @@ dist/
 !.env.development.example
 !.env.test.example
 *.log
+
+# Local sensitive material and database audit snapshots
+**/*password*.sh
+**/*secret*.sh
+**/*credentials*.json
+**/*-backup-*.json

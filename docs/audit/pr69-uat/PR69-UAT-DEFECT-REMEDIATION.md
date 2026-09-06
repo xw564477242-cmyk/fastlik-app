@@ -70,7 +70,7 @@ That does not deploy the backend candidate.
 
 | Item | Evidence | Current status |
 | --- | --- | --- |
-| Backend repair candidate | `d290d62aa174dd20f0b5ac9227096eb26ff39765` passed complete non-production CI in [run 32857933657](https://github.com/xw564477242-cmyk/fastlik-backend/actions/runs/32857933657). The CI also validates all public Card response contracts now including canonical `currencyId`. | **Validated, not deployed** |
+| Backend repair candidate | `ac2433008acdfc9ba3098aa8763dd9f3dd6d5b30` passed the local no-migration Backend PR Gate: 158/158 suites, 1411/1411 tests, lint, build, and secret scan. It also verifies that missing local Card top-up signing configuration fails closed before Card/Wallet reads or a transaction. Public Card issue contracts remain canonical `currencyId`; bare ISO `currency` is rejected. | **Validated locally, not deployed** |
 | Paired backend release | The configured SANDBOX Railway deployment path runs `prisma migrate deploy`; migrations are prohibited for this task. The active backend remains `a953097...`. | **Blocked by no-migration constraint** |
 | SANL-X deposit/withdrawal/Card fixtures | Existing fixture switch is global to an empty SANDBOX scope and has no dedicated tenant/customer allowlist. No safe manifest or isolated tenant was supplied. | **Blocked by fixture-isolation gate** |
 | Read-only retest | No case was run against an unpaired Worker/backend combination; no financial or fixture write occurred. | **Not started** |
